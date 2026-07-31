@@ -19,3 +19,9 @@ HEARTBEAT.md
 TOOLS.md
 AGENTS.md
 meta_short_drama/
+
+# Design QA and agent run artifacts
+design-qa*.md
+qa-*.png
+evidence_round_*.json
+plan*.json
