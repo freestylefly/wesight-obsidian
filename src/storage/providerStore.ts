@@ -328,7 +328,12 @@ export class ProviderStore {
   }
 
   private apiKeySecretId(profileId: string): string {
-    return `wesight-provider-api-key:${profileId}`;
+    // Obsidian's SecretStorage key must be lowercase letters, numbers and dashes
+    // (max 64 chars). Replace colons/underscores and truncate to stay valid.
+    return `wesight-provider-api-key-${profileId}`
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-')
+      .slice(0, 64);
   }
 
   private readApiKey(profileId: string): string {
