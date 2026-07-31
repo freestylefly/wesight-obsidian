@@ -1,0 +1,58 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+import { RuntimeDiscovery } from '../src/runtime/discovery';
+
+function makeExecutable(filePath: string, content = '#!/bin/sh\necho test\n'): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content, { mode: 0o755 });
+}
+
+describe('RuntimeDiscovery', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wesight-discovery-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('prefers configured paths', () => {
+    const configured = path.join(tempDir, 'custom-claude');
+    makeExecutable(configured, '#!/bin/sh\necho claude 1.0\n');
+    const discovery = new RuntimeDiscovery({
+      env: { WESIGHT_HOME: tempDir, PATH: '' } as NodeJS.ProcessEnv,
+      configuredPaths: { claude: configured },
+    });
+    const status = discovery.resolve('claude');
+    expect(status.found).toBe(true);
+    expect(status.source).toBe('configured');
+    expect(status.binaryPath).toBe(configured);
+  });
+
+  test('falls back to managed runtime before PATH', () => {
+    const managed = path.join(tempDir, 'runtimes/codex/node_modules/.bin/codex');
+    const pathBin = path.join(tempDir, 'bin/codex');
+    makeExecutable(managed);
+    makeExecutable(pathBin);
+    const discovery = new RuntimeDiscovery({
+      env: { WESIGHT_HOME: tempDir, PATH: path.dirname(pathBin) } as NodeJS.ProcessEnv,
+    });
+    const status = discovery.resolve('codex');
+    expect(status.source).toBe('managed');
+    expect(status.binaryPath).toBe(managed);
+  });
+
+  test('reports missing without installing', () => {
+    const discovery = new RuntimeDiscovery({
+      env: { WESIGHT_HOME: tempDir, PATH: '' } as NodeJS.ProcessEnv,
+    });
+    const status = discovery.resolve('opencode');
+    expect(status.found).toBe(false);
+    expect(status.state).toBe('missing');
+    expect(fs.existsSync(path.join(tempDir, 'runtimes/opencode'))).toBe(false);
+  });
+});

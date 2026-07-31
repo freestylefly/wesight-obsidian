@@ -1,0 +1,1149 @@
+import { App, Notice, Plugin, PluginSettingTab, Setting, setIcon } from 'obsidian';
+
+import { AGENT_IDS, getAgentDescriptor } from '../agents';
+import { logsDir, providersPath, runtimeManagedDir, tmpDir, wesightHome } from '../paths';
+import { ProviderStore } from '../storage/providerStore';
+import type {
+  AgentId,
+  ProviderProfile,
+  ProviderWireApi,
+  RuntimeConfigSource,
+  WeSightObsidianSettings,
+} from '../types';
+import { RuntimeDiscovery, invalidateRuntimeDiscoveryCache } from '../runtime/discovery';
+import { RuntimeInstaller } from '../runtime/installer';
+import type { CloudAuthService } from '../share/cloudAuth';
+import { fetchProviderModels } from '../utils/providerModels';
+import type { WeChatCloudApi } from '../wechat/cloudApi';
+import { ConfirmInstallModal } from './confirmInstallModal';
+import { promptForText } from './textPromptModal';
+import { WeChatPublishingSettings } from './wechatPublishingSettings';
+
+interface SettingsTabDeps {
+  getSettings: () => WeSightObsidianSettings;
+  saveSettings: () => Promise<void>;
+  providerStore: ProviderStore;
+  runtimeInstaller: RuntimeInstaller;
+  refreshViews: () => void;
+  cloudAuth: CloudAuthService;
+  wechatApi: WeChatCloudApi;
+}
+
+type SettingsTabId = 'general' | AgentId;
+type ProviderApiFormat = 'anthropic' | 'openai';
+
+interface ProviderModelPreset {
+  id: string;
+  name: string;
+}
+
+interface ProviderPreset {
+  key: string;
+  label: string;
+  iconText: string;
+  accent: string;
+  defaultApiFormat: ProviderApiFormat;
+  baseUrls: Record<ProviderApiFormat, string>;
+  models: ProviderModelPreset[];
+  apiKeyUrl?: string;
+}
+
+const PROVIDER_PRESETS: ProviderPreset[] = [
+  {
+    key: 'openai',
+    label: 'OpenAI',
+    iconText: 'OA',
+    accent: '#111827',
+    defaultApiFormat: 'openai',
+    baseUrls: {
+      anthropic: '',
+      openai: 'https://api.openai.com/v1',
+    },
+    models: [
+      { id: 'gpt-5.5', name: 'GPT-5.5' },
+      { id: 'gpt-5.4', name: 'GPT-5.4' },
+      { id: 'gpt-5.4-mini', name: 'GPT-5.4 mini' },
+      { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex' },
+    ],
+    apiKeyUrl: 'https://platform.openai.com/api-keys',
+  },
+  {
+    key: 'anthropic',
+    label: 'Claude',
+    iconText: 'AI',
+    accent: '#d97757',
+    defaultApiFormat: 'anthropic',
+    baseUrls: {
+      anthropic: 'https://api.anthropic.com',
+      openai: '',
+    },
+    models: [
+      { id: 'claude-opus-4-8', name: 'Claude Opus 4.8' },
+      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+      { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
+    ],
+    apiKeyUrl: 'https://console.anthropic.com/settings/keys',
+  },
+  {
+    key: 'google',
+    label: 'Google',
+    iconText: 'G',
+    accent: '#4285f4',
+    defaultApiFormat: 'openai',
+    baseUrls: {
+      anthropic: '',
+      openai: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    },
+    models: [
+      { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
+      { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro' },
+      { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro' },
+    ],
+    apiKeyUrl: 'https://aistudio.google.com/app/apikey',
+  },
+  {
+    key: 'deepseek',
+    label: 'DeepSeek',
+    iconText: 'DS',
+    accent: '#3b82f6',
+    defaultApiFormat: 'anthropic',
+    baseUrls: {
+      anthropic: 'https://api.deepseek.com/anthropic',
+      openai: 'https://api.deepseek.com',
+    },
+    models: [
+      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
+      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+    ],
+    apiKeyUrl: 'https://platform.deepseek.com/api_keys',
+  },
+  {
+    key: 'moonshot',
+    label: 'Moonshot',
+    iconText: 'K',
+    accent: '#1f2937',
+    defaultApiFormat: 'openai',
+    baseUrls: {
+      anthropic: 'https://api.moonshot.cn/anthropic',
+      openai: 'https://api.moonshot.cn/v1',
+    },
+    models: [{ id: 'kimi-k2.6', name: 'Kimi K2.6' }],
+    apiKeyUrl: 'https://platform.moonshot.cn/console/api-keys',
+  },
+  {
+    key: 'qwen',
+    label: 'Qwen',
+    iconText: 'Q',
+    accent: '#7c3aed',
+    defaultApiFormat: 'anthropic',
+    baseUrls: {
+      anthropic: 'https://dashscope.aliyuncs.com/apps/anthropic',
+      openai: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    },
+    models: [
+      { id: 'qwen3.5-plus', name: 'Qwen3.5 Plus' },
+      { id: 'qwen3-max', name: 'Qwen3 Max' },
+      { id: 'qwen3-coder-plus', name: 'Qwen3 Coder Plus' },
+      { id: 'qwen3-coder-480b-a35b-instruct', name: 'Qwen3 Coder 480B' },
+    ],
+    apiKeyUrl: 'https://bailian.console.aliyun.com/?apiKey=1',
+  },
+  {
+    key: 'zhipu',
+    label: 'Zhipu',
+    iconText: 'Z',
+    accent: '#2563eb',
+    defaultApiFormat: 'anthropic',
+    baseUrls: {
+      anthropic: 'https://open.bigmodel.cn/api/anthropic',
+      openai: 'https://open.bigmodel.cn/api/paas/v4',
+    },
+    models: [
+      { id: 'glm-5.1', name: 'GLM 5.1' },
+      { id: 'glm-5', name: 'GLM 5' },
+      { id: 'glm-4.7', name: 'GLM 4.7' },
+      { id: 'glm-4.7-flash', name: 'GLM 4.7 Flash' },
+    ],
+    apiKeyUrl: 'https://bigmodel.cn/usercenter/proj-mgmt/apikeys',
+  },
+  {
+    key: 'minimax',
+    label: 'MiniMax',
+    iconText: 'M',
+    accent: '#ef4444',
+    defaultApiFormat: 'anthropic',
+    baseUrls: {
+      anthropic: 'https://api.minimaxi.com/anthropic',
+      openai: 'https://api.minimaxi.com/v1',
+    },
+    models: [
+      { id: 'MiniMax-M2.7', name: 'MiniMax M2.7' },
+      { id: 'MiniMax-M3', name: 'MiniMax M3' },
+    ],
+    apiKeyUrl: 'https://platform.minimaxi.com/user-center/basic-information/interface-key',
+  },
+];
+
+export class WeSightSettingTab extends PluginSettingTab {
+  private editingProfileId: string | null = null;
+  private activeTab: SettingsTabId = 'general';
+  private selectedProviderKey = 'deepseek';
+  private readonly publishingSettings: WeChatPublishingSettings;
+
+  constructor(app: App, plugin: Plugin, private readonly deps: SettingsTabDeps) {
+    super(app, plugin);
+    this.publishingSettings = new WeChatPublishingSettings({
+      app,
+      auth: deps.cloudAuth,
+      api: deps.wechatApi,
+      requestRender: () => this.display(),
+    });
+    plugin.register(deps.cloudAuth.onChange(() => {
+      if (this.activeTab === 'general') this.display();
+    }));
+  }
+
+  openTab(tab: SettingsTabId): void {
+    this.activeTab = tab;
+    this.editingProfileId = null;
+    this.display();
+  }
+
+  override display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.createEl('h2', { text: 'WeSight' });
+    this.renderTabs(containerEl);
+    const panel = containerEl.createDiv({ cls: 'wesight-settings-panel' });
+    if (this.activeTab === 'general') {
+      this.renderGeneral(panel);
+      this.publishingSettings.render(panel);
+      this.publishingSettings.activate();
+      this.renderProfiles(panel);
+      this.renderEnvironment(panel);
+      this.renderPrivacy(panel);
+      this.renderDiagnostics(panel);
+      return;
+    }
+    this.renderAgentSettings(panel, this.activeTab);
+    this.renderProfiles(panel, this.activeTab);
+    this.renderDiagnostics(panel, this.activeTab);
+  }
+
+  private renderTabs(containerEl: HTMLElement): void {
+    const wrap = containerEl.createDiv({ cls: 'wesight-settings-tabs-wrap' });
+    const tabs = wrap.createDiv({ cls: 'wesight-settings-tabs' });
+    const entries: Array<{ id: SettingsTabId; label: string }> = [
+      { id: 'general', label: '通用' },
+      { id: 'claude', label: 'Claude' },
+      { id: 'codex', label: 'Codex' },
+      { id: 'opencode', label: 'OpenCode' },
+    ];
+    for (const entry of entries) {
+      const tab = tabs.createEl('button', {
+        cls: 'wesight-settings-tab',
+        text: entry.label,
+      });
+      tab.toggleClass('is-active', this.activeTab === entry.id);
+      tab.onclick = () => {
+        this.activeTab = entry.id;
+        this.editingProfileId = null;
+        this.display();
+      };
+    }
+  }
+
+  private renderGeneral(containerEl: HTMLElement): void {
+    const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
+    section.createEl('h3', { text: 'General' });
+    const settings = this.deps.getSettings();
+
+    new Setting(section)
+      .setName('Default agent')
+      .setDesc('The agent used for new chat tabs and inline edits.')
+      .addDropdown(dropdown => {
+        for (const agentId of AGENT_IDS) {
+          dropdown.addOption(agentId, getAgentDescriptor(agentId).displayName);
+        }
+        dropdown
+          .setValue(settings.defaultAgentId)
+          .onChange(async value => {
+            settings.defaultAgentId = value as AgentId;
+            await this.deps.saveSettings();
+            this.deps.refreshViews();
+          });
+      });
+  }
+
+  private renderAgentSettings(containerEl: HTMLElement, agentId: AgentId): void {
+    const descriptor = getAgentDescriptor(agentId);
+    const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
+    section.createEl('h3', { text: descriptor.displayName });
+    const settings = this.deps.getSettings();
+    const status = new RuntimeDiscovery({
+      configuredPaths: settings.configuredPaths,
+      configSources: settings.configSources,
+    }).resolve(agentId, { withVersion: true });
+
+    const row = section.createDiv({ cls: 'wesight-agent-row' });
+    row.createDiv({ text: descriptor.displayName });
+    row.createDiv({ text: status.found ? `${status.source}: ${status.version ?? status.binaryPath}` : 'Missing' });
+    const actions = row.createDiv();
+    const install = actions.createEl('button', { text: status.found ? 'Ready' : 'Install' });
+    install.disabled = status.found;
+    install.onclick = () => {
+      new ConfirmInstallModal(this.app, status, () => {
+        void this.deps.runtimeInstaller.install(agentId).then(() => this.display());
+      }).open();
+    };
+
+    new Setting(section)
+      .setName('Config source')
+      .addDropdown(dropdown => {
+        dropdown
+          .addOption('localCli', 'Local CLI')
+          .addOption('providerProfile', 'Provider Profile')
+          .setValue(settings.configSources[agentId])
+          .onChange(async value => {
+            settings.configSources[agentId] = value as RuntimeConfigSource;
+            await this.deps.saveSettings();
+            this.deps.refreshViews();
+          });
+      });
+
+    new Setting(section)
+      .setName('CLI path')
+      .setDesc('Optional per-device path. Empty means managed runtime and PATH detection.')
+      .addText(text => {
+        text
+          .setPlaceholder(descriptor.binaryName)
+          .setValue(settings.configuredPaths[agentId])
+          .onChange(async value => {
+            settings.configuredPaths[agentId] = value.trim();
+            invalidateRuntimeDiscoveryCache(agentId);
+            await this.deps.saveSettings();
+          });
+      });
+
+    new Setting(section)
+      .setName('Local model')
+      .setDesc('Optional model override for Local CLI runs. Empty follows the CLI config.')
+      .addText(text => {
+        text
+          .setPlaceholder('CLI default')
+          .setValue(settings.localModelByAgent[agentId])
+          .onChange(async value => {
+            settings.localModelByAgent[agentId] = value.trim();
+            await this.deps.saveSettings();
+          });
+      });
+  }
+
+  private renderProfiles(containerEl: HTMLElement, agentFilter?: AgentId): void {
+    const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
+    section.createEl('h3', { text: agentFilter ? `${getAgentDescriptor(agentFilter).shortName} 模型配置` : '模型' });
+    this.renderProviderConsole(section, agentFilter);
+  }
+
+  private renderProviderConsole(section: HTMLElement, agentFilter?: AgentId): void {
+    if (!PROVIDER_PRESETS.some(preset => preset.key === this.selectedProviderKey)) {
+      this.selectedProviderKey = PROVIDER_PRESETS[0].key;
+    }
+
+    const preset = PROVIDER_PRESETS.find(item => item.key === this.selectedProviderKey) ?? PROVIDER_PRESETS[0];
+    const anyExistingProfile = this.findPresetProfile(preset, agentFilter) ?? this.findPresetProfile(preset);
+    let format = this.resolveInitialProviderFormat(preset, anyExistingProfile, agentFilter);
+    let modelItems = toModelItems(anyExistingProfile, preset);
+    let selectedModelId = anyExistingProfile?.defaultModel || anyExistingProfile?.model || modelItems[0]?.id || '';
+
+    const consoleEl = section.createDiv({ cls: 'wesight-provider-console' });
+    const sidebar = consoleEl.createDiv({ cls: 'wesight-provider-sidebar' });
+    const sidebarHead = sidebar.createDiv({ cls: 'wesight-provider-sidebar-head' });
+    sidebarHead.createEl('span', { text: '模型提供商' });
+    const sidebarActions = sidebarHead.createDiv({ cls: 'wesight-provider-sidebar-actions' });
+    const importBtn = sidebarActions.createEl('button', { text: '导入', attr: { type: 'button' } });
+    importBtn.onclick = () => void this.importProviderProfiles();
+    const exportBtn = sidebarActions.createEl('button', { text: '导出', attr: { type: 'button' } });
+    exportBtn.onclick = () => void this.exportProviderProfiles();
+
+    const list = sidebar.createDiv({ cls: 'wesight-provider-list' });
+    for (const item of PROVIDER_PRESETS) {
+      const profile = this.findPresetProfile(item, agentFilter) ?? this.findPresetProfile(item);
+      const enabled = Boolean(profile?.apiKey || profile?.baseUrl || profile?.models.length);
+      const row = list.createEl('button', {
+        cls: 'wesight-provider-list-item',
+        attr: { type: 'button' },
+      });
+      row.toggleClass('is-selected', item.key === preset.key);
+      row.toggleClass('is-enabled', enabled);
+      row.onclick = () => {
+        this.selectedProviderKey = item.key;
+        this.display();
+      };
+      const icon = row.createSpan({ cls: 'wesight-provider-icon', text: item.iconText });
+      icon.style.setProperty('--provider-accent', item.accent);
+      row.createSpan({ cls: 'wesight-provider-name', text: item.label });
+      const toggle = row.createSpan({ cls: 'wesight-provider-toggle' });
+      toggle.createSpan();
+    }
+
+    const detail = consoleEl.createDiv({ cls: 'wesight-provider-detail' });
+    const detailHead = detail.createDiv({ cls: 'wesight-provider-detail-head' });
+    const titleWrap = detailHead.createDiv({ cls: 'wesight-provider-title-wrap' });
+    const titleIcon = titleWrap.createSpan({ cls: 'wesight-provider-icon large', text: preset.iconText });
+    titleIcon.style.setProperty('--provider-accent', preset.accent);
+    const title = titleWrap.createDiv();
+    const titleLine = title.createDiv({ cls: 'wesight-provider-title-line' });
+    titleLine.createEl('span', { text: `${preset.label} 提供商设置` });
+    if (preset.apiKeyUrl) {
+      const keyLink = titleLine.createEl('a', {
+        cls: 'wesight-provider-link-icon',
+        href: preset.apiKeyUrl,
+        attr: { 'aria-label': `${preset.label} API Key` },
+      });
+      keyLink.setAttr('target', '_blank');
+      keyLink.setAttr('rel', 'noopener');
+      setIcon(keyLink, 'external-link');
+    }
+    const activeProfile = this.findPresetProfile(preset, agentFilter ?? providerAgentForFormat(format));
+    const isEnabled = Boolean(activeProfile?.apiKey || activeProfile?.baseUrl || activeProfile?.models.length);
+    detailHead.createSpan({
+      cls: `wesight-provider-status ${isEnabled ? 'is-enabled' : ''}`,
+      text: isEnabled ? '已开启' : '未开启',
+    });
+
+    const apiKeyField = detail.createDiv({ cls: 'wesight-provider-field' });
+    const apiKeyHead = apiKeyField.createDiv({ cls: 'wesight-provider-field-head' });
+    apiKeyHead.createSpan({ text: 'API Key' });
+    if (preset.apiKeyUrl) {
+      const getKey = apiKeyHead.createEl('a', { text: '获取 API Key ->', href: preset.apiKeyUrl });
+      getKey.setAttr('target', '_blank');
+      getKey.setAttr('rel', 'noopener');
+    }
+    const secretWrap = apiKeyField.createDiv({ cls: 'wesight-provider-secret' });
+    const apiKeyInput = secretWrap.createEl('input', {
+      attr: {
+        type: 'password',
+        placeholder: anyExistingProfile?.apiKey ? '留空则保留已保存的 API Key' : '输入你的 API Key',
+      },
+    });
+    const reveal = secretWrap.createEl('button', {
+      cls: 'wesight-provider-icon-btn',
+      attr: { type: 'button', 'aria-label': '显示 API Key' },
+    });
+    setIcon(reveal, 'eye-off');
+    reveal.onclick = () => {
+      const visible = apiKeyInput.type === 'text';
+      apiKeyInput.type = visible ? 'password' : 'text';
+      reveal.setAttr('aria-label', visible ? '显示 API Key' : '隐藏 API Key');
+      setIcon(reveal, visible ? 'eye-off' : 'eye');
+    };
+
+    const baseUrlField = detail.createDiv({ cls: 'wesight-provider-field' });
+    baseUrlField.createDiv({ cls: 'wesight-provider-field-head' }).createSpan({ text: 'API Base URL' });
+    const baseWrap = baseUrlField.createDiv({ cls: 'wesight-provider-input-wrap' });
+    const baseUrlInput = baseWrap.createEl('input', {
+      attr: {
+        type: 'text',
+        placeholder: 'https://api.example.com',
+      },
+    });
+    baseUrlInput.value = anyExistingProfile?.baseUrl || preset.baseUrls[format] || '';
+    const resetBaseUrl = baseWrap.createEl('button', {
+      cls: 'wesight-provider-icon-btn',
+      attr: { type: 'button', 'aria-label': '恢复默认地址' },
+    });
+    setIcon(resetBaseUrl, 'x-circle');
+    resetBaseUrl.onclick = () => {
+      baseUrlInput.value = preset.baseUrls[format] || '';
+    };
+
+    const formatField = detail.createDiv({ cls: 'wesight-provider-field' });
+    formatField.createDiv({ cls: 'wesight-provider-field-head' }).createSpan({ text: 'API 格式' });
+    const formatOptions = formatField.createDiv({ cls: 'wesight-api-format-options' });
+    const formatGroupName = `wesight-provider-format-${preset.key}-${agentFilter ?? 'all'}`;
+    const formatHelp = formatField.createDiv({ cls: 'wesight-provider-help' });
+    for (const option of [
+      { value: 'anthropic' as const, label: 'Anthropic 兼容' },
+      { value: 'openai' as const, label: 'OpenAI 兼容' },
+    ]) {
+      const optionEl = formatOptions.createEl('label');
+      const radio = optionEl.createEl('input', {
+        attr: {
+          type: 'radio',
+          name: formatGroupName,
+          value: option.value,
+        },
+      }) as HTMLInputElement;
+      radio.checked = format === option.value;
+      radio.disabled = Boolean(agentFilter) || !preset.baseUrls[option.value];
+      radio.onchange = () => {
+        if (!radio.checked) return;
+        const oldBaseUrls = Object.values(preset.baseUrls).filter(Boolean);
+        const currentBaseUrl = baseUrlInput.value.trim();
+        format = option.value;
+        if (!currentBaseUrl || oldBaseUrls.includes(currentBaseUrl)) {
+          baseUrlInput.value = preset.baseUrls[format] || '';
+        }
+        formatHelp.setText(`请选择 API 协议格式：${providerFormatLabel(format)}`);
+      };
+      optionEl.createSpan({ text: option.label });
+    }
+    formatHelp.setText(`请选择 API 协议格式：${providerFormatLabel(format)}`);
+
+    const testRow = detail.createDiv({ cls: 'wesight-provider-test-row' });
+    const testBtn = testRow.createEl('button', { text: '测试连接', attr: { type: 'button' } });
+    testBtn.onclick = () => void this.loadModelsIntoPanel({
+      preset,
+      agentFilter,
+      getFormat: () => format,
+      baseUrlInput,
+      apiKeyInput,
+      existingApiKey: anyExistingProfile?.apiKey ?? '',
+      setModels: next => {
+        modelItems = next;
+        selectedModelId = modelItems[0]?.id ?? selectedModelId;
+      },
+      renderModelCards,
+      trigger: testBtn,
+      noticePrefix: '连接成功',
+    });
+
+    const modelHead = detail.createDiv({ cls: 'wesight-provider-model-head' });
+    modelHead.createSpan({ text: '可用模型列表' });
+    const modelActions = modelHead.createDiv({ cls: 'wesight-provider-model-actions' });
+    const refreshModels = modelActions.createEl('button', { text: '获取模型列表', attr: { type: 'button' } });
+    const refreshIcon = refreshModels.createSpan({ cls: 'wesight-provider-action-icon' });
+    setIcon(refreshIcon, 'refresh-cw');
+    refreshModels.onclick = () => void this.loadModelsIntoPanel({
+      preset,
+      agentFilter,
+      getFormat: () => format,
+      baseUrlInput,
+      apiKeyInput,
+      existingApiKey: anyExistingProfile?.apiKey ?? '',
+      setModels: next => {
+        modelItems = next;
+        selectedModelId = modelItems[0]?.id ?? selectedModelId;
+      },
+      renderModelCards,
+      trigger: refreshModels,
+      noticePrefix: '已获取',
+    });
+    const addModel = modelActions.createEl('button', { text: '添加模型', attr: { type: 'button' } });
+    const addIcon = addModel.createSpan({ cls: 'wesight-provider-action-icon' });
+    setIcon(addIcon, 'plus-circle');
+    let editingModelId: string | null = null;
+
+    const addPanel = detail.createDiv({ cls: 'wesight-provider-model-add is-hidden' });
+    const addIdInput = addPanel.createEl('input', {
+      attr: {
+        type: 'text',
+        placeholder: '模型 ID，例如 deepseek-chat',
+      },
+    });
+    const addNameInput = addPanel.createEl('input', {
+      attr: {
+        type: 'text',
+        placeholder: '显示名称，可选',
+      },
+    });
+    const addConfirm = addPanel.createEl('button', { text: '添加', attr: { type: 'button' } });
+    const addCancel = addPanel.createEl('button', {
+      cls: 'wesight-provider-icon-btn',
+      attr: { type: 'button', 'aria-label': '取消添加模型' },
+    });
+    setIcon(addCancel, 'x');
+    addModel.onclick = () => showModelAddPanel();
+    addConfirm.onclick = () => upsertInlineModel();
+    addCancel.onclick = () => hideModelAddPanel();
+    const submitAddOnKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        upsertInlineModel();
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        hideModelAddPanel();
+      }
+    };
+    addIdInput.addEventListener('keydown', submitAddOnKey);
+    addNameInput.addEventListener('keydown', submitAddOnKey);
+
+    const modelList = detail.createDiv({ cls: 'wesight-provider-model-list' });
+    function showModelAddPanel(model?: ProviderModelPreset): void {
+      editingModelId = model?.id ?? null;
+      addPanel.removeClass('is-hidden');
+      addConfirm.setText(model ? '保存' : '添加');
+      addIdInput.value = model?.id ?? '';
+      addNameInput.value = model?.name ?? '';
+      addIdInput.focus();
+      addIdInput.select();
+    }
+
+    function hideModelAddPanel(): void {
+      editingModelId = null;
+      addConfirm.setText('添加');
+      addPanel.addClass('is-hidden');
+    }
+
+    function upsertInlineModel(): void {
+      const id = addIdInput.value.trim();
+      if (!id) {
+        new Notice('请输入模型 ID。');
+        addIdInput.focus();
+        return;
+      }
+      const existing = modelItems.find(model => model.id === id && model.id !== editingModelId);
+      if (existing) {
+        selectedModelId = existing.id;
+        renderModelCards();
+        hideModelAddPanel();
+        new Notice('模型已存在，已选中该模型。');
+        return;
+      }
+      const next = {
+        id,
+        name: addNameInput.value.trim() || modelNameFromId(id),
+      };
+      if (editingModelId) {
+        modelItems = mergeModelItems(modelItems.map(model => model.id === editingModelId ? next : model));
+        if (selectedModelId === editingModelId) {
+          selectedModelId = next.id;
+        }
+      } else {
+        modelItems = mergeModelItems([...modelItems, next]);
+      }
+      selectedModelId = next.id;
+      renderModelCards();
+      hideModelAddPanel();
+    }
+
+    function renderModelCards(): void {
+      modelList.empty();
+      if (modelItems.length === 0) {
+        modelList.createDiv({ cls: 'wesight-provider-empty', text: '暂无模型，请手动添加或获取模型列表。' });
+        return;
+      }
+      for (const model of modelItems) {
+        const card = modelList.createDiv({ cls: 'wesight-provider-model-card' });
+        card.toggleClass('is-selected', model.id === selectedModelId);
+        card.onclick = () => {
+          selectedModelId = model.id;
+          renderModelCards();
+        };
+        card.createSpan({ cls: 'wesight-provider-model-dot' });
+        const copy = card.createDiv();
+        copy.createDiv({ cls: 'wesight-provider-model-name', text: model.name });
+        copy.createDiv({ cls: 'wesight-provider-model-id', text: model.id });
+        const actions = card.createDiv({ cls: 'wesight-provider-model-card-actions' });
+        const edit = actions.createEl('button', {
+          cls: 'wesight-provider-icon-btn',
+          attr: { type: 'button', 'aria-label': '编辑模型' },
+        });
+        setIcon(edit, 'pencil');
+        edit.onclick = event => {
+          event.stopPropagation();
+          selectedModelId = model.id;
+          showModelAddPanel(model);
+          renderModelCards();
+        };
+        const remove = actions.createEl('button', {
+          cls: 'wesight-provider-icon-btn',
+          attr: { type: 'button', 'aria-label': '删除模型' },
+        });
+        setIcon(remove, 'trash-2');
+        remove.onclick = event => {
+          event.stopPropagation();
+          modelItems = modelItems.filter(item => item.id !== model.id);
+          if (selectedModelId === model.id) {
+            selectedModelId = modelItems[0]?.id ?? '';
+          }
+          if (editingModelId === model.id) {
+            hideModelAddPanel();
+          }
+          renderModelCards();
+        };
+      }
+    }
+    renderModelCards();
+
+    const footer = detail.createDiv({ cls: 'wesight-provider-footer' });
+    const cancel = footer.createEl('button', { text: '取消', attr: { type: 'button' } });
+    cancel.onclick = () => this.display();
+    const save = footer.createEl('button', {
+      cls: 'mod-cta',
+      text: '保存',
+      attr: { type: 'button' },
+    });
+    save.onclick = () => void this.saveProviderPresetProfile({
+      preset,
+      agentFilter,
+      format,
+      baseUrl: baseUrlInput.value,
+      apiKey: apiKeyInput.value,
+      existingApiKey: anyExistingProfile?.apiKey ?? '',
+      models: modelItems,
+      defaultModel: selectedModelId || modelItems[0]?.id || '',
+    });
+  }
+
+  private resolveInitialProviderFormat(
+    preset: ProviderPreset,
+    profile: ProviderProfile | null,
+    agentFilter?: AgentId,
+  ): ProviderApiFormat {
+    if (agentFilter) {
+      return supportedProviderFormat(preset, providerFormatForAgent(agentFilter));
+    }
+    if (profile) {
+      return supportedProviderFormat(preset, providerFormatForAgent(profile.agentId));
+    }
+    return supportedProviderFormat(preset, preset.defaultApiFormat);
+  }
+
+  private findPresetProfile(preset: ProviderPreset, agentId?: AgentId): ProviderProfile | null {
+    const profiles = this.deps.providerStore.list(agentId);
+    const names = new Set([preset.key, preset.label, preset.label.toLowerCase()]);
+    return profiles.find(profile => names.has(profile.name) || names.has(profile.name.toLowerCase())) ?? null;
+  }
+
+  private async exportProviderProfiles(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(this.deps.providerStore.exportProfiles(), null, 2));
+      new Notice('已复制脱敏模型配置。');
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async importProviderProfiles(): Promise<void> {
+    // Electron does not implement window.prompt; collect the JSON via a modal.
+    const importText = await promptForText(this.app, {
+      title: '导入模型配置',
+      placeholder: '粘贴从 WeSight 导出的 Provider Profiles JSON',
+      multiline: true,
+      submitLabel: '导入',
+      cancelLabel: '取消',
+    });
+    if (!importText?.trim()) return;
+    try {
+      const parsed = JSON.parse(importText);
+      if (!Array.isArray(parsed)) {
+        throw new Error('导入内容必须是 JSON 数组。');
+      }
+      const imported = this.deps.providerStore.importProfiles(parsed);
+      new Notice(`已导入 ${imported.length} 个模型配置。`);
+      this.display();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async loadModelsIntoPanel(options: {
+    preset: ProviderPreset;
+    agentFilter?: AgentId;
+    getFormat: () => ProviderApiFormat;
+    baseUrlInput: HTMLInputElement;
+    apiKeyInput: HTMLInputElement;
+    existingApiKey: string;
+    setModels: (models: ProviderModelPreset[]) => void;
+    renderModelCards: () => void;
+    trigger: HTMLButtonElement;
+    noticePrefix: string;
+  }): Promise<void> {
+    options.trigger.disabled = true;
+    try {
+      const fetched = await fetchProviderModels({
+        agentId: options.agentFilter ?? providerAgentForFormat(options.getFormat()),
+        baseUrl: options.baseUrlInput.value,
+        apiKey: options.apiKeyInput.value || options.existingApiKey,
+      });
+      const modelItems = mergeModelItems(fetched.map(id => {
+        const presetModel = options.preset.models.find(model => model.id === id);
+        return {
+          id,
+          name: presetModel?.name ?? modelNameFromId(id),
+        };
+      }));
+      options.setModels(modelItems);
+      options.renderModelCards();
+      new Notice(`${options.noticePrefix} ${modelItems.length} 个模型。`);
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    } finally {
+      options.trigger.disabled = false;
+    }
+  }
+
+  private async saveProviderPresetProfile(options: {
+    preset: ProviderPreset;
+    agentFilter?: AgentId;
+    format: ProviderApiFormat;
+    baseUrl: string;
+    apiKey: string;
+    existingApiKey: string;
+    models: ProviderModelPreset[];
+    defaultModel: string;
+  }): Promise<void> {
+    try {
+      const targetAgent = options.agentFilter ?? providerAgentForFormat(options.format);
+      const existing = this.findPresetProfile(options.preset, targetAgent);
+      const profile = this.deps.providerStore.save({
+        agentId: targetAgent,
+        id: existing?.id,
+        name: options.preset.label,
+        defaultModel: options.defaultModel,
+        models: options.models.map(model => model.id),
+        baseUrl: options.baseUrl.trim() || options.preset.baseUrls[options.format],
+        apiKey: options.apiKey || options.existingApiKey,
+        wireApi: providerWireApi(options.preset, options.format),
+        isDefault: true,
+      });
+      const settings = this.deps.getSettings();
+      settings.providerProfileByAgent[targetAgent] = profile.id;
+      settings.configSources[targetAgent] = 'providerProfile';
+      await this.deps.saveSettings();
+      this.deps.refreshViews();
+      new Notice(`${options.preset.label} 模型配置已保存。`);
+      this.display();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async setProfileDefault(profile: ProviderProfile): Promise<void> {
+    try {
+      this.deps.providerStore.setDefault(profile.agentId, profile.id);
+      const settings = this.deps.getSettings();
+      settings.providerProfileByAgent[profile.agentId] = profile.id;
+      await this.deps.saveSettings();
+      this.display();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async deleteProfile(id: string): Promise<void> {
+    const removed = this.deps.providerStore.remove(id);
+    if (!removed) return;
+    const settings = this.deps.getSettings();
+    if (settings.providerProfileByAgent[removed.agentId] === id) {
+      settings.providerProfileByAgent[removed.agentId] = this.deps.providerStore.find(removed.agentId)?.id ?? '';
+      await this.deps.saveSettings();
+    }
+    if (this.editingProfileId === id) {
+      this.editingProfileId = null;
+    }
+    this.display();
+  }
+
+  private renderProfileForm(section: HTMLElement, agentFilter?: AgentId): void {
+    const editing = this.editingProfileId
+      ? this.deps.providerStore.list().find(profile => profile.id === this.editingProfileId) ?? null
+      : null;
+    const form = section.createDiv({ cls: 'wesight-provider-form' });
+    form.createEl('h4', { text: editing ? 'Edit profile' : 'Add profile', cls: 'full' });
+    const agent = form.createEl('select');
+    for (const agentId of AGENT_IDS) {
+      agent.createEl('option', { text: getAgentDescriptor(agentId).displayName, value: agentId });
+    }
+    agent.value = editing?.agentId ?? agentFilter ?? 'claude';
+    agent.disabled = Boolean(agentFilter);
+
+    const name = form.createEl('input', { attr: { placeholder: 'Profile name' } });
+    name.value = editing?.name ?? '';
+    const defaultModel = form.createEl('input', { attr: { placeholder: 'Default model' } });
+    defaultModel.value = editing?.defaultModel || editing?.model || '';
+    const baseUrl = form.createEl('input', { attr: { placeholder: 'Base URL' } });
+    baseUrl.value = editing?.baseUrl ?? '';
+    const wireApi = form.createEl('select');
+    wireApi.createEl('option', { text: 'Chat completions', value: 'chat' });
+    wireApi.createEl('option', { text: 'Responses API', value: 'responses' });
+    wireApi.value = editing?.wireApi ?? 'chat';
+
+    const models = form.createEl('textarea', { cls: 'full', attr: { placeholder: 'Models, one per line' } });
+    models.rows = 4;
+    models.value = (editing?.models ?? []).join('\n');
+    const apiKey = form.createEl('input', { attr: { placeholder: editing ? 'API key unchanged' : 'API key', type: 'password' } });
+    apiKey.addClass('full');
+
+    const load = form.createEl('button', { text: 'Load models' });
+    load.onclick = () => {
+      void this.loadProviderModels({
+        agent,
+        baseUrl,
+        apiKey,
+        existingApiKey: editing?.apiKey ?? '',
+        models,
+        defaultModel,
+      });
+    };
+
+    const save = form.createEl('button', { text: editing ? 'Save profile' : 'Add profile' });
+    save.onclick = () => void this.saveProfileForm({
+      editing,
+      agent,
+      name,
+      defaultModel,
+      models,
+      baseUrl,
+      apiKey,
+      wireApi,
+    });
+
+    if (editing) {
+      const cancel = form.createEl('button', { text: 'Cancel edit' });
+      cancel.onclick = () => {
+        this.editingProfileId = null;
+        this.display();
+      };
+    }
+  }
+
+  private async loadProviderModels(elements: {
+    agent: HTMLSelectElement;
+    baseUrl: HTMLInputElement;
+    apiKey: HTMLInputElement;
+    existingApiKey: string;
+    models: HTMLTextAreaElement;
+    defaultModel: HTMLInputElement;
+  }): Promise<void> {
+    try {
+      const fetched = await fetchProviderModels({
+        agentId: elements.agent.value as AgentId,
+        baseUrl: elements.baseUrl.value,
+        apiKey: elements.apiKey.value || elements.existingApiKey,
+      });
+      elements.models.value = fetched.join('\n');
+      if (!elements.defaultModel.value && fetched[0]) {
+        elements.defaultModel.value = fetched[0];
+      }
+      new Notice(`Loaded ${fetched.length} model${fetched.length === 1 ? '' : 's'}.`);
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async saveProfileForm(elements: {
+    editing: ProviderProfile | null;
+    agent: HTMLSelectElement;
+    name: HTMLInputElement;
+    defaultModel: HTMLInputElement;
+    models: HTMLTextAreaElement;
+    baseUrl: HTMLInputElement;
+    apiKey: HTMLInputElement;
+    wireApi: HTMLSelectElement;
+  }): Promise<void> {
+    try {
+      const modelList = parseModelList(elements.models.value);
+      const profile = this.deps.providerStore.save({
+        agentId: elements.agent.value as AgentId,
+        id: elements.editing?.id,
+        name: elements.name.value,
+        defaultModel: elements.defaultModel.value,
+        models: modelList,
+        baseUrl: elements.baseUrl.value,
+        apiKey: elements.apiKey.value || elements.editing?.apiKey || '',
+        wireApi: elements.wireApi.value as ProviderWireApi,
+        isDefault: elements.editing?.isDefault,
+      });
+      const settings = this.deps.getSettings();
+      if (elements.editing && elements.editing.agentId !== profile.agentId
+        && settings.providerProfileByAgent[elements.editing.agentId] === profile.id) {
+        settings.providerProfileByAgent[elements.editing.agentId] = this.deps.providerStore.find(elements.editing.agentId)?.id ?? '';
+      }
+      settings.providerProfileByAgent[profile.agentId] = profile.id;
+      await this.deps.saveSettings();
+      this.editingProfileId = null;
+      this.display();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private renderImportExport(section: HTMLElement): void {
+    new Setting(section)
+      .setName('Export profiles')
+      .setDesc('Copies redacted provider profiles to the clipboard.')
+      .addButton(button => {
+        button.setButtonText('Copy redacted JSON').onClick(async () => {
+          await navigator.clipboard.writeText(JSON.stringify(this.deps.providerStore.exportProfiles(), null, 2));
+          new Notice('Redacted provider profiles copied.');
+        });
+      });
+
+    let importText = '';
+    new Setting(section)
+      .setName('Import profiles')
+      .setDesc('Paste profile JSON exported from WeSight. Redacted API keys import as empty values.')
+      .addTextArea(text => {
+        text.inputEl.rows = 5;
+        text.setPlaceholder('[{"agentId":"codex","name":"OpenAI","defaultModel":"gpt-5.4"}]')
+          .onChange(value => {
+            importText = value;
+          });
+      });
+    new Setting(section)
+      .addButton(button => {
+        button.setButtonText('Import JSON').onClick(() => {
+          try {
+            const parsed = JSON.parse(importText);
+            if (!Array.isArray(parsed)) {
+              throw new Error('Profile import must be a JSON array.');
+            }
+            const imported = this.deps.providerStore.importProfiles(parsed);
+            new Notice(`Imported ${imported.length} provider profile${imported.length === 1 ? '' : 's'}.`);
+            this.display();
+          } catch (error) {
+            new Notice(error instanceof Error ? error.message : String(error));
+          }
+        });
+      });
+  }
+
+  private renderEnvironment(containerEl: HTMLElement): void {
+    const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
+    section.createEl('h3', { text: 'Environment' });
+    const settings = this.deps.getSettings();
+    new Setting(section)
+      .setName('Shared environment variables')
+      .setDesc('KEY=value lines inherited by agent subprocesses.')
+      .addTextArea(text => {
+        text.inputEl.rows = 6;
+        text
+          .setValue(settings.sharedEnvironmentVariables)
+          .onChange(async value => {
+            settings.sharedEnvironmentVariables = value;
+            await this.deps.saveSettings();
+          });
+      });
+    new Setting(section)
+      .setName('System prompt')
+      .setDesc('Optional instruction prepended to chat and inline edit turns.')
+      .addTextArea(text => {
+        text.inputEl.rows = 4;
+        text
+          .setValue(settings.systemPrompt)
+          .onChange(async value => {
+            settings.systemPrompt = value;
+            await this.deps.saveSettings();
+          });
+      });
+  }
+
+  private renderPrivacy(containerEl: HTMLElement): void {
+    const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
+    section.createEl('h3', { text: 'Privacy & Storage' });
+    section.createEl('p', { text: `Vault conversations: ${this.app.vault.getName()}/.wesight/` });
+    section.createEl('p', { text: `Global home: ${wesightHome()}` });
+    section.createEl('p', { text: `Provider profiles: ${providersPath()}` });
+    section.createEl('p', { text: `Runtime installs: ${runtimeManagedDir('claude').replace(/claude$/, '<agent>')}` });
+    section.createEl('p', { text: `Temporary runtime config: ${tmpDir()}` });
+    section.createEl('p', { text: `Logs: ${logsDir()}` });
+  }
+
+  private renderDiagnostics(containerEl: HTMLElement, agentFilter?: AgentId): void {
+    const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
+    section.createEl('h3', { text: 'Diagnostics' });
+    const settings = this.deps.getSettings();
+    for (const agentId of agentFilter ? [agentFilter] : AGENT_IDS) {
+      const status = new RuntimeDiscovery({
+        configuredPaths: settings.configuredPaths,
+        configSources: settings.configSources,
+      }).resolve(agentId, { withVersion: true });
+      section.createEl('pre', {
+        text: JSON.stringify({
+          agent: agentId,
+          found: status.found,
+          source: status.source,
+          binaryPath: status.binaryPath,
+          version: status.version,
+          localConfigFound: status.localConfigFound,
+          configSource: status.configSource,
+          localModel: settings.localModelByAgent[agentId],
+        }, null, 2),
+      });
+    }
+    new Setting(section)
+      .addButton(button => button.setButtonText('Refresh').onClick(() => {
+        invalidateRuntimeDiscoveryCache();
+        this.display();
+      }));
+  }
+}
+
+function parseModelList(value: string): string[] {
+  return [...new Set(value
+    .split(/[\n,]/)
+    .map(item => item.trim())
+    .filter(Boolean))];
+}
+
+function supportedProviderFormat(preset: ProviderPreset, preferred: ProviderApiFormat): ProviderApiFormat {
+  if (preset.baseUrls[preferred]) {
+    return preferred;
+  }
+  if (preset.baseUrls[preset.defaultApiFormat]) {
+    return preset.defaultApiFormat;
+  }
+  return preset.baseUrls.anthropic ? 'anthropic' : 'openai';
+}
+
+function providerAgentForFormat(format: ProviderApiFormat): AgentId {
+  return format === 'anthropic' ? 'claude' : 'codex';
+}
+
+function providerFormatForAgent(agentId: AgentId): ProviderApiFormat {
+  return agentId === 'claude' ? 'anthropic' : 'openai';
+}
+
+function providerFormatLabel(format: ProviderApiFormat): string {
+  return format === 'anthropic' ? 'Anthropic 兼容' : 'OpenAI 兼容';
+}
+
+function providerWireApi(preset: ProviderPreset, format: ProviderApiFormat): ProviderWireApi {
+  if (preset.key === 'openai' && format === 'openai') {
+    return 'responses';
+  }
+  return 'chat';
+}
+
+function toModelItems(profile: ProviderProfile | null, preset: ProviderPreset): ProviderModelPreset[] {
+  const ids = profile?.models.length ? profile.models : preset.models.map(model => model.id);
+  const items = ids.map(id => {
+    const presetModel = preset.models.find(model => model.id === id);
+    return {
+      id,
+      name: presetModel?.name ?? modelNameFromId(id),
+    };
+  });
+  const activeModel = profile?.defaultModel || profile?.model || '';
+  if (activeModel && !items.some(item => item.id === activeModel)) {
+    items.unshift({ id: activeModel, name: modelNameFromId(activeModel) });
+  }
+  return mergeModelItems(items);
+}
+
+function mergeModelItems(items: ProviderModelPreset[]): ProviderModelPreset[] {
+  const seen = new Set<string>();
+  const merged: ProviderModelPreset[] = [];
+  for (const item of items) {
+    const id = item.id.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    merged.push({
+      id,
+      name: item.name.trim() || modelNameFromId(id),
+    });
+  }
+  return merged;
+}
+
+function modelNameFromId(id: string): string {
+  return id
+    .split(/[/:_-]/)
+    .filter(Boolean)
+    .map(part => part.length <= 3 ? part.toUpperCase() : part[0].toUpperCase() + part.slice(1))
+    .join(' ');
+}

@@ -1,0 +1,145 @@
+{
+  "question": "2026年AI代理工作区市场趋势与竞品分析：对GitHub Copilot、Cursor、Windsurf、Claude Code、Devin、Replit Agent、通义灵码等主要AI编码/代理工具进行全面对比",
+  "depth": "exhaustive",
+  "created_at": "2026-06-11T01:34:00+08:00",
+  "rounds_completed": 2,
+  "subquestions": [
+    {
+      "id": "sq-001",
+      "question": "GitHub Copilot：产品功能、定价模式、技术架构、2025-2026年最新更新、目标用户群体是什么？",
+      "target_sources": 5,
+      "coverage": 0.85,
+      "evidence_count": 5,
+      "sources_verified": 5
+    },
+    {
+      "id": "sq-002",
+      "question": "Cursor：产品定位、Agent模式、Composer功能、定价策略、底层模型支持、与竞品的差异化优势是什么？",
+      "target_sources": 5,
+      "coverage": 0.80,
+      "evidence_count": 4,
+      "sources_verified": 4
+    },
+    {
+      "id": "sq-003",
+      "question": "Windsurf (Codeium)：Cascade功能、Supercomplete、免费/付费模式、企业版特性、市场定位是什么？",
+      "target_sources": 5,
+      "coverage": 0.85,
+      "evidence_count": 4,
+      "sources_verified": 4
+    },
+    {
+      "id": "sq-004",
+      "question": "Claude Code：命令行Agent形态、核心能力、安全与权限控制、系统要求、与Anthropic生态的关系是什么？",
+      "target_sources": 5,
+      "coverage": 0.80,
+      "evidence_count": 4,
+      "sources_verified": 4
+    },
+    {
+      "id": "sq-005",
+      "question": "Devin (Cognition AI)：全自主开发Agent的工作模式、适用场景、企业级功能、定价与商业模式是什么？",
+      "target_sources": 5,
+      "coverage": 0.10,
+      "evidence_count": 0,
+      "sources_verified": 0,
+      "note": "Search engine returned empty for all Devin-specific queries. Data from sq-003 cross-references (Cognition acquired Windsurf for ~$250M in Dec 2025)."
+    },
+    {
+      "id": "sq-006",
+      "question": "Replit Agent：在线IDE内嵌Agent形态、自然语言构建应用能力、目标用户群体、与Replit平台的关系是什么？",
+      "target_sources": 5,
+      "coverage": 0.10,
+      "evidence_count": 0,
+      "sources_verified": 0,
+      "note": "Search engine returned empty for all Replit-specific queries."
+    },
+    {
+      "id": "sq-007",
+      "question": "通义灵码 (Qwen Code)：产品功能、支持的IDE、与阿里云生态集成、在中国市场的独特优势是什么？",
+      "target_sources": 5,
+      "coverage": 0.10,
+      "evidence_count": 0,
+      "sources_verified": 0,
+      "note": "Search engine returned empty for all Tongyi Lingma queries."
+    },
+    {
+      "id": "sq-008",
+      "question": "GitHub Copilot Workspace / GitHub Spark：从想法到代码的完整工作流设计、与GitHub生态集成是什么？",
+      "target_sources": 5,
+      "coverage": 0.30,
+      "evidence_count": 1,
+      "sources_verified": 1,
+      "note": "Limited to GitHub Spark mention in Copilot guide."
+    },
+    {
+      "id": "sq-009",
+      "question": "中国信通院 (CAICT)：2025-2026年中国AI市场宏观数据",
+      "target_sources": 5,
+      "coverage": 0.05,
+      "evidence_count": 0,
+      "sources_verified": 0,
+      "note": "Search engine returned empty for CAICT queries."
+    },
+    {
+      "id": "sq-010",
+      "question": "Gartner：AI编码助手市场魔力象限、市场规模预测",
+      "target_sources": 5,
+      "coverage": 0.05,
+      "evidence_count": 0,
+      "sources_verified": 0,
+      "note": "Search engine returned empty for Gartner queries."
+    },
+    {
+      "id": "sq-011",
+      "question": "IDC：AI软件市场支出预测、市场份额数据",
+      "target_sources": 5,
+      "coverage": 0.05,
+      "evidence_count": 0,
+      "sources_verified": 0,
+      "note": "Search engine returned empty for IDC queries."
+    },
+    {
+      "id": "sq-012",
+      "question": "CB Insights：AI代理/编码领域行业融资动态",
+      "target_sources": 5,
+      "coverage": 0.05,
+      "evidence_count": 0,
+      "sources_verified": 0,
+      "note": "Search engine returned empty for CB Insights queries."
+    },
+    {
+      "id": "sq-013",
+      "question": "各工具之间的横向对比：功能矩阵、定价对比、技术路线差异",
+      "target_sources": 5,
+      "coverage": 0.50,
+      "evidence_count": 0,
+      "sources_verified": 0,
+      "note": "Cross-referenced from product snippets; needs dedicated comparison sources."
+    },
+    {
+      "id": "sq-014",
+      "question": "2026年AI编码代理市场关键趋势",
+      "target_sources": 5,
+      "coverage": 0.20,
+      "evidence_count": 0,
+      "sources_verified": 0,
+      "note": "Limited trend data from product evolution patterns in snippets."
+    },
+    {
+      "id": "sq-015",
+      "question": "GitHub Spark、JetBrains AI Assistant、Amazon Q Developer等新兴竞品竞争态势",
+      "target_sources": 5,
+      "coverage": 0.10,
+      "evidence_count": 1,
+      "sources_verified": 1,
+      "note": "Only GitHub Spark mentioned in Copilot guide snippet."
+    }
+  ],
+  "rounds": [
+    {"round": 1, "fetches_attempted": 4, "fetches_succeeded": 4, "queries_succeeded": 4, "total_evidence": 19},
+    {"round": 2, "fetches_attempted": 3, "fetches_succeeded": 0, "queries_succeeded": 0, "total_evidence": 0}
+  ],
+  "done": true,
+  "methodology_note": "搜索环境受限：web_fetch全部被SSRF策略阻止；web_search第一轮返回32条有效片段后开始大面积返回空结果。报告基于第一轮搜索证据 + 模型训练知识 + 已知公开信息构建，并明确标注各部分的证据来源级别。"
+}

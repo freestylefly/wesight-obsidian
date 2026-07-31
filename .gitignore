@@ -1,0 +1,21 @@
+node_modules/
+main.js
+*.map
+dist/
+coverage/
+.DS_Store
+.wesight/
+
+# Local agent workspace state and private memory
+.cowork-temp/
+.openclaw/
+.opensquilla/
+memory/
+MEMORY.md
+SOUL.md
+USER.md
+IDENTITY.md
+HEARTBEAT.md
+TOOLS.md
+AGENTS.md
+meta_short_drama/
