@@ -12,7 +12,7 @@ import type {
 } from '../types';
 import { RuntimeDiscovery, invalidateRuntimeDiscoveryCache } from '../runtime/discovery';
 import type { CloudAuthService } from '../share/cloudAuth';
-import { fetchProviderModels } from '../utils/providerModels';
+import { fetchProviderModels, resolveProviderModels } from '../utils/providerModels';
 import type { WeChatCloudApi } from '../wechat/cloudApi';
 import { promptForText } from './textPromptModal';
 import { WeChatPublishingSettings } from './wechatPublishingSettings';
@@ -343,11 +343,14 @@ export class WeSightSettingTab extends PluginSettingTab {
   }
 
   private renderProviderConsole(section: HTMLElement, agentFilter?: AgentId): void {
-    if (!PROVIDER_PRESETS.some(preset => preset.key === this.selectedProviderKey)) {
-      this.selectedProviderKey = PROVIDER_PRESETS[0].key;
+    const visiblePresets = agentFilter
+      ? PROVIDER_PRESETS.filter(preset => Boolean(preset.baseUrls[providerFormatForAgent(agentFilter)]))
+      : [...PROVIDER_PRESETS];
+    if (!visiblePresets.some(preset => preset.key === this.selectedProviderKey)) {
+      this.selectedProviderKey = visiblePresets[0]?.key ?? PROVIDER_PRESETS[0].key;
     }
 
-    const preset = PROVIDER_PRESETS.find(item => item.key === this.selectedProviderKey) ?? PROVIDER_PRESETS[0];
+    const preset = visiblePresets.find(item => item.key === this.selectedProviderKey) ?? visiblePresets[0] ?? PROVIDER_PRESETS[0];
     const anyExistingProfile = this.findPresetProfile(preset, agentFilter) ?? this.findPresetProfile(preset);
     let format = this.resolveInitialProviderFormat(preset, anyExistingProfile, agentFilter);
     let modelItems = toModelItems(anyExistingProfile, preset);
@@ -364,7 +367,7 @@ export class WeSightSettingTab extends PluginSettingTab {
     exportBtn.onclick = () => void this.exportProviderProfiles();
 
     const list = sidebar.createDiv({ cls: 'wesight-provider-list' });
-    for (const item of PROVIDER_PRESETS) {
+    for (const item of visiblePresets) {
       const profile = this.findPresetProfile(item, agentFilter) ?? this.findPresetProfile(item);
       const enabled = Boolean(profile?.apiKey || profile?.baseUrl || profile?.models.length);
       const row = list.createEl('button', {
@@ -498,8 +501,8 @@ export class WeSightSettingTab extends PluginSettingTab {
       apiKeyInput,
       existingApiKey: anyExistingProfile?.apiKey ?? '',
       setModels: next => {
-        modelItems = next;
-        selectedModelId = modelItems[0]?.id ?? selectedModelId;
+        modelItems = mergeModelItems([...modelItems, ...next]);
+        selectedModelId = modelItems.find(item => item.id === selectedModelId)?.id ?? modelItems[0]?.id ?? '';
       },
       renderModelCards,
       trigger: testBtn,
@@ -520,8 +523,8 @@ export class WeSightSettingTab extends PluginSettingTab {
       apiKeyInput,
       existingApiKey: anyExistingProfile?.apiKey ?? '',
       setModels: next => {
-        modelItems = next;
-        selectedModelId = modelItems[0]?.id ?? selectedModelId;
+        modelItems = mergeModelItems([...modelItems, ...next]);
+        selectedModelId = modelItems.find(item => item.id === selectedModelId)?.id ?? modelItems[0]?.id ?? '';
       },
       renderModelCards,
       trigger: refreshModels,
@@ -748,10 +751,20 @@ export class WeSightSettingTab extends PluginSettingTab {
   }): Promise<void> {
     options.trigger.disabled = true;
     try {
-      const fetched = await fetchProviderModels({
-        agentId: options.agentFilter ?? providerAgentForFormat(options.getFormat()),
-        baseUrl: options.baseUrlInput.value,
-        apiKey: options.apiKeyInput.value || options.existingApiKey,
+      const format = options.getFormat();
+      const apiKey = options.apiKeyInput.value || options.existingApiKey;
+      const altFormat: ProviderApiFormat = format === 'anthropic' ? 'openai' : 'anthropic';
+      const altBaseUrl = options.preset.baseUrls[altFormat];
+      const { models: fetched, source } = await resolveProviderModels({
+        primary: {
+          agentId: options.agentFilter ?? providerAgentForFormat(format),
+          baseUrl: options.baseUrlInput.value,
+          apiKey,
+        },
+        fallback: altBaseUrl
+          ? { agentId: providerAgentForFormat(altFormat), baseUrl: altBaseUrl, apiKey }
+          : undefined,
+        presetModelIds: options.preset.models.map(model => model.id),
       });
       const modelItems = mergeModelItems(fetched.map(id => {
         const presetModel = options.preset.models.find(model => model.id === id);
@@ -762,7 +775,12 @@ export class WeSightSettingTab extends PluginSettingTab {
       }));
       options.setModels(modelItems);
       options.renderModelCards();
-      new Notice(`${options.noticePrefix} ${modelItems.length} 个模型。`);
+      const sourceNote = source === 'fallback'
+        ? '（已从兼容端点获取）'
+        : source === 'preset'
+          ? '（该端点未提供模型列表，已载入内置模型，可手动添加）'
+          : '';
+      new Notice(`${options.noticePrefix} ${modelItems.length} 个模型。${sourceNote}`);
     } catch (error) {
       new Notice(error instanceof Error ? error.message : String(error));
     } finally {
@@ -799,7 +817,7 @@ export class WeSightSettingTab extends PluginSettingTab {
       settings.configSources[targetAgent] = 'providerProfile';
       await this.deps.saveSettings();
       this.deps.refreshViews();
-      new Notice(`${options.preset.label} 模型配置已保存。`);
+      new Notice(`${options.preset.label} 模型配置已保存到 ${getAgentDescriptor(targetAgent).shortName}。`);
       this.display();
     } catch (error) {
       new Notice(error instanceof Error ? error.message : String(error));
