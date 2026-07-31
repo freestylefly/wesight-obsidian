@@ -154,12 +154,12 @@ export class RuntimeDiscovery {
     return {
       ...this.env,
       PATH: [
+        this.env.PATH ?? '',
         path.join(os.homedir(), '.local', 'bin'),
         path.join(os.homedir(), '.npm-global', 'bin'),
         path.join(os.homedir(), '.volta', 'bin'),
         '/opt/homebrew/bin',
         '/usr/local/bin',
-        this.env.PATH ?? '',
       ].join(path.delimiter),
     };
   }

@@ -7,18 +7,13 @@ import {
   buildFeishuUpdateDocumentArgs,
   buildLarkAuthStatusArgs,
   buildLarkAuthorizationArgs,
-  buildLarkCliInstallPlan,
   isValidLarkAuthorizationRecord,
-  isValidLarkInstallRecord,
   LarkCliService,
   missingLarkScopes,
   parseLarkCliFailure,
-  REQUIRED_LARK_SKILLS,
 } from '../src/feishu/larkCli';
 import {
   larkCliAuthorizationRecordPath,
-  larkCliInstallRecordPath,
-  larkCliManagedBinaryPath,
 } from '../src/paths';
 
 describe('LarkCliService commands', () => {
@@ -28,19 +23,6 @@ describe('LarkCliService commands', () => {
     for (const tempDir of tempDirs.splice(0)) {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
-  });
-
-  test('installs lark-cli into the shared WeSight runtime', () => {
-    const plan = buildLarkCliInstallPlan({
-      WESIGHT_HOME: '/tmp/wesight',
-    } as NodeJS.ProcessEnv);
-    expect(plan.managedDir).toBe('/tmp/wesight/runtimes/lark-cli');
-    expect(plan.args).toEqual([
-      'install',
-      '--prefix',
-      '/tmp/wesight/runtimes/lark-cli',
-      '@larksuite/cli@latest',
-    ]);
   });
 
   test('requests every CLI business domain with split-flow authorization', () => {
@@ -61,13 +43,6 @@ describe('LarkCliService commands', () => {
       '--json',
       '--verify',
     ]);
-  });
-
-  test('requires the complete official Skills set including Base and Drive', () => {
-    expect(REQUIRED_LARK_SKILLS).toContain('lark-base');
-    expect(REQUIRED_LARK_SKILLS).toContain('lark-drive');
-    expect(REQUIRED_LARK_SKILLS).toContain('lark-im');
-    expect(REQUIRED_LARK_SKILLS.length).toBeGreaterThan(20);
   });
 
   test('compares all app scopes with the user authorization', () => {
@@ -95,52 +70,17 @@ describe('LarkCliService commands', () => {
     })).toBe(false);
   });
 
-  test('ignores a system CLI until the managed binary and install record are valid', () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wesight-lark-test-'));
-    tempDirs.push(tempDir);
-    const env = {
-      WESIGHT_HOME: tempDir,
-      PATH: process.env.PATH,
-    } as NodeJS.ProcessEnv;
-    const binaryPath = larkCliManagedBinaryPath(env);
-    fs.mkdirSync(path.dirname(binaryPath), { recursive: true });
-    fs.writeFileSync(binaryPath, '#!/bin/sh\nprintf "lark-cli 9.9.9\\n"\n');
-    fs.chmodSync(binaryPath, 0o755);
-
+  test('detects an independently installed system CLI', () => {
+    const env = createSystemCliFixture(tempDirs);
     const cli = new LarkCliService(env);
     expect(cli.discoverCli()).toMatchObject({
-      path: null,
-      managedInstallStatus: 'invalid',
+      path: path.join(env.WESIGHT_HOME!, 'bin', 'lark-cli'),
+      cliStatus: 'ready',
     });
-
-    const installRecord = {
-      packageName: '@larksuite/cli',
-      binaryPath,
-      version: '9.9.9',
-      installedAt: '2026-07-30T08:00:00.000Z',
-    };
-    fs.writeFileSync(
-      larkCliInstallRecordPath(env),
-      JSON.stringify(installRecord),
-    );
-    expect(isValidLarkInstallRecord(installRecord, binaryPath)).toBe(true);
-    expect(cli.discoverCli()).toMatchObject({
-      path: binaryPath,
-      managedInstallStatus: 'ready',
-    });
-  });
-
-  test('rejects an install record that points outside the managed runtime', () => {
-    expect(isValidLarkInstallRecord({
-      packageName: '@larksuite/cli',
-      binaryPath: '/tmp/other/lark-cli',
-      version: '1.0.0',
-      installedAt: '2026-07-30T08:00:00.000Z',
-    }, '/tmp/wesight/runtimes/lark-cli/node_modules/.bin/lark-cli')).toBe(false);
   });
 
   test('requires a local all-mode record before reusing an existing full authorization', async () => {
-    const env = createManagedCliFixture(tempDirs);
+    const env = createSystemCliFixture(tempDirs);
     const cli = new LarkCliService(env);
     const grantedScopes = [
       'im:chat:read',
@@ -187,7 +127,7 @@ describe('LarkCliService commands', () => {
   });
 
   test('detects partial authorization when a Base scope is missing', async () => {
-    const env = createManagedCliFixture(tempDirs);
+    const env = createSystemCliFixture(tempDirs);
     fs.writeFileSync(larkCliAuthorizationRecordPath(env), JSON.stringify({
       authorizationMode: 'all',
       scopeVersion: 1,
@@ -218,7 +158,7 @@ describe('LarkCliService commands', () => {
   });
 
   test('returns to scanning when the verified user token has expired', async () => {
-    const env = createManagedCliFixture(tempDirs);
+    const env = createSystemCliFixture(tempDirs);
     const cli = new LarkCliService(env);
     Reflect.set(cli, 'run', async (args: string[]) => {
       if (args[0] === 'config') return commandResult({ appId: 'cli_test' });
@@ -349,22 +289,18 @@ function buildConnectionRunner(
   };
 }
 
-function createManagedCliFixture(tempDirs: string[]): NodeJS.ProcessEnv {
+function createSystemCliFixture(tempDirs: string[]): NodeJS.ProcessEnv {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wesight-lark-state-'));
   tempDirs.push(tempDir);
+  const binDir = path.join(tempDir, 'bin');
   const env = {
     WESIGHT_HOME: tempDir,
-    PATH: process.env.PATH,
+    PATH: [binDir, process.env.PATH ?? ''].join(path.delimiter),
   } as NodeJS.ProcessEnv;
-  const binaryPath = larkCliManagedBinaryPath(env);
+  const binaryPath = path.join(binDir, process.platform === 'win32' ? 'lark-cli.cmd' : 'lark-cli');
   fs.mkdirSync(path.dirname(binaryPath), { recursive: true });
   fs.writeFileSync(binaryPath, '#!/bin/sh\nprintf "lark-cli 9.9.9\\n"\n');
   fs.chmodSync(binaryPath, 0o755);
-  fs.writeFileSync(larkCliInstallRecordPath(env), JSON.stringify({
-    packageName: '@larksuite/cli',
-    binaryPath,
-    version: '9.9.9',
-    installedAt: '2026-07-30T08:00:00.000Z',
-  }));
+  fs.mkdirSync(path.dirname(larkCliAuthorizationRecordPath(env)), { recursive: true });
   return env;
 }

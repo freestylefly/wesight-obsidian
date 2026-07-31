@@ -10,6 +10,7 @@ import {
 import type { ShareSnapshot, ShareState } from '../share/types';
 import type { LarkCliService } from '../feishu/larkCli';
 import type { WeSightObsidianSettings } from '../types';
+import { recordValue } from '../utils/records';
 import type { WeChatCloudApi } from '../wechat/cloudApi';
 import { FeishuSharePanel } from './feishuSharePanel';
 import { confirmShareAction } from './shareConfirm';
@@ -261,7 +262,7 @@ class SharePopover {
     } else {
       this.renderError(body, '无法读取当前笔记。');
     }
-    requestAnimationFrame(() => this.position());
+    window.requestAnimationFrame(() => this.position());
   }
 
   private renderTabs(): void {
@@ -338,7 +339,7 @@ class SharePopover {
     const icon = operation.createSpan();
     setIcon(icon, 'loader-circle');
     operation.createEl('strong', { text: this.operationLabel ?? '处理中…' });
-    operation.createEl('span', { text: '请保持 Obsidian 打开。' });
+    operation.createSpan({ text: '请保持 Obsidian 打开。' });
   }
 
   private renderError(parent: HTMLElement, override?: string): void {
@@ -347,7 +348,7 @@ class SharePopover {
     setIcon(icon, 'circle-alert');
     const copy = error.createDiv();
     copy.createEl('strong', { text: '暂时无法完成分享' });
-    copy.createEl('span', { text: override || this.error || '请稍后重试。' });
+    copy.createSpan({ text: override || this.error || '请稍后重试。' });
     const retry = parent.createEl('button', {
       cls: 'wesight-share-primary-button',
       text: '重试',
@@ -362,7 +363,7 @@ class SharePopover {
     setIcon(icon, 'copy-x');
     const copy = error.createDiv();
     copy.createEl('strong', { text: '检测到重复的分享标识' });
-    copy.createEl('span', {
+    copy.createSpan({
       text: `另一篇笔记“${this.duplicatePath}”使用了同一个分享链接。`,
     });
     const publish = parent.createEl('button', {
@@ -499,7 +500,7 @@ class SharePopover {
     setIcon(iconWrap, 'message-circle');
     const copy = row.createDiv({ cls: 'wesight-share-comments-copy' });
     copy.createEl('strong', { text: '允许访客划线评论' });
-    copy.createEl('span', {
+    copy.createSpan({
       text: state.commentsEnabled
         ? `${state.commentCount} 条评论 · 访客无需登录`
         : state.commentCount > 0
@@ -532,7 +533,7 @@ class SharePopover {
     setIcon(iconWrap, 'globe');
     const copy = row.createDiv({ cls: 'wesight-share-status-copy' });
     copy.createEl('strong', { text: title });
-    copy.createEl('span', { text: description });
+    copy.createSpan({ text: description });
     const toggle = row.createEl('button', {
       cls: `wesight-share-toggle${enabled ? ' is-enabled' : ''}`,
       attr: {
@@ -656,7 +657,7 @@ class SharePopover {
   }
 
   private async setShareId(value: string | null): Promise<void> {
-    await this.app.fileManager.processFrontMatter(this.file, (frontmatter) => {
+    await this.app.fileManager.processFrontMatter(this.file, (frontmatter: Record<string, unknown>) => {
       if (value) {
         frontmatter[SHARE_ID_FRONTMATTER_KEY] = value;
       } else {
@@ -668,9 +669,10 @@ class SharePopover {
   private findDuplicatePath(shareId: string): string | null {
     for (const candidate of this.app.vault.getMarkdownFiles()) {
       if (candidate.path === this.file.path) continue;
-      const value = this.app.metadataCache
-        .getFileCache(candidate)
-        ?.frontmatter?.[SHARE_ID_FRONTMATTER_KEY];
+      const value = recordValue(
+        this.app.metadataCache.getFileCache(candidate)?.frontmatter,
+        SHARE_ID_FRONTMATTER_KEY,
+      );
       if (value === shareId) return candidate.path;
     }
     return null;

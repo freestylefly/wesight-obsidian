@@ -21,21 +21,8 @@ export function managedBinaryPath(agentId: AgentId, binaryName: string, env: Nod
   return path.join(runtimeManagedDir(agentId, env), 'node_modules', '.bin', binary);
 }
 
-export function larkCliManagedDir(env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(wesightHome(env), 'runtimes', 'lark-cli');
-}
-
-export function larkCliManagedBinaryPath(env: NodeJS.ProcessEnv = process.env): string {
-  const binary = process.platform === 'win32' ? 'lark-cli.cmd' : 'lark-cli';
-  return path.join(larkCliManagedDir(env), 'node_modules', '.bin', binary);
-}
-
-export function larkCliInstallRecordPath(env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(larkCliManagedDir(env), 'install.json');
-}
-
 export function larkCliAuthorizationRecordPath(env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(larkCliManagedDir(env), 'authorization.json');
+  return path.join(wesightHome(env), 'lark', 'authorization.json');
 }
 
 export function providersPath(env: NodeJS.ProcessEnv = process.env): string {

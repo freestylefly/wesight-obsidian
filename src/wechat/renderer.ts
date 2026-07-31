@@ -44,7 +44,7 @@ function styles(element: HTMLElement, values: Partial<CSSStyleDeclaration>): voi
 
 function decorateCode(pre: HTMLElement): void {
   if (pre.parentElement?.classList.contains('wesight-wechat-code-section')) return;
-  const wrapper = document.createElement('section');
+  const wrapper = createEl('section');
   wrapper.className = 'wesight-wechat-code-section';
   styles(wrapper, {
     display: 'block',
@@ -55,7 +55,7 @@ function decorateCode(pre: HTMLElement): void {
     overflow: 'hidden',
     boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
   });
-  const header = document.createElement('section');
+  const header = createEl('section');
   header.setAttribute('aria-hidden', 'true');
   styles(header, {
     display: 'block',
@@ -66,7 +66,7 @@ function decorateCode(pre: HTMLElement): void {
     backgroundColor: '#282c34',
   });
   for (const color of ['#ff5f56', '#ffbd2e', '#27c93f']) {
-    const dot = document.createElement('span');
+    const dot = createSpan();
     dot.textContent = '●';
     styles(dot, {
       display: 'inline-block',
@@ -86,7 +86,7 @@ function decorateHeading(heading: HTMLElement): void {
   if (heading.tagName !== 'H2' || heading.querySelector(':scope > .wesight-wechat-h2-tail')) {
     return;
   }
-  const tail = document.createElement('span');
+  const tail = createSpan();
   tail.className = 'wesight-wechat-h2-tail';
   tail.setAttribute('aria-hidden', 'true');
   styles(tail, {
@@ -103,7 +103,7 @@ function decorateHeading(heading: HTMLElement): void {
 }
 
 function replaceTaskCheckbox(input: HTMLInputElement): void {
-  const mark = document.createElement('span');
+  const mark = createSpan();
   mark.textContent = input.checked ? '☑' : '☐';
   styles(mark, {
     display: 'inline-block',
@@ -117,7 +117,7 @@ function replaceTaskCheckbox(input: HTMLInputElement): void {
 function wrapTables(root: HTMLElement): void {
   for (const table of Array.from(root.querySelectorAll('table'))) {
     if (table.parentElement?.classList.contains('wesight-wechat-table-wrap')) continue;
-    const wrapper = document.createElement('section');
+    const wrapper = createEl('section');
     wrapper.className = 'wesight-wechat-table-wrap';
     styles(wrapper, {
       display: 'block',
@@ -408,7 +408,7 @@ async function svgToPng(svg: SVGElement): Promise<ArrayBuffer> {
   try {
     const image = await imageFromUrl(url);
     const scale = Math.min(3, Math.max(1, 1200 / width));
-    const canvas = document.createElement('canvas');
+    const canvas = createEl('canvas');
     canvas.width = Math.ceil(width * scale);
     canvas.height = Math.ceil(height * scale);
     const context = canvas.getContext('2d');
@@ -444,7 +444,7 @@ export async function replaceFormulaSvgs(
       previewUrl: '',
     };
     const url = await upload(asset);
-    const image = document.createElement('img');
+    const image = createEl('img');
     image.src = url;
     image.alt = '公式';
     const target = svg.closest('mjx-container, .math') ?? svg;
@@ -461,14 +461,14 @@ export function serializeWeChatArticle(root: HTMLElement): string {
         element.removeAttribute(attribute.name);
       }
     }
-    if (element instanceof HTMLAnchorElement) {
+    if (element.instanceOf(HTMLAnchorElement)) {
       const href = element.getAttribute('href') || '';
       if (!/^(?:https?:|mailto:)/i.test(href)) element.removeAttribute('href');
     }
-    if (element instanceof HTMLImageElement) {
+    if (element.instanceOf(HTMLImageElement)) {
       const src = element.getAttribute('src') || '';
       if (!/^https:\/\//i.test(src)) {
-        const notice = document.createElement('span');
+        const notice = createSpan();
         notice.textContent = element.alt ? `图片：${element.alt}` : '图片无法随文章发布';
         styles(notice, {
           display: 'block',
@@ -481,5 +481,8 @@ export function serializeWeChatArticle(root: HTMLElement): string {
       }
     }
   }
-  return clone.innerHTML;
+  const serializer = new XMLSerializer();
+  return Array.from(clone.childNodes)
+    .map(node => serializer.serializeToString(node))
+    .join('');
 }

@@ -51,9 +51,9 @@ export class AgentAdapter extends EventEmitter {
         child.stdin.end(stdinPayload);
       }
 
-      child.stdout?.on('data', chunk => {
+      child.stdout?.on('data', (chunk: unknown) => {
         sawOutput = true;
-        stdoutBuffer += chunk.toString('utf8');
+        stdoutBuffer += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
         const lines = stdoutBuffer.split(/\r?\n/);
         stdoutBuffer = lines.pop() ?? '';
         for (const line of lines) {
@@ -61,8 +61,9 @@ export class AgentAdapter extends EventEmitter {
         }
       });
 
-      child.stderr?.on('data', chunk => {
-        stderrTail = appendTail(stderrTail, chunk.toString('utf8'));
+      child.stderr?.on('data', (chunk: unknown) => {
+        const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+        stderrTail = appendTail(stderrTail, text);
       });
 
       child.on('error', error => {
@@ -100,12 +101,12 @@ export class AgentAdapter extends EventEmitter {
     const child = this.child;
     if (!child) return;
     child.kill('SIGTERM');
-    const killTimer = setTimeout(() => {
+    const killTimer = window.setTimeout(() => {
       if (child.exitCode === null && child.signalCode === null) {
         child.kill('SIGKILL');
       }
     }, 3_000);
-    child.once('exit', () => clearTimeout(killTimer));
+    child.once('exit', () => window.clearTimeout(killTimer));
   }
 
   onRuntimeEvent(listener: (event: RuntimeTurnEvent) => void): () => void {

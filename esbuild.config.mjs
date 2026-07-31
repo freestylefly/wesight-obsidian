@@ -39,7 +39,7 @@ const context = await esbuild.context({
 
 if (watch) {
   await context.watch();
-  console.log('Watching WeSight plugin sources...');
+  process.stdout.write('Watching WeSight plugin sources...\n');
 } else {
   await context.rebuild();
   await context.dispose();

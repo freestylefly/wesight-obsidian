@@ -1,6 +1,6 @@
 export type FeishuCapabilityId = 'im' | 'docs' | 'base' | 'calendar' | 'drive';
 
-export type FeishuManagedInstallStatus = 'missing' | 'invalid' | 'ready';
+export type FeishuCliStatus = 'missing' | 'ready';
 
 export type FeishuAuthorizationMode = 'all';
 
@@ -22,7 +22,6 @@ export interface FeishuCapabilityState {
 
 export type FeishuConnectionStatus =
   | 'missing-cli'
-  | 'unsupported-install'
   | 'needs-config'
   | 'needs-auth'
   | 'admin-action-required'
@@ -33,7 +32,7 @@ export interface FeishuConnectionState {
   status: FeishuConnectionStatus;
   cliPath: string | null;
   cliVersion: string | null;
-  managedInstallStatus: FeishuManagedInstallStatus;
+  cliStatus: FeishuCliStatus;
   configured: boolean;
   connected: boolean;
   authorizationMode: FeishuAuthorizationMode | null;
@@ -76,8 +75,6 @@ export interface FeishuPublishState {
 export type FeishuAuthPhase =
   | 'idle'
   | 'detecting'
-  | 'installing'
-  | 'installing-skills'
   | 'configuring'
   | 'waiting-auth'
   | 'verifying'

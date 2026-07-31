@@ -109,7 +109,7 @@ export class WeChatPublishingSettings {
       .setName('AppID')
       .setDesc('在微信公众平台“开发 → 基本配置”中获取。')
       .addText(text => text
-        .setPlaceholder('wx...')
+        .setPlaceholder('Wx...')
         .setValue(this.appId)
         .onChange(value => {
           this.appId = value.trim();
@@ -230,7 +230,7 @@ export class WeChatPublishingSettings {
   }
 
   private chooseDefaultCover(): void {
-    const input = document.createElement('input');
+    const input = createEl('input');
     input.type = 'file';
     input.accept = 'image/png,image/jpeg,image/gif,image/webp';
     input.onchange = () => {

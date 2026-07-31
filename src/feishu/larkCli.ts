@@ -7,15 +7,9 @@ import QRCode from 'qrcode';
 
 import {
   larkCliAuthorizationRecordPath,
-  larkCliInstallRecordPath,
-  larkCliManagedBinaryPath,
-  larkCliManagedDir,
 } from '../paths';
 import { resolveCommand, readCommandVersion } from '../utils/command';
 import {
-  ensureDir,
-  executableFileExists,
-  fileExists,
   readJsonFile,
   writeJsonFile,
 } from '../utils/fs';
@@ -28,47 +22,16 @@ import type {
   FeishuConnectionState,
   FeishuDocumentResult,
   FeishuFolderResult,
-  FeishuManagedInstallStatus,
+  FeishuCliStatus,
   LarkAuthorizationRecord,
 } from './types';
 
-const LARK_CLI_PACKAGE = '@larksuite/cli';
 const LARK_AUTHORIZATION_MODE: FeishuAuthorizationMode = 'all';
 const LARK_SCOPE_VERSION = 1;
 const DEFAULT_FOLDER_NAME = 'WeSight 分享';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const AUTH_TIMEOUT_MS = 10 * 60_000;
-const INSTALL_TIMEOUT_MS = 3 * 60_000;
 const MAX_CAPTURE_CHARS = 4 * 1024 * 1024;
-export const REQUIRED_LARK_SKILLS = [
-  'lark-approval',
-  'lark-apps',
-  'lark-attendance',
-  'lark-base',
-  'lark-calendar',
-  'lark-contact',
-  'lark-doc',
-  'lark-drive',
-  'lark-event',
-  'lark-im',
-  'lark-mail',
-  'lark-markdown',
-  'lark-minutes',
-  'lark-note',
-  'lark-okr',
-  'lark-openapi-explorer',
-  'lark-shared',
-  'lark-sheets',
-  'lark-skill-maker',
-  'lark-slides',
-  'lark-task',
-  'lark-vc',
-  'lark-vc-agent',
-  'lark-whiteboard',
-  'lark-wiki',
-  'lark-workflow-meeting-summary',
-  'lark-workflow-standup-report',
-] as const;
 
 const CAPABILITY_META: Record<FeishuCapabilityId, Omit<FeishuCapabilityState, 'granted' | 'verified'>> = {
   im: {
@@ -161,23 +124,10 @@ interface LarkAuthStatus {
   };
 }
 
-export interface LarkInstallRecord {
-  packageName: string;
-  binaryPath: string;
-  version: string | null;
-  installedAt: string;
-}
-
-interface ManagedCliDiscovery {
+interface CliDiscovery {
   path: string | null;
   version: string | null;
-  managedInstallStatus: FeishuManagedInstallStatus;
-}
-
-export interface LarkCliInstallPlan {
-  packageName: string;
-  managedDir: string;
-  args: string[];
+  cliStatus: FeishuCliStatus;
 }
 
 export class LarkCliError extends Error {
@@ -359,22 +309,6 @@ export function missingLarkScopes(
   return Array.from(new Set(expectedScopes)).filter(scope => !granted.has(scope));
 }
 
-export function isValidLarkInstallRecord(
-  value: unknown,
-  expectedBinaryPath: string,
-): value is LarkInstallRecord {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const record = value as Partial<LarkInstallRecord>;
-  const installedAt = typeof record.installedAt === 'string'
-    ? Date.parse(record.installedAt)
-    : Number.NaN;
-  return record.packageName === LARK_CLI_PACKAGE
-    && typeof record.binaryPath === 'string'
-    && path.resolve(record.binaryPath) === path.resolve(expectedBinaryPath)
-    && (typeof record.version === 'string' || record.version === null)
-    && Number.isFinite(installedAt);
-}
-
 export function isValidLarkAuthorizationRecord(
   value: unknown,
 ): value is LarkAuthorizationRecord {
@@ -399,17 +333,6 @@ function ensureSafeVaultPath(vaultPath: string): string {
     throw new Error(`图片路径超出当前 Vault：${vaultPath}`);
   }
   return normalized;
-}
-
-export function buildLarkCliInstallPlan(
-  env: NodeJS.ProcessEnv = process.env,
-): LarkCliInstallPlan {
-  const managedDir = larkCliManagedDir(env);
-  return {
-    packageName: LARK_CLI_PACKAGE,
-    managedDir,
-    args: ['install', '--prefix', managedDir, `${LARK_CLI_PACKAGE}@latest`],
-  };
 }
 
 export function buildLarkAuthorizationArgs(): string[] {
@@ -466,11 +389,6 @@ export function buildFeishuUpdateDocumentArgs(documentId: string): string[] {
 }
 
 export class LarkCliService extends EventEmitter {
-  private static readonly installPromises = new Map<
-    string,
-    Promise<{ path: string; version: string | null }>
-  >();
-
   private activeChild: ChildProcess | null = null;
   private cancelled = false;
   private pendingDeviceCode: string | null = null;
@@ -488,80 +406,14 @@ export class LarkCliService extends EventEmitter {
     return () => this.off('progress', listener);
   }
 
-  isManagedInstallSupported(): boolean {
-    return process.platform === 'darwin';
-  }
-
-  discoverCli(): ManagedCliDiscovery {
-    const managed = larkCliManagedBinaryPath(this.env);
-    const recordPath = larkCliInstallRecordPath(this.env);
-    const record = readJsonFile<unknown>(recordPath, null);
-    const hasBinary = fileExists(managed);
-    const hasRecord = fileExists(recordPath);
-    const valid = executableFileExists(managed)
-      && isValidLarkInstallRecord(record, managed);
-    const cliPath = valid ? managed : null;
+  discoverCli(): CliDiscovery {
+    const cliPath = resolveCommand('lark-cli', this.buildSearchEnv());
     this.resolvedCliPath = cliPath;
     return {
       path: cliPath,
       version: cliPath ? readCommandVersion(cliPath, this.buildSearchEnv()) : null,
-      managedInstallStatus: valid
-        ? 'ready'
-        : hasBinary || hasRecord
-          ? 'invalid'
-          : 'missing',
+      cliStatus: cliPath ? 'ready' : 'missing',
     };
-  }
-
-  async install(): Promise<{ path: string; version: string | null }> {
-    const managedDir = larkCliManagedDir(this.env);
-    const running = LarkCliService.installPromises.get(managedDir);
-    if (running) return running;
-    const installPromise = this.performInstall();
-    LarkCliService.installPromises.set(managedDir, installPromise);
-    try {
-      return await installPromise;
-    } finally {
-      if (LarkCliService.installPromises.get(managedDir) === installPromise) {
-        LarkCliService.installPromises.delete(managedDir);
-      }
-    }
-  }
-
-  private async performInstall(): Promise<{ path: string; version: string | null }> {
-    if (!this.isManagedInstallSupported()) {
-      throw new LarkCliError(
-        '当前版本仅支持在 macOS 自动安装飞书 CLI，请先按安装指引完成安装。',
-        null,
-      );
-    }
-    this.cancelled = false;
-    const plan = buildLarkCliInstallPlan(this.env);
-    ensureDir(plan.managedDir);
-    const npmPath = resolveCommand('npm', this.buildSearchEnv()) ?? 'npm';
-    this.emitProgress({ phase: 'installing', message: '正在安装飞书 CLI…' });
-    const installResult = await this.run(plan.args, {
-      command: npmPath,
-      cwd: plan.managedDir,
-      timeoutMs: INSTALL_TIMEOUT_MS,
-    });
-    this.assertSuccess(installResult);
-
-    const binaryPath = larkCliManagedBinaryPath(this.env);
-    if (!executableFileExists(binaryPath)) {
-      throw new LarkCliError('飞书 CLI 安装完成，但未找到可执行文件。', null);
-    }
-    const version = readCommandVersion(binaryPath, this.buildSearchEnv());
-    this.resolvedCliPath = binaryPath;
-    writeJsonFile(larkCliInstallRecordPath(this.env), {
-      packageName: LARK_CLI_PACKAGE,
-      binaryPath,
-      version,
-      installedAt: new Date().toISOString(),
-    } satisfies LarkInstallRecord, 0o644);
-
-    await this.installAgentSkills();
-    return { path: binaryPath, version };
   }
 
   async ensureConfigured(
@@ -703,10 +555,10 @@ export class LarkCliService extends EventEmitter {
     const discovered = this.discoverCli();
     if (!discovered.path) {
       return {
-        status: this.isManagedInstallSupported() ? 'missing-cli' : 'unsupported-install',
+        status: 'missing-cli',
         cliPath: null,
         cliVersion: null,
-        managedInstallStatus: discovered.managedInstallStatus,
+        cliStatus: discovered.cliStatus,
         configured: false,
         connected: false,
         authorizationMode: null,
@@ -717,9 +569,7 @@ export class LarkCliService extends EventEmitter {
         tenantName: null,
         capabilities: emptyCapabilities(),
         consoleUrl: null,
-        message: discovered.managedInstallStatus === 'invalid'
-          ? 'WeSight 管理的飞书 CLI 缺失或损坏，需要重新安装。'
-          : '尚未安装 WeSight 管理的飞书 CLI。',
+        message: '未检测到系统中的飞书 CLI。请先按照官方指引独立安装。',
       };
     }
 
@@ -730,7 +580,7 @@ export class LarkCliService extends EventEmitter {
         status: 'needs-config',
         cliPath: discovered.path,
         cliVersion: discovered.version,
-        managedInstallStatus: discovered.managedInstallStatus,
+        cliStatus: discovered.cliStatus,
         configured: false,
         connected: false,
         authorizationMode: authorizationRecord?.authorizationMode ?? null,
@@ -765,7 +615,7 @@ export class LarkCliService extends EventEmitter {
           status: 'needs-auth',
           cliPath: discovered.path,
           cliVersion: discovered.version,
-          managedInstallStatus: discovered.managedInstallStatus,
+          cliStatus: discovered.cliStatus,
           configured: true,
           connected: false,
           authorizationMode: authorizationRecord?.authorizationMode ?? null,
@@ -791,7 +641,7 @@ export class LarkCliService extends EventEmitter {
           status: 'needs-auth',
           cliPath: discovered.path,
           cliVersion: discovered.version,
-          managedInstallStatus: discovered.managedInstallStatus,
+          cliStatus: discovered.cliStatus,
           configured: true,
           connected: false,
           authorizationMode: authorizationRecord?.authorizationMode ?? null,
@@ -819,7 +669,7 @@ export class LarkCliService extends EventEmitter {
         status: allGranted ? 'connected' : 'needs-auth',
         cliPath: discovered.path,
         cliVersion: discovered.version,
-        managedInstallStatus: discovered.managedInstallStatus,
+        cliStatus: discovered.cliStatus,
         configured: true,
         connected: allGranted,
         authorizationMode: authorizationRecord?.authorizationMode
@@ -841,7 +691,7 @@ export class LarkCliService extends EventEmitter {
         status: larkError?.consoleUrl ? 'admin-action-required' : 'error',
         cliPath: discovered.path,
         cliVersion: discovered.version,
-        managedInstallStatus: discovered.managedInstallStatus,
+        cliStatus: discovered.cliStatus,
         configured: true,
         connected: false,
         authorizationMode: authorizationRecord?.authorizationMode ?? null,
@@ -1009,49 +859,6 @@ export class LarkCliService extends EventEmitter {
     this.emitProgress({ phase: 'cancelled', message: '已取消飞书连接操作。' });
   }
 
-  private async installAgentSkills(): Promise<void> {
-    if (this.requiredSkillsInstalled()) return;
-    this.emitProgress({
-      phase: 'installing-skills',
-      message: '正在安装完整飞书 Agent Skills…',
-    });
-    const npxPath = resolveCommand('npx', this.buildSearchEnv()) ?? 'npx';
-    const primary = await this.run(
-      ['-y', 'skills', 'add', 'https://open.feishu.cn', '-y', '-g'],
-      {
-        command: npxPath,
-        timeoutMs: INSTALL_TIMEOUT_MS,
-      },
-    );
-    if (primary.code !== 0 || !this.requiredSkillsInstalled()) {
-      const fallback = await this.run(
-        ['-y', 'skills', 'add', 'larksuite/cli', '-y', '-g'],
-        {
-          command: npxPath,
-          timeoutMs: INSTALL_TIMEOUT_MS,
-        },
-      );
-      this.assertSuccess(fallback);
-    }
-    const missingSkills = this.missingRequiredSkills();
-    if (missingSkills.length) {
-      throw new LarkCliError(
-        `飞书 Skills 安装不完整，缺少：${missingSkills.join('、')}`,
-        null,
-      );
-    }
-  }
-
-  private requiredSkillsInstalled(): boolean {
-    return this.missingRequiredSkills().length === 0;
-  }
-
-  private missingRequiredSkills(): string[] {
-    const root = path.join(os.homedir(), '.agents', 'skills');
-    return REQUIRED_LARK_SKILLS
-      .filter(skill => !fs.existsSync(path.join(root, skill, 'SKILL.md')));
-  }
-
   private async hasConfiguration(): Promise<boolean> {
     const cliPath = this.requireCli();
     const result = await this.run(['config', 'show'], { command: cliPath });
@@ -1176,13 +983,12 @@ export class LarkCliService extends EventEmitter {
     return {
       ...this.env,
       PATH: [
-        path.dirname(larkCliManagedBinaryPath(this.env)),
+        this.env.PATH ?? '',
         path.join(os.homedir(), '.npm-global', 'bin'),
         path.join(os.homedir(), '.local', 'bin'),
         path.join(os.homedir(), '.volta', 'bin'),
         '/opt/homebrew/bin',
         '/usr/local/bin',
-        this.env.PATH ?? '',
       ].join(path.delimiter),
     };
   }
@@ -1224,7 +1030,7 @@ export class LarkCliService extends EventEmitter {
       const finish = (code: number | null): void => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         if (this.activeChild === child) this.activeChild = null;
         resolve({
           code,
@@ -1234,15 +1040,17 @@ export class LarkCliService extends EventEmitter {
           timedOut,
         });
       };
-      const timer = setTimeout(() => {
+      const timer = window.setTimeout(() => {
         timedOut = true;
         child.kill('SIGTERM');
       }, timeoutMs);
-      child.stdout?.on('data', (chunk) => {
+      child.stdout?.on('data', (chunk: unknown) => {
+        if (typeof chunk !== 'string' && !Buffer.isBuffer(chunk)) return;
         stdout = append(stdout, chunk);
         options.onOutput?.(String(chunk));
       });
-      child.stderr?.on('data', (chunk) => {
+      child.stderr?.on('data', (chunk: unknown) => {
+        if (typeof chunk !== 'string' && !Buffer.isBuffer(chunk)) return;
         stderr = append(stderr, chunk);
         options.onOutput?.(String(chunk));
       });

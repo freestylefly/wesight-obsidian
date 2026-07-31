@@ -22,6 +22,7 @@ import type {
   FeishuSnapshot,
 } from '../feishu/types';
 import type { WeSightObsidianSettings } from '../types';
+import { recordValue } from '../utils/records';
 import { confirmShareAction } from './shareConfirm';
 
 interface FeishuSharePanelOptions {
@@ -159,7 +160,7 @@ export class FeishuSharePanel {
     try {
       const frontmatter = this.options.app.metadataCache
         .getFileCache(this.options.file)
-        ?.frontmatter as Record<string, unknown> | undefined;
+        ?.frontmatter;
       this.publishState = parseFeishuPublishState(frontmatter);
       this.duplicatePath = this.publishState
         ? this.findDuplicatePath(this.publishState.documentId)
@@ -192,18 +193,16 @@ export class FeishuSharePanel {
     this.renderFeishuHero(
       parent,
       '连接飞书后发布文档',
-      '首次安装 WeSight 管理的飞书 CLI，并通过手机飞书 App 一次授权全部能力。',
+      '请先独立安装飞书 CLI，再通过手机飞书 App 授权发布所需能力。',
     );
     const statusRow = parent.createDiv({ cls: 'wesight-feishu-cli-status' });
     const statusIcon = statusRow.createSpan();
-    setIcon(statusIcon, status === 'missing-cli' || status === 'unsupported-install'
+    setIcon(statusIcon, status === 'missing-cli'
       ? 'circle-alert'
       : 'circle-check');
     statusRow.createSpan({
-      text: status === 'missing-cli' || status === 'unsupported-install'
-        ? this.connection?.managedInstallStatus === 'invalid'
-          ? '受管飞书 CLI 需要重新安装或修复'
-          : '尚未安装 WeSight 管理的飞书 CLI'
+      text: status === 'missing-cli'
+        ? '未检测到系统飞书 CLI'
         : status === 'needs-config'
           ? `已安装飞书 CLI${this.connection?.cliVersion ? ` · ${this.connection.cliVersion}` : ''}`
           : this.connection?.permissionsComplete
@@ -212,21 +211,17 @@ export class FeishuSharePanel {
     });
     this.renderCapabilityStrip(parent);
 
-    const unsupported = status === 'unsupported-install';
+    const missingCli = status === 'missing-cli';
     const primary = buttonWithIcon(
       parent,
       'wesight-share-primary-button is-feishu',
-      unsupported
+      missingCli
         ? '查看飞书 CLI 安装指引'
-        : status === 'missing-cli'
-          ? this.connection?.managedInstallStatus === 'invalid'
-            ? '重新安装并连接飞书'
-            : '安装并连接飞书'
-          : '连接飞书',
-      unsupported ? 'external-link' : 'plug-zap',
+        : '连接飞书',
+      missingCli ? 'external-link' : 'plug-zap',
     );
     primary.onclick = () => {
-      if (unsupported) {
+      if (missingCli) {
         window.open(
           'https://github.com/larksuite/cli#installation',
           '_blank',
@@ -238,7 +233,7 @@ export class FeishuSharePanel {
     };
     parent.createDiv({
       cls: 'wesight-feishu-security-note',
-      text: '同一电脑只需安装和授权一次，凭据由飞书 CLI 与系统安全存储管理',
+      text: 'WeSight 不会安装或更新飞书 CLI；凭据由飞书 CLI 与系统安全存储管理',
     });
   }
 
@@ -261,19 +256,6 @@ export class FeishuSharePanel {
         );
         open.onclick = () => this.openExternal(progress.verificationUrl!);
       }
-      this.renderSpinnerStatus(parent, progress.message);
-      this.renderCancelButton(parent);
-      return;
-    }
-    if (progress.phase === 'installing' || progress.phase === 'installing-skills') {
-      this.renderFeishuHero(
-        parent,
-        '安装飞书连接组件',
-        progress.phase === 'installing'
-          ? '正在把飞书 CLI 安装到 WeSight 共用运行目录。'
-          : '正在安装消息、文档、多维表格、日历、云盘等完整 Agent Skills。',
-        false,
-      );
       this.renderSpinnerStatus(parent, progress.message);
       this.renderCancelButton(parent);
       return;
@@ -308,10 +290,10 @@ export class FeishuSharePanel {
       authCopy.createEl('strong', {
         text: '进入授权页面后，勾选全部权限项目并点击同意。',
       });
-      authCopy.createEl('span', {
+      authCopy.createSpan({
         text: '文档、消息、多维表格、日历、云盘等全部飞书能力。',
       });
-      authCopy.createEl('span', {
+      authCopy.createSpan({
         text: '真实权限清单由飞书官方授权页展示。',
       });
     }
@@ -362,7 +344,7 @@ export class FeishuSharePanel {
     const authorizedAt = connection.authorizedAt
       ? formatUpdatedAt(connection.authorizedAt)
       : '';
-    copy.createEl('span', {
+    copy.createSpan({
       text: connection.tenantName
         || (authorizedAt ? `全部权限 · 授权于 ${authorizedAt}` : '已连接飞书企业'),
     });
@@ -495,7 +477,7 @@ export class FeishuSharePanel {
     setIcon(icon, 'copy-x');
     const copy = error.createDiv();
     copy.createEl('strong', { text: '检测到重复的飞书文档标识' });
-    copy.createEl('span', {
+    copy.createSpan({
       text: `另一篇笔记“${this.duplicatePath}”关联了同一篇飞书文档。`,
     });
     const publish = parent.createEl('button', {
@@ -538,7 +520,7 @@ export class FeishuSharePanel {
     const icon = operation.createSpan();
     setIcon(icon, 'loader-circle');
     operation.createEl('strong', { text: this.operationLabel ?? '处理中…' });
-    operation.createEl('span', { text: '请保持 Obsidian 打开。' });
+    operation.createSpan({ text: '请保持 Obsidian 打开。' });
   }
 
   private renderError(parent: HTMLElement, override?: string): void {
@@ -547,7 +529,7 @@ export class FeishuSharePanel {
     setIcon(icon, 'circle-alert');
     const copy = error.createDiv();
     copy.createEl('strong', { text: '暂时无法完成飞书操作' });
-    copy.createEl('span', { text: override || this.error || '请稍后重试。' });
+    copy.createSpan({ text: override || this.error || '请稍后重试。' });
     if (this.consoleUrl) {
       const consoleButton = buttonWithIcon(
         parent,
@@ -630,7 +612,7 @@ export class FeishuSharePanel {
     }
     const copy = hero.createDiv({ cls: 'wesight-feishu-hero-copy' });
     copy.createEl('strong', { text: title });
-    copy.createEl('span', { text: description });
+    copy.createSpan({ text: description });
   }
 
   private renderCapabilityStrip(parent: HTMLElement): void {
@@ -660,15 +642,15 @@ export class FeishuSharePanel {
 
   private renderAuthStepper(parent: HTMLElement, phase: FeishuAuthProgress['phase']): void {
     const stepper = parent.createDiv({ cls: 'wesight-feishu-stepper' });
-    const installDone = !['installing', 'installing-skills', 'configuring'].includes(phase);
+    const cliDone = phase !== 'detecting';
     const requestDone = ['verifying', 'success'].includes(phase);
     const authDone = phase === 'success';
     const steps = [
-      { label: '安装 CLI', done: installDone, active: !installDone },
+      { label: '检测 CLI', done: cliDone, active: !cliDone },
       {
         label: '申请权限',
         done: requestDone,
-        active: installDone && !requestDone,
+        active: cliDone && !requestDone,
       },
       {
         label: '完成授权',
@@ -728,7 +710,12 @@ export class FeishuSharePanel {
     this.consoleUrl = null;
     try {
       if (!this.options.cli.discoverCli().path) {
-        await this.options.cli.install();
+        window.open(
+          'https://github.com/larksuite/cli#installation',
+          '_blank',
+          'noopener,noreferrer',
+        );
+        throw new Error('请先按照官方指引独立安装飞书 CLI。');
       }
       await this.options.cli.ensureConfigured(url => {
         this.openedConfigUrl = url;
@@ -852,7 +839,7 @@ export class FeishuSharePanel {
   }
 
   private async setPublishState(state: FeishuPublishState): Promise<void> {
-    await this.options.app.fileManager.processFrontMatter(this.options.file, (frontmatter) => {
+    await this.options.app.fileManager.processFrontMatter(this.options.file, (frontmatter: Record<string, unknown>) => {
       frontmatter[FEISHU_DOC_ID_FRONTMATTER_KEY] = state.documentId;
       frontmatter[FEISHU_DOC_URL_FRONTMATTER_KEY] = state.url;
       frontmatter[FEISHU_CONTENT_HASH_FRONTMATTER_KEY] = state.contentHash;
@@ -864,9 +851,10 @@ export class FeishuSharePanel {
   private findDuplicatePath(documentId: string): string | null {
     for (const candidate of this.options.app.vault.getMarkdownFiles()) {
       if (candidate.path === this.options.file.path) continue;
-      const value = this.options.app.metadataCache
-        .getFileCache(candidate)
-        ?.frontmatter?.[FEISHU_DOC_ID_FRONTMATTER_KEY];
+      const value = recordValue(
+        this.options.app.metadataCache.getFileCache(candidate)?.frontmatter,
+        FEISHU_DOC_ID_FRONTMATTER_KEY,
+      );
       if (value === documentId) return candidate.path;
     }
     return null;
@@ -907,7 +895,7 @@ export class FeishuSharePanel {
   private requestRender(): void {
     if (this.disposed) return;
     this.options.requestRender();
-    requestAnimationFrame(() => this.options.requestPosition());
+    window.requestAnimationFrame(() => this.options.requestPosition());
   }
 }
 

@@ -1,7 +1,7 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting, setIcon } from 'obsidian';
 
 import { AGENT_IDS, getAgentDescriptor } from '../agents';
-import { logsDir, providersPath, runtimeManagedDir, tmpDir, wesightHome } from '../paths';
+import { logsDir, providersPath, tmpDir, wesightHome } from '../paths';
 import { ProviderStore } from '../storage/providerStore';
 import type {
   AgentId,
@@ -11,11 +11,9 @@ import type {
   WeSightObsidianSettings,
 } from '../types';
 import { RuntimeDiscovery, invalidateRuntimeDiscoveryCache } from '../runtime/discovery';
-import { RuntimeInstaller } from '../runtime/installer';
 import type { CloudAuthService } from '../share/cloudAuth';
 import { fetchProviderModels } from '../utils/providerModels';
 import type { WeChatCloudApi } from '../wechat/cloudApi';
-import { ConfirmInstallModal } from './confirmInstallModal';
 import { promptForText } from './textPromptModal';
 import { WeChatPublishingSettings } from './wechatPublishingSettings';
 
@@ -23,7 +21,6 @@ interface SettingsTabDeps {
   getSettings: () => WeSightObsidianSettings;
   saveSettings: () => Promise<void>;
   providerStore: ProviderStore;
-  runtimeInstaller: RuntimeInstaller;
   refreshViews: () => void;
   cloudAuth: CloudAuthService;
   wechatApi: WeChatCloudApi;
@@ -212,7 +209,6 @@ export class WeSightSettingTab extends PluginSettingTab {
   override display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl('h2', { text: 'WeSight' });
     this.renderTabs(containerEl);
     const panel = containerEl.createDiv({ cls: 'wesight-settings-panel' });
     if (this.activeTab === 'general') {
@@ -255,7 +251,6 @@ export class WeSightSettingTab extends PluginSettingTab {
 
   private renderGeneral(containerEl: HTMLElement): void {
     const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
-    section.createEl('h3', { text: 'General' });
     const settings = this.deps.getSettings();
 
     new Setting(section)
@@ -278,7 +273,7 @@ export class WeSightSettingTab extends PluginSettingTab {
   private renderAgentSettings(containerEl: HTMLElement, agentId: AgentId): void {
     const descriptor = getAgentDescriptor(agentId);
     const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
-    section.createEl('h3', { text: descriptor.displayName });
+    new Setting(section).setName(descriptor.displayName).setHeading();
     const settings = this.deps.getSettings();
     const status = new RuntimeDiscovery({
       configuredPaths: settings.configuredPaths,
@@ -289,12 +284,12 @@ export class WeSightSettingTab extends PluginSettingTab {
     row.createDiv({ text: descriptor.displayName });
     row.createDiv({ text: status.found ? `${status.source}: ${status.version ?? status.binaryPath}` : 'Missing' });
     const actions = row.createDiv();
-    const install = actions.createEl('button', { text: status.found ? 'Ready' : 'Install' });
-    install.disabled = status.found;
-    install.onclick = () => {
-      new ConfirmInstallModal(this.app, status, () => {
-        void this.deps.runtimeInstaller.install(agentId).then(() => this.display());
-      }).open();
+    const setup = actions.createEl('button', {
+      text: status.found ? 'Detected' : 'Installation guide',
+    });
+    setup.disabled = status.found;
+    setup.onclick = () => {
+      window.open(descriptor.docsUrl, '_blank', 'noopener,noreferrer');
     };
 
     new Setting(section)
@@ -302,7 +297,7 @@ export class WeSightSettingTab extends PluginSettingTab {
       .addDropdown(dropdown => {
         dropdown
           .addOption('localCli', 'Local CLI')
-          .addOption('providerProfile', 'Provider Profile')
+          .addOption('providerProfile', 'Provider profile')
           .setValue(settings.configSources[agentId])
           .onChange(async value => {
             settings.configSources[agentId] = value as RuntimeConfigSource;
@@ -313,7 +308,7 @@ export class WeSightSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName('CLI path')
-      .setDesc('Optional per-device path. Empty means managed runtime and PATH detection.')
+      .setDesc('Optional per-device executable path. Empty searches the system path and compatible legacy WeSight runtime locations.')
       .addText(text => {
         text
           .setPlaceholder(descriptor.binaryName)
@@ -327,7 +322,7 @@ export class WeSightSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName('Local model')
-      .setDesc('Optional model override for Local CLI runs. Empty follows the CLI config.')
+      .setDesc('Optional model override for local CLI runs. Empty follows the CLI config.')
       .addText(text => {
         text
           .setPlaceholder('CLI default')
@@ -341,7 +336,9 @@ export class WeSightSettingTab extends PluginSettingTab {
 
   private renderProfiles(containerEl: HTMLElement, agentFilter?: AgentId): void {
     const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
-    section.createEl('h3', { text: agentFilter ? `${getAgentDescriptor(agentFilter).shortName} 模型配置` : '模型' });
+    new Setting(section)
+      .setName(agentFilter ? `${getAgentDescriptor(agentFilter).shortName} 模型配置` : '模型')
+      .setHeading();
     this.renderProviderConsole(section, agentFilter);
   }
 
@@ -359,7 +356,7 @@ export class WeSightSettingTab extends PluginSettingTab {
     const consoleEl = section.createDiv({ cls: 'wesight-provider-console' });
     const sidebar = consoleEl.createDiv({ cls: 'wesight-provider-sidebar' });
     const sidebarHead = sidebar.createDiv({ cls: 'wesight-provider-sidebar-head' });
-    sidebarHead.createEl('span', { text: '模型提供商' });
+    sidebarHead.createSpan({ text: '模型提供商' });
     const sidebarActions = sidebarHead.createDiv({ cls: 'wesight-provider-sidebar-actions' });
     const importBtn = sidebarActions.createEl('button', { text: '导入', attr: { type: 'button' } });
     importBtn.onclick = () => void this.importProviderProfiles();
@@ -394,7 +391,7 @@ export class WeSightSettingTab extends PluginSettingTab {
     titleIcon.style.setProperty('--provider-accent', preset.accent);
     const title = titleWrap.createDiv();
     const titleLine = title.createDiv({ cls: 'wesight-provider-title-line' });
-    titleLine.createEl('span', { text: `${preset.label} 提供商设置` });
+    titleLine.createSpan({ text: `${preset.label} 提供商设置` });
     if (preset.apiKeyUrl) {
       const keyLink = titleLine.createEl('a', {
         cls: 'wesight-provider-link-icon',
@@ -414,9 +411,9 @@ export class WeSightSettingTab extends PluginSettingTab {
 
     const apiKeyField = detail.createDiv({ cls: 'wesight-provider-field' });
     const apiKeyHead = apiKeyField.createDiv({ cls: 'wesight-provider-field-head' });
-    apiKeyHead.createSpan({ text: 'API Key' });
+    apiKeyHead.createSpan({ text: 'API key' });
     if (preset.apiKeyUrl) {
-      const getKey = apiKeyHead.createEl('a', { text: '获取 API Key ->', href: preset.apiKeyUrl });
+      const getKey = apiKeyHead.createEl('a', { text: '获取 API key ->', href: preset.apiKeyUrl });
       getKey.setAttr('target', '_blank');
       getKey.setAttr('rel', 'noopener');
     }
@@ -424,18 +421,18 @@ export class WeSightSettingTab extends PluginSettingTab {
     const apiKeyInput = secretWrap.createEl('input', {
       attr: {
         type: 'password',
-        placeholder: anyExistingProfile?.apiKey ? '留空则保留已保存的 API Key' : '输入你的 API Key',
+        placeholder: anyExistingProfile?.apiKey ? '留空则保留已保存的 API key' : '输入你的 API key',
       },
     });
     const reveal = secretWrap.createEl('button', {
       cls: 'wesight-provider-icon-btn',
-      attr: { type: 'button', 'aria-label': '显示 API Key' },
+      attr: { type: 'button', 'aria-label': '显示 API key' },
     });
     setIcon(reveal, 'eye-off');
     reveal.onclick = () => {
       const visible = apiKeyInput.type === 'text';
       apiKeyInput.type = visible ? 'password' : 'text';
-      reveal.setAttr('aria-label', visible ? '显示 API Key' : '隐藏 API Key');
+      reveal.setAttr('aria-label', visible ? '显示 API key' : '隐藏 API key');
       setIcon(reveal, visible ? 'eye-off' : 'eye');
     };
 
@@ -474,7 +471,7 @@ export class WeSightSettingTab extends PluginSettingTab {
           name: formatGroupName,
           value: option.value,
         },
-      }) as HTMLInputElement;
+      });
       radio.checked = format === option.value;
       radio.disabled = Boolean(agentFilter) || !preset.baseUrls[option.value];
       radio.onchange = () => {
@@ -728,10 +725,7 @@ export class WeSightSettingTab extends PluginSettingTab {
     });
     if (!importText?.trim()) return;
     try {
-      const parsed = JSON.parse(importText);
-      if (!Array.isArray(parsed)) {
-        throw new Error('导入内容必须是 JSON 数组。');
-      }
+      const parsed: unknown = JSON.parse(importText);
       const imported = this.deps.providerStore.importProfiles(parsed);
       new Notice(`已导入 ${imported.length} 个模型配置。`);
       this.display();
@@ -843,7 +837,7 @@ export class WeSightSettingTab extends PluginSettingTab {
       ? this.deps.providerStore.list().find(profile => profile.id === this.editingProfileId) ?? null
       : null;
     const form = section.createDiv({ cls: 'wesight-provider-form' });
-    form.createEl('h4', { text: editing ? 'Edit profile' : 'Add profile', cls: 'full' });
+    new Setting(form).setName(editing ? 'Edit profile' : 'Add profile').setHeading();
     const agent = form.createEl('select');
     for (const agentId of AGENT_IDS) {
       agent.createEl('option', { text: getAgentDescriptor(agentId).displayName, value: agentId });
@@ -988,10 +982,7 @@ export class WeSightSettingTab extends PluginSettingTab {
       .addButton(button => {
         button.setButtonText('Import JSON').onClick(() => {
           try {
-            const parsed = JSON.parse(importText);
-            if (!Array.isArray(parsed)) {
-              throw new Error('Profile import must be a JSON array.');
-            }
+            const parsed: unknown = JSON.parse(importText);
             const imported = this.deps.providerStore.importProfiles(parsed);
             new Notice(`Imported ${imported.length} provider profile${imported.length === 1 ? '' : 's'}.`);
             this.display();
@@ -1004,11 +995,11 @@ export class WeSightSettingTab extends PluginSettingTab {
 
   private renderEnvironment(containerEl: HTMLElement): void {
     const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
-    section.createEl('h3', { text: 'Environment' });
+    new Setting(section).setName('Environment').setHeading();
     const settings = this.deps.getSettings();
     new Setting(section)
       .setName('Shared environment variables')
-      .setDesc('KEY=value lines inherited by agent subprocesses.')
+      .setDesc('Key=value lines inherited by agent subprocesses.')
       .addTextArea(text => {
         text.inputEl.rows = 6;
         text
@@ -1034,18 +1025,18 @@ export class WeSightSettingTab extends PluginSettingTab {
 
   private renderPrivacy(containerEl: HTMLElement): void {
     const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
-    section.createEl('h3', { text: 'Privacy & Storage' });
+    new Setting(section).setName('Privacy & storage').setHeading();
     section.createEl('p', { text: `Vault conversations: ${this.app.vault.getName()}/.wesight/` });
     section.createEl('p', { text: `Global home: ${wesightHome()}` });
     section.createEl('p', { text: `Provider profiles: ${providersPath()}` });
-    section.createEl('p', { text: `Runtime installs: ${runtimeManagedDir('claude').replace(/claude$/, '<agent>')}` });
+    section.createEl('p', { text: 'Runtime executables: detected only; WeSight does not install or update them.' });
     section.createEl('p', { text: `Temporary runtime config: ${tmpDir()}` });
     section.createEl('p', { text: `Logs: ${logsDir()}` });
   }
 
   private renderDiagnostics(containerEl: HTMLElement, agentFilter?: AgentId): void {
     const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
-    section.createEl('h3', { text: 'Diagnostics' });
+    new Setting(section).setName('Diagnostics').setHeading();
     const settings = this.deps.getSettings();
     for (const agentId of agentFilter ? [agentFilter] : AGENT_IDS) {
       const status = new RuntimeDiscovery({

@@ -56,16 +56,11 @@ body.theme-light .wesight-view {
   min-width: 0;
 }
 
-.wesight-logo {
-  display: flex;
-  align-items: center;
-  color: var(--wesight-brand);
+.wesight-logo-image {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
   flex: 0 0 auto;
-}
-
-.wesight-logo svg {
-  width: 16px;
-  height: 16px;
 }
 
 .wesight-title-text {
@@ -132,6 +127,121 @@ button.wesight-toolbar-btn svg {
 
 button.wesight-header-btn.needs-setup {
   color: var(--wesight-brand);
+}
+
+.wesight-account-slot {
+  display: flex;
+  min-width: 26px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+button.wesight-login-button {
+  display: flex;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 9px;
+  border: 1px solid #d97757;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: #d97757;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1;
+}
+
+button.wesight-login-button:hover {
+  border-color: #c96548;
+  background: rgba(217, 119, 87, 0.08);
+  box-shadow: none;
+  color: #c96548;
+}
+
+button.wesight-login-button:focus-visible,
+button.wesight-account-button:focus-visible {
+  outline: 2px solid rgba(217, 119, 87, 0.42);
+  outline-offset: 2px;
+}
+
+button.wesight-account-button {
+  display: flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+}
+
+button.wesight-account-button {
+  cursor: pointer;
+}
+
+button.wesight-account-button:hover {
+  background: rgba(217, 119, 87, 0.08);
+  box-shadow: none;
+}
+
+.wesight-account-avatar {
+  display: flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 1px;
+  border: 2px solid #d97757;
+  border-radius: 50%;
+  background: var(--background-primary);
+  box-sizing: border-box;
+  flex: 0 0 auto;
+}
+
+.wesight-account-avatar-image {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.wesight-account-avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.wesight-account-avatar-fallback svg {
+  width: 14px;
+  height: 14px;
+}
+
+.wesight-account-menu-profile {
+  display: flex;
+  min-width: 156px;
+  align-items: center;
+  gap: 8px;
+}
+
+.wesight-account-menu-avatar {
+  width: 26px;
+  height: 26px;
+}
+
+.wesight-account-menu-nickname {
+  overflow: hidden;
+  color: var(--text-normal);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wesight-messages-wrapper {

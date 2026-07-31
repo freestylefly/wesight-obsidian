@@ -36,33 +36,6 @@ export interface AgentStatus {
   error: string | null;
 }
 
-export type InstallPhase =
-  | 'queued'
-  | 'starting'
-  | 'installing'
-  | 'verifying'
-  | 'success'
-  | 'error'
-  | 'unsupported'
-  | 'cancelled';
-
-export interface InstallProgress {
-  agentId: AgentId;
-  phase: InstallPhase;
-  message: string;
-  detail?: string;
-}
-
-export interface InstallResult {
-  success: boolean;
-  agentId: AgentId;
-  binaryPath?: string | null;
-  version?: string | null;
-  error?: string;
-  unsupported?: boolean;
-  cancelled?: boolean;
-}
-
 export interface ProviderProfile {
   id: string;
   agentId: AgentId;

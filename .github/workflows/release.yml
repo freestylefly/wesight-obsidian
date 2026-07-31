@@ -1,0 +1,60 @@
+name: Release Obsidian plugin
+
+on:
+  push:
+    tags:
+      - '*.*.*'
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test, lint, and build
+        run: npm run check
+
+      - name: Verify tag and manifest version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: >-
+          node --input-type=module -e
+          "import manifest from './manifest.json' with { type: 'json' };
+          if (manifest.version !== process.env.RELEASE_TAG)
+          throw new Error('Tag must match manifest version');"
+
+      - name: Verify release assets
+        run: test -s main.js && test -s manifest.json && test -s styles.css
+
+      - name: Generate artifact attestation
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Initial WeSight release for the Obsidian Community Plugins directory." \
+            main.js manifest.json styles.css

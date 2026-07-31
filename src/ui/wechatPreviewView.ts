@@ -33,6 +33,7 @@ import type {
   WeChatDraftState,
   WeChatPreviewSnapshot,
 } from '../wechat/types';
+import { recordValue } from '../utils/records';
 import { confirmShareAction } from './shareConfirm';
 
 export const WESIGHT_WECHAT_PREVIEW_VIEW_TYPE = 'wesight-wechat-preview';
@@ -104,7 +105,7 @@ export class WeChatPreviewView extends ItemView {
   override async onClose(): Promise<void> {
     if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
-    this.temporaryCover = null;
+    this.clearTemporaryCover();
   }
 
   override getState(): Record<string, unknown> {
@@ -125,7 +126,7 @@ export class WeChatPreviewView extends ItemView {
   async setFile(file: TFile): Promise<void> {
     if (this.file?.path === file.path && this.snapshot) return;
     this.file = file;
-    this.temporaryCover = null;
+    this.clearTemporaryCover();
     this.acknowledgedWarnings = false;
     await this.leaf.setViewState({
       type: WESIGHT_WECHAT_PREVIEW_VIEW_TYPE,
@@ -533,7 +534,7 @@ export class WeChatPreviewView extends ItemView {
 
   private async writePublishState(draft: WeChatDraftState): Promise<void> {
     if (!this.file) return;
-    await this.app.fileManager.processFrontMatter(this.file, (frontmatter) => {
+    await this.app.fileManager.processFrontMatter(this.file, (frontmatter: Record<string, unknown>) => {
       frontmatter[WECHAT_DRAFT_ID_FRONTMATTER_KEY] = draft.id;
       frontmatter[WECHAT_CONTENT_HASH_FRONTMATTER_KEY] = draft.contentHash;
       frontmatter[WECHAT_PUBLISHED_AT_FRONTMATTER_KEY] = draft.updatedAt;
@@ -543,9 +544,10 @@ export class WeChatPreviewView extends ItemView {
   private findDuplicatePath(draftId: string): string | null {
     for (const candidate of this.app.vault.getMarkdownFiles()) {
       if (candidate.path === this.file?.path) continue;
-      const value = this.app.metadataCache
-        .getFileCache(candidate)
-        ?.frontmatter?.[WECHAT_DRAFT_ID_FRONTMATTER_KEY];
+      const value = recordValue(
+        this.app.metadataCache.getFileCache(candidate)?.frontmatter,
+        WECHAT_DRAFT_ID_FRONTMATTER_KEY,
+      );
       if (value === draftId) return candidate.path;
     }
     return null;
@@ -569,16 +571,14 @@ export class WeChatPreviewView extends ItemView {
   }
 
   private chooseTemporaryCover(): void {
-    const input = document.createElement('input');
+    const input = createEl('input');
     input.type = 'file';
     input.accept = 'image/png,image/jpeg,image/gif,image/webp';
     input.onchange = () => {
       const file = input.files?.[0];
       if (!file) return;
       void file.arrayBuffer().then((body) => {
-        if (this.temporaryCover?.previewUrl.startsWith('blob:')) {
-          URL.revokeObjectURL(this.temporaryCover.previewUrl);
-        }
+        this.clearTemporaryCover();
         this.temporaryCover = {
           token: '',
           source: file.name,
@@ -592,5 +592,12 @@ export class WeChatPreviewView extends ItemView {
       });
     };
     input.click();
+  }
+
+  private clearTemporaryCover(): void {
+    if (this.temporaryCover?.previewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(this.temporaryCover.previewUrl);
+    }
+    this.temporaryCover = null;
   }
 }

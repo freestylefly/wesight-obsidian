@@ -26,7 +26,7 @@ describe('provider projection', () => {
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wesight-projection-'));
-    env = { WESIGHT_HOME: tempDir } as NodeJS.ProcessEnv;
+    env = { WESIGHT_HOME: tempDir };
   });
 
   afterEach(() => {

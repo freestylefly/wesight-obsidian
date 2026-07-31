@@ -1,13 +1,15 @@
-import { Editor, ItemView, MarkdownView, Notice, setIcon, TFile, WorkspaceLeaf } from 'obsidian';
+import { Editor, ItemView, MarkdownView, Menu, Notice, setIcon, TFile, WorkspaceLeaf } from 'obsidian';
 
 import { AGENT_IDS, getAgentDescriptor } from '../agents';
+import wesightLogo from '../../assets/wesight-logo.png';
+import type { CloudAuthService } from '../share/cloudAuth';
+import type { CloudUser } from '../share/types';
 import { ProviderStore } from '../storage/providerStore';
 import { VaultStore } from '../storage/vaultStore';
 import type {
   AgentId,
   ChatMessage,
   FileAttachment,
-  InstallProgress,
   ProviderProfile,
   RuntimeConfigSource,
   RuntimeTurnEvent,
@@ -19,10 +21,9 @@ import { resolveMentions, findMentionQuery, findSlashQuery } from '../utils/cont
 import { filterSlashCommands } from '../utils/slashCommands';
 import { getVaultBasePath, resolveVaultAbsolutePath, guessMimeType } from '../utils/vault';
 import { RuntimeDiscovery } from '../runtime/discovery';
-import { RuntimeInstaller } from '../runtime/installer';
 import { RuntimeManager } from '../runtime/runtimeManager';
 import { getClaudeDetectedLocalModel, listLocalModels } from '../runtime/localModels';
-import { ConfirmInstallModal } from './confirmInstallModal';
+import { RuntimeSetupModal } from './runtimeSetupModal';
 
 export const WESIGHT_VIEW_TYPE = 'wesight-chat-view';
 
@@ -31,8 +32,8 @@ export interface ChatViewDeps {
   saveSettings: () => Promise<void>;
   providerStore: ProviderStore;
   vaultStore: VaultStore;
-  runtimeInstaller: RuntimeInstaller;
   runtimeManager: RuntimeManager;
+  auth: CloudAuthService;
   openSettings: () => void;
 }
 
@@ -52,6 +53,7 @@ export class WeSightChatView extends ItemView {
   private messagesEl!: HTMLElement;
   private inputEl!: HTMLTextAreaElement;
   private statusEl!: HTMLElement;
+  private accountSlotEl!: HTMLElement;
   private setupButtonEl!: HTMLButtonElement;
   private sendButtonEl!: HTMLButtonElement;
   private stopButtonEl!: HTMLButtonElement;
@@ -66,8 +68,10 @@ export class WeSightChatView extends ItemView {
   private dismissedContextSignature: string | null = null;
   private configSubmenuEl: HTMLElement | null = null;
   private modelSubmenuEl: HTMLElement | null = null;
-  private submenuHideTimeout: NodeJS.Timeout | null = null;
+  private submenuHideTimeout: number | null = null;
   private scrollScheduled = false;
+  private authUnsubscribe: (() => void) | null = null;
+  private accountMenu: Menu | null = null;
 
   constructor(leaf: WorkspaceLeaf, private readonly deps: ChatViewDeps) {
     super(leaf);
@@ -100,16 +104,28 @@ export class WeSightChatView extends ItemView {
       this.registerEditorContextTracking();
       this.contextTrackingRegistered = true;
     }
+    if (!this.authUnsubscribe) {
+      this.authUnsubscribe = this.deps.auth.onChange(() => {
+        this.accountMenu?.hide();
+        this.accountMenu = null;
+        this.renderAccountControl();
+      });
+    }
     this.updateEditorContextFromWorkspace();
     this.render();
     this.ensureConversation();
     this.renderMessages();
     this.refreshStatus();
+    void this.restoreAuthSession();
   }
 
   override async onClose(): Promise<void> {
     // Submenus live on document.body, so they outlive contentEl unless removed here.
     this.hideConfigSubmenu();
+    this.accountMenu?.hide();
+    this.accountMenu = null;
+    this.authUnsubscribe?.();
+    this.authUnsubscribe = null;
   }
 
   private closeAllDropdowns(): void {
@@ -279,16 +295,6 @@ export class WeSightChatView extends ItemView {
     };
   }
 
-  handleInstallProgress(progress: InstallProgress): void {
-    if (progress.agentId !== this.agentId) return;
-    this.statusEl.setText(progress.message);
-    this.statusEl.toggleClass('is-error', progress.phase === 'error');
-    this.statusEl.toggleClass('is-ready', progress.phase === 'success');
-    if (progress.phase === 'success') {
-      this.refreshStatus();
-    }
-  }
-
   private render(): void {
     this.hideConfigSubmenu();
     this.hideModelSubmenu();
@@ -301,8 +307,14 @@ export class WeSightChatView extends ItemView {
 
     const header = root.createDiv({ cls: 'wesight-header' });
     const brand = header.createDiv({ cls: 'wesight-title-slot' });
-    const logo = brand.createSpan({ cls: 'wesight-logo' });
-    setIcon(logo, 'sparkles');
+    brand.createEl('img', {
+      cls: 'wesight-logo-image',
+      attr: {
+        src: wesightLogo,
+        alt: '',
+        'aria-hidden': 'true',
+      },
+    });
     brand.createEl('h4', { text: 'WeSight', cls: 'wesight-title-text' });
 
     const headerActions = header.createDiv({ cls: 'wesight-header-actions' });
@@ -314,14 +326,17 @@ export class WeSightChatView extends ItemView {
     newChatButton.onclick = () => void this.startNewConversation();
 
     this.setupButtonEl = headerActions.createEl('button', { cls: 'clickable-icon wesight-header-btn' });
-    setIcon(this.setupButtonEl, 'download');
-    this.setupButtonEl.ariaLabel = 'Install current agent';
-    this.setupButtonEl.onclick = () => this.confirmInstall();
+    setIcon(this.setupButtonEl, 'circle-help');
+    this.setupButtonEl.ariaLabel = 'Set up current agent';
+    this.setupButtonEl.onclick = () => this.openRuntimeSetup();
 
     const settingsButton = headerActions.createEl('button', { cls: 'clickable-icon wesight-header-btn' });
     setIcon(settingsButton, 'settings');
     settingsButton.ariaLabel = 'Open WeSight settings';
     settingsButton.onclick = this.deps.openSettings;
+
+    this.accountSlotEl = headerActions.createDiv({ cls: 'wesight-account-slot' });
+    this.renderAccountControl();
 
     const messagesWrapper = root.createDiv({ cls: 'wesight-messages-wrapper' });
     this.messagesEl = messagesWrapper.createDiv({ cls: 'wesight-chat-log' });
@@ -385,6 +400,107 @@ export class WeSightChatView extends ItemView {
     setIcon(this.sendButtonEl, 'arrow-up');
     this.sendButtonEl.ariaLabel = 'Send message';
     this.sendButtonEl.onclick = () => void this.sendMessage();
+  }
+
+  private async restoreAuthSession(): Promise<void> {
+    await this.deps.auth.restoreSession();
+    this.renderAccountControl();
+  }
+
+  private renderAccountControl(): void {
+    if (!this.accountSlotEl) return;
+    this.accountSlotEl.empty();
+    const user = this.deps.auth.getCurrentUser();
+
+    if (!user) {
+      const login = this.accountSlotEl.createEl('button', {
+        cls: 'wesight-login-button',
+        text: '登录',
+        attr: {
+          type: 'button',
+          'aria-label': '登录 WeSight',
+        },
+      });
+      login.onclick = () => this.deps.auth.startLogin();
+      return;
+    }
+
+    const account = this.accountSlotEl.createEl('button', {
+      cls: 'clickable-icon wesight-account-button',
+      attr: {
+        type: 'button',
+        'aria-label': `${user.nickname}，打开账户菜单`,
+        title: user.nickname,
+        'aria-haspopup': 'menu',
+      },
+    });
+    const avatar = account.createSpan({ cls: 'wesight-account-avatar' });
+    this.renderUserAvatar(avatar, user);
+    account.onclick = (event) => {
+      event.stopPropagation();
+      this.openAccountMenu(account, user);
+    };
+  }
+
+  private renderUserAvatar(parent: HTMLElement, user: CloudUser): void {
+    parent.empty();
+    const renderFallback = () => {
+      parent.empty();
+      const icon = parent.createSpan({ cls: 'wesight-account-avatar-fallback' });
+      setIcon(icon, 'user-round');
+    };
+    if (!user.avatarUrl) {
+      renderFallback();
+      return;
+    }
+    const image = parent.createEl('img', {
+      cls: 'wesight-account-avatar-image',
+      attr: {
+        src: user.avatarUrl,
+        alt: '',
+      },
+    });
+    image.decoding = 'async';
+    image.referrerPolicy = 'no-referrer';
+    image.onerror = renderFallback;
+  }
+
+  private openAccountMenu(anchor: HTMLElement, user: CloudUser): void {
+    this.accountMenu?.hide();
+    const menu = new Menu();
+    const profile = createFragment();
+    const profileRow = createDiv();
+    profileRow.className = 'wesight-account-menu-profile';
+    const avatar = createSpan();
+    avatar.className = 'wesight-account-avatar wesight-account-menu-avatar';
+    this.renderUserAvatar(avatar, user);
+    const nickname = createSpan();
+    nickname.className = 'wesight-account-menu-nickname';
+    nickname.textContent = user.nickname;
+    profileRow.append(avatar, nickname);
+    profile.append(profileRow);
+    menu.addItem(item => item
+      .setTitle(profile)
+      .setIsLabel(true));
+    menu.addSeparator();
+    menu.addItem(item => item
+      .setTitle('退出登录')
+      .setIcon('log-out')
+      .onClick(() => {
+        this.deps.auth.clearSession();
+        new Notice('已退出 WeSight。');
+      }));
+    menu.onHide(() => {
+      if (this.accountMenu === menu) this.accountMenu = null;
+    });
+    const bounds = anchor.getBoundingClientRect();
+    const accountMenuWidth = 96;
+    menu.showAtPosition({
+      x: Math.max(8, bounds.right - accountMenuWidth),
+      y: bounds.bottom + 4,
+      width: accountMenuWidth,
+    });
+    this.accountMenu = menu;
   }
 
   private setupDropdown(selector: HTMLElement, button: HTMLElement): void {
@@ -477,7 +593,7 @@ export class WeSightChatView extends ItemView {
 
   private showConfigSubmenu(agentId: AgentId, triggerEl: HTMLElement): void {
     if (this.submenuHideTimeout) {
-      clearTimeout(this.submenuHideTimeout);
+      window.clearTimeout(this.submenuHideTimeout);
       this.submenuHideTimeout = null;
     }
 
@@ -486,7 +602,7 @@ export class WeSightChatView extends ItemView {
     const settings = this.deps.getSettings();
     const currentSource = settings.configSources[agentId];
 
-    const submenu = document.createElement('div');
+    const submenu = createDiv();
     submenu.className = 'wesight-config-submenu';
 
     submenu.createDiv({ cls: 'wesight-model-group', text: '配置来源' });
@@ -529,12 +645,12 @@ export class WeSightChatView extends ItemView {
 
     submenu.style.top = `${top}px`;
     submenu.style.left = `${left}px`;
-    submenu.style.zIndex = 'var(--layer-modal, 10000)';
+    submenu.setCssProps({ zIndex: 'var(--layer-modal, 10000)' });
     submenu.addClass('is-open');
 
     submenu.addEventListener('mouseenter', () => {
       if (this.submenuHideTimeout) {
-        clearTimeout(this.submenuHideTimeout);
+        window.clearTimeout(this.submenuHideTimeout);
         this.submenuHideTimeout = null;
       }
     });
@@ -603,13 +719,13 @@ export class WeSightChatView extends ItemView {
     }>;
   }): void {
     if (this.submenuHideTimeout) {
-      clearTimeout(this.submenuHideTimeout);
+      window.clearTimeout(this.submenuHideTimeout);
       this.submenuHideTimeout = null;
     }
 
     this.hideModelSubmenu();
 
-    const submenu = document.createElement('div');
+    const submenu = createDiv();
     submenu.className = 'wesight-model-submenu';
     submenu.createDiv({ cls: 'wesight-model-group', text: options.title });
     if (options.items.length === 0) {
@@ -660,12 +776,12 @@ export class WeSightChatView extends ItemView {
 
     submenu.style.top = `${top}px`;
     submenu.style.left = `${left}px`;
-    submenu.style.zIndex = 'var(--layer-modal, 10001)';
+    submenu.setCssProps({ zIndex: 'var(--layer-modal, 10001)' });
     submenu.addClass('is-open');
 
     submenu.addEventListener('mouseenter', () => {
       if (this.submenuHideTimeout) {
-        clearTimeout(this.submenuHideTimeout);
+        window.clearTimeout(this.submenuHideTimeout);
         this.submenuHideTimeout = null;
       }
     });
@@ -686,16 +802,16 @@ export class WeSightChatView extends ItemView {
 
   private scheduleHideSubmenu(): void {
     if (this.submenuHideTimeout) {
-      clearTimeout(this.submenuHideTimeout);
+      window.clearTimeout(this.submenuHideTimeout);
     }
-    this.submenuHideTimeout = setTimeout(() => {
+    this.submenuHideTimeout = window.setTimeout(() => {
       this.hideConfigSubmenu();
     }, 200);
   }
 
   private hideConfigSubmenu(): void {
     if (this.submenuHideTimeout) {
-      clearTimeout(this.submenuHideTimeout);
+      window.clearTimeout(this.submenuHideTimeout);
       this.submenuHideTimeout = null;
     }
     this.hideModelSubmenu();
@@ -729,7 +845,7 @@ export class WeSightChatView extends ItemView {
       configSources: settings.configSources,
     }).resolve(agentId);
     if (!status.found) {
-      this.confirmInstall();
+      this.openRuntimeSetup();
     }
   }
 
@@ -1131,7 +1247,7 @@ export class WeSightChatView extends ItemView {
   private scheduleScrollToBottom(): void {
     if (this.scrollScheduled) return;
     this.scrollScheduled = true;
-    requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
       this.scrollScheduled = false;
       if (this.messagesEl) {
         this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
@@ -1151,7 +1267,7 @@ export class WeSightChatView extends ItemView {
     this.renderMessages();
     this.refreshStatus();
     if (promptInstallIfMissing) {
-      this.confirmInstall();
+      this.openRuntimeSetup();
     }
   }
 
@@ -1166,7 +1282,7 @@ export class WeSightChatView extends ItemView {
       configSources: this.deps.getSettings().configSources,
     }).resolve(this.agentId);
     if (!status.found) {
-      this.confirmInstall();
+      this.openRuntimeSetup();
     }
   }
 
@@ -1187,7 +1303,7 @@ export class WeSightChatView extends ItemView {
       configSources: this.deps.getSettings().configSources,
     }).resolve(this.agentId);
     if (!status.found) {
-      this.confirmInstall();
+      this.openRuntimeSetup();
     }
   }
 
@@ -1361,7 +1477,7 @@ export class WeSightChatView extends ItemView {
     return { prompt: lines.join('\n'), attachments };
   }
 
-  private confirmInstall(): void {
+  private openRuntimeSetup(): void {
     const settings = this.deps.getSettings();
     const status = new RuntimeDiscovery({
       configuredPaths: settings.configuredPaths,
@@ -1371,13 +1487,7 @@ export class WeSightChatView extends ItemView {
       new Notice(`${status.descriptor.displayName} is already available.`);
       return;
     }
-    new ConfirmInstallModal(this.app, status, () => {
-      void this.deps.runtimeInstaller.install(this.agentId).then(result => {
-        if (!result.success && result.error) {
-          new Notice(result.error);
-        }
-      });
-    }).open();
+    new RuntimeSetupModal(this.app, status, this.deps.openSettings).open();
   }
 }
 

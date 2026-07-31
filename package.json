@@ -2,12 +2,15 @@
   "name": "wesight-obsidian",
   "version": "0.1.0",
   "description": "WeSight Obsidian plugin for local agent runtimes.",
+  "type": "module",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs --watch",
     "build": "tsc --noEmit && node esbuild.config.mjs production",
-    "lint": "eslint \"{src,tests}/**/*.ts\"",
-    "test": "vitest run"
+    "check": "npm test && npm run lint && npm run build && npm run verify:release",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "verify:release": "node scripts/verify-release.mjs"
   },
   "keywords": [
     "obsidian",
@@ -23,8 +26,9 @@
     "@eslint/js": "^9.39.1",
     "@types/node": "^24.10.1",
     "@types/qrcode": "^1.5.6",
-    "esbuild": "^0.27.0",
+    "esbuild": "^0.28.1",
     "eslint": "^9.39.1",
+    "eslint-plugin-obsidianmd": "^0.4.1",
     "obsidian": "^1.8.7",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.48.0",

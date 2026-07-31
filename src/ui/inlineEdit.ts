@@ -94,7 +94,7 @@ class InlineEditModal extends Modal {
   override onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl('h2', { text: 'Review WeSight Edit' });
+    contentEl.createEl('h2', { text: 'Review WeSight edit' });
     const diff = contentEl.createDiv({ cls: 'wesight-modal-diff' });
     const left = diff.createDiv();
     left.createEl('strong', { text: 'Original' });

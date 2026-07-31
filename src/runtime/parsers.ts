@@ -124,7 +124,7 @@ export function parseOpenCodeStreamLine(line: string): RuntimeTurnEvent[] {
 
 export function parseJson(line: string): Record<string, unknown> | null {
   try {
-    const parsed = JSON.parse(line);
+    const parsed: unknown = JSON.parse(line);
     return isRecord(parsed) ? parsed : null;
   } catch {
     return null;

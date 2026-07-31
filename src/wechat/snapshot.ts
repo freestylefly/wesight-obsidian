@@ -167,9 +167,7 @@ function hashSnapshot(snapshot: Omit<WeChatPreviewSnapshot, 'contentHash'>): str
 
 export async function buildWeChatSnapshot(app: App, file: TFile): Promise<WeChatPreviewSnapshot> {
   const share = await buildShareSnapshot(app, file);
-  const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter as
-    | Record<string, unknown>
-    | undefined;
+  const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
   const warnings: WeChatWarning[] = share.warnings.map((message) => ({
     code: message.includes('Mermaid') ? 'mermaid' : 'embed',
     message,

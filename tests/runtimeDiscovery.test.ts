@@ -24,7 +24,7 @@ describe('RuntimeDiscovery', () => {
     const configured = path.join(tempDir, 'custom-claude');
     makeExecutable(configured, '#!/bin/sh\necho claude 1.0\n');
     const discovery = new RuntimeDiscovery({
-      env: { WESIGHT_HOME: tempDir, PATH: '' } as NodeJS.ProcessEnv,
+      env: { WESIGHT_HOME: tempDir, PATH: '' },
       configuredPaths: { claude: configured },
     });
     const status = discovery.resolve('claude');
@@ -39,7 +39,7 @@ describe('RuntimeDiscovery', () => {
     makeExecutable(managed);
     makeExecutable(pathBin);
     const discovery = new RuntimeDiscovery({
-      env: { WESIGHT_HOME: tempDir, PATH: path.dirname(pathBin) } as NodeJS.ProcessEnv,
+      env: { WESIGHT_HOME: tempDir, PATH: path.dirname(pathBin) },
     });
     const status = discovery.resolve('codex');
     expect(status.source).toBe('managed');
@@ -48,7 +48,7 @@ describe('RuntimeDiscovery', () => {
 
   test('reports missing without installing', () => {
     const discovery = new RuntimeDiscovery({
-      env: { WESIGHT_HOME: tempDir, PATH: '' } as NodeJS.ProcessEnv,
+      env: { WESIGHT_HOME: tempDir, PATH: '' },
     });
     const status = discovery.resolve('opencode');
     expect(status.found).toBe(false);

@@ -1,9 +1,11 @@
 import fs from 'fs';
+import type { SecretStorage } from 'obsidian';
 
 import { providersPath } from '../paths';
 import type { AgentId, ExportedProviderProfile, ProviderProfile, ProviderWireApi } from '../types';
 import { createId } from '../utils/id';
 import { readJsonFile, writeJsonFile } from '../utils/fs';
+import { recordFromUnknown } from '../utils/records';
 
 interface ProviderStoreFile {
   version: 1;
@@ -83,7 +85,10 @@ export class ProviderStore {
   // disk synchronously, so cache the parsed file keyed on its stat signature.
   private readCache: ProviderReadCache | null = null;
 
-  constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
+  constructor(
+    private readonly secrets: Pick<SecretStorage, 'getSecret' | 'setSecret'>,
+    private readonly env: NodeJS.ProcessEnv = process.env,
+  ) {}
 
   get path(): string {
     return providersPath(this.env);
@@ -111,7 +116,7 @@ export class ProviderStore {
       id: input.id?.trim() || createId('profile'),
       agentId: input.agentId,
       name: input.name.trim(),
-      apiKey: input.apiKey ?? '',
+      apiKey: input.apiKey ?? (input.id ? this.readApiKey(input.id) : ''),
       baseUrl: input.baseUrl ?? '',
       model: defaultModel,
       defaultModel,
@@ -156,6 +161,7 @@ export class ProviderStore {
     const index = store.profiles.findIndex(profile => profile.id === id);
     if (index < 0) return null;
     const [removed] = store.profiles.splice(index, 1);
+    this.secrets.setSecret(this.apiKeySecretId(removed.id), '');
     const siblings = store.profiles.filter(profile => profile.agentId === removed.agentId);
     if (removed.isDefault && siblings.length > 0 && !siblings.some(profile => profile.isDefault)) {
       siblings[0].isDefault = true;
@@ -217,20 +223,42 @@ export class ProviderStore {
     });
   }
 
-  importProfiles(profiles: ExportedProviderProfile[]): ProviderProfile[] {
+  importProfiles(value: unknown): ProviderProfile[] {
+    if (!Array.isArray(value)) {
+      throw new Error('Provider profile import must be a JSON array.');
+    }
     const imported: ProviderProfile[] = [];
-    for (const profile of profiles) {
+    for (const [index, valueEntry] of value.entries()) {
+      const profile = recordFromUnknown(valueEntry);
+      if (!profile) {
+        throw new Error(`Provider profile ${index + 1} must be a JSON object.`);
+      }
+      const agentId = profile.agentId;
+      if (agentId !== 'claude' && agentId !== 'codex' && agentId !== 'opencode') {
+        throw new Error(`Provider profile ${index + 1} has an invalid agentId.`);
+      }
+      if (typeof profile.name !== 'string' || !profile.name.trim()) {
+        throw new Error(`Provider profile ${index + 1} requires a name.`);
+      }
+      const wireApi = profile.wireApi === 'responses' || profile.wireApi === 'chat'
+        ? profile.wireApi
+        : undefined;
+      const models = Array.isArray(profile.models)
+        ? profile.models.filter((model): model is string => typeof model === 'string')
+        : undefined;
       imported.push(this.save({
-        agentId: profile.agentId,
-        id: profile.id,
+        agentId,
+        id: typeof profile.id === 'string' ? profile.id : undefined,
         name: profile.name,
-        apiKey: profile.apiKeyRedacted ? '' : profile.apiKey ?? '',
-        baseUrl: profile.baseUrl,
-        model: profile.model,
-        defaultModel: profile.defaultModel,
-        models: profile.models,
-        wireApi: profile.wireApi,
-        isDefault: profile.isDefault,
+        apiKey: profile.apiKeyRedacted === true
+          ? ''
+          : typeof profile.apiKey === 'string' ? profile.apiKey : '',
+        baseUrl: typeof profile.baseUrl === 'string' ? profile.baseUrl : '',
+        model: typeof profile.model === 'string' ? profile.model : '',
+        defaultModel: typeof profile.defaultModel === 'string' ? profile.defaultModel : '',
+        models,
+        wireApi,
+        isDefault: profile.isDefault === true,
       }));
     }
     return imported;
@@ -246,13 +274,40 @@ export class ProviderStore {
       return { version: 1, profiles: this.readCache.profiles.map(cloneProfile) };
     }
     const store = readJsonFile<ProviderStoreFile>(this.path, EMPTY_STORE);
-    const profiles = Array.isArray(store.profiles) ? store.profiles.map(normalizeProfile) : [];
+    let containsLegacySecrets = false;
+    const profiles = Array.isArray(store.profiles)
+      ? store.profiles.map((stored) => {
+        const profile = normalizeProfile(stored);
+        const existingSecret = this.readApiKey(profile.id);
+        if (profile.apiKey) {
+          containsLegacySecrets = true;
+          if (!existingSecret) {
+            this.secrets.setSecret(this.apiKeySecretId(profile.id), profile.apiKey);
+          }
+        }
+        return {
+          ...profile,
+          apiKey: existingSecret || profile.apiKey,
+        };
+      })
+      : [];
+    if (containsLegacySecrets) {
+      this.write({ version: 1, profiles });
+      return { version: 1, profiles: profiles.map(cloneProfile) };
+    }
     this.readCache = { mtimeMs: stat.mtimeMs, size: stat.size, profiles: profiles.map(cloneProfile) };
     return { version: 1, profiles };
   }
 
   private write(store: ProviderStoreFile): void {
-    writeJsonFile(this.path, store, 0o600);
+    for (const profile of store.profiles) {
+      this.secrets.setSecret(this.apiKeySecretId(profile.id), profile.apiKey);
+    }
+    const diskStore: ProviderStoreFile = {
+      version: 1,
+      profiles: store.profiles.map((profile) => ({ ...profile, apiKey: '' })),
+    };
+    writeJsonFile(this.path, diskStore, 0o600);
     try {
       fs.chmodSync(this.path, 0o600);
     } catch {
@@ -270,5 +325,13 @@ export class ProviderStore {
     } catch {
       return null;
     }
+  }
+
+  private apiKeySecretId(profileId: string): string {
+    return `wesight-provider-api-key:${profileId}`;
+  }
+
+  private readApiKey(profileId: string): string {
+    return this.secrets.getSecret(this.apiKeySecretId(profileId))?.trim() || '';
   }
 }

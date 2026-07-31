@@ -1,9 +1,8 @@
-import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf } from 'obsidian';
+import { type App, MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf } from 'obsidian';
 
 import { DEFAULT_SETTINGS, type WeSightObsidianSettings } from './types';
 import { ProviderStore } from './storage/providerStore';
 import { VaultStore } from './storage/vaultStore';
-import { RuntimeInstaller } from './runtime/installer';
 import { RuntimeManager } from './runtime/runtimeManager';
 import { runInlineEdit } from './ui/inlineEdit';
 import { WeSightChatView, WESIGHT_VIEW_TYPE } from './ui/chatView';
@@ -18,11 +17,17 @@ import {
   WESIGHT_WECHAT_PREVIEW_VIEW_TYPE,
 } from './ui/wechatPreviewView';
 
+interface AppWithSettings extends App {
+  setting?: {
+    open(): void;
+    openTabById(id: string): void;
+  };
+}
+
 export default class WeSightPlugin extends Plugin {
   settings!: WeSightObsidianSettings;
   providerStore!: ProviderStore;
   vaultStore!: VaultStore;
-  runtimeInstaller!: RuntimeInstaller;
   runtimeManager!: RuntimeManager;
   cloudAuth!: CloudAuthService;
   shareCloudApi!: ShareCloudApi;
@@ -35,9 +40,8 @@ export default class WeSightPlugin extends Plugin {
 
   override async onload(): Promise<void> {
     await this.loadSettings();
-    this.providerStore = new ProviderStore();
+    this.providerStore = new ProviderStore(this.app.secretStorage);
     this.vaultStore = new VaultStore(this.app.vault.adapter);
-    this.runtimeInstaller = new RuntimeInstaller();
     this.runtimeManager = new RuntimeManager(this.providerStore, () => this.settings);
     this.cloudAuth = new CloudAuthService(this.app);
     this.shareCloudApi = new ShareCloudApi(this.cloudAuth);
@@ -66,8 +70,8 @@ export default class WeSightPlugin extends Plugin {
         saveSettings: () => this.saveSettings(),
         providerStore: this.providerStore,
         vaultStore: this.vaultStore,
-        runtimeInstaller: this.runtimeInstaller,
         runtimeManager: this.runtimeManager,
+        auth: this.cloudAuth,
         openSettings: () => this.openSettings(),
       }),
     );
@@ -80,16 +84,13 @@ export default class WeSightPlugin extends Plugin {
       }),
     );
 
-    this.registerInstallerProgress();
-
     this.addRibbonIcon('sparkles', 'Open WeSight', () => {
       void this.activateView();
     });
 
     this.addCommand({
-      id: 'open-wesight-chat',
-      name: 'Open WeSight chat',
-      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'w' }],
+      id: 'open-chat',
+      name: 'Open chat',
       callback: () => void this.activateView(),
     });
 
@@ -113,17 +114,16 @@ export default class WeSightPlugin extends Plugin {
     }));
 
     this.addCommand({
-      id: 'wesight-inline-edit',
-      name: 'Inline edit with WeSight',
-      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'e' }],
+      id: 'inline-edit',
+      name: 'Inline edit',
       editorCallback: () => {
         void runInlineEdit(this, this.runtimeManager, () => this.settings);
       },
     });
 
     this.addCommand({
-      id: 'wesight-stop-agent',
-      name: 'Stop active WeSight agent',
+      id: 'stop-agent',
+      name: 'Stop active agent',
       callback: () => {
         this.runtimeManager.cancel();
         new Notice('WeSight stop signal sent.');
@@ -163,7 +163,6 @@ export default class WeSightPlugin extends Plugin {
       getSettings: () => this.settings,
       saveSettings: () => this.saveSettings(),
       providerStore: this.providerStore,
-      runtimeInstaller: this.runtimeInstaller,
       refreshViews: () => this.refreshViews(),
       cloudAuth: this.cloudAuth,
       wechatApi: this.wechatCloudApi,
@@ -173,6 +172,8 @@ export default class WeSightPlugin extends Plugin {
 
   override onunload(): void {
     this.sharePopover?.close();
+    this.runtimeManager?.cancel();
+    this.larkCli?.cancelActiveOperation();
     for (const element of this.shareActionElements) element.remove();
     this.shareActionElements.clear();
   }
@@ -180,7 +181,7 @@ export default class WeSightPlugin extends Plugin {
   async activateView(): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(WESIGHT_VIEW_TYPE)[0];
     if (existing) {
-      this.app.workspace.revealLeaf(existing);
+      await this.app.workspace.revealLeaf(existing);
       return;
     }
     const leaf = this.app.workspace.getRightLeaf(false);
@@ -189,7 +190,7 @@ export default class WeSightPlugin extends Plugin {
       active: true,
     });
     if (leaf) {
-      this.app.workspace.revealLeaf(leaf);
+      await this.app.workspace.revealLeaf(leaf);
     }
   }
 
@@ -211,7 +212,7 @@ export default class WeSightPlugin extends Plugin {
     if (leaf.view instanceof WeChatPreviewView) {
       await leaf.view.setFile(file);
     }
-    this.app.workspace.revealLeaf(leaf);
+    await this.app.workspace.revealLeaf(leaf);
   }
 
   async loadSettings(): Promise<void> {
@@ -224,24 +225,6 @@ export default class WeSightPlugin extends Plugin {
     this.refreshViews();
   }
 
-  private registerInstallerProgress(): void {
-    const unsubscribe = this.runtimeInstaller.onProgress(progress => {
-      for (const leaf of this.app.workspace.getLeavesOfType(WESIGHT_VIEW_TYPE)) {
-        const view = leaf.view;
-        if (view instanceof WeSightChatView) {
-          view.handleInstallProgress(progress);
-        }
-      }
-      if (progress.phase === 'error' || progress.phase === 'unsupported') {
-        new Notice(progress.message);
-      }
-      if (progress.phase === 'success') {
-        new Notice(progress.message);
-      }
-    });
-    this.register(unsubscribe);
-  }
-
   private refreshViews(): void {
     for (const leaf of this.app.workspace.getLeavesOfType(WESIGHT_VIEW_TYPE)) {
       const view = leaf.view;
@@ -252,13 +235,13 @@ export default class WeSightPlugin extends Plugin {
   }
 
   private openSettings(tab?: 'general'): void {
-    const setting = (this.app as any).setting;
-    if (setting?.open && setting?.openTabById) {
+    const setting = (this.app as AppWithSettings).setting;
+    if (setting) {
       setting.open();
       setting.openTabById(this.manifest.id);
       if (tab) this.settingTab?.openTab(tab);
     } else {
-      new Notice('Open Settings and choose WeSight.');
+      new Notice('Open settings and choose WeSight.');
     }
   }
 
