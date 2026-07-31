@@ -54,6 +54,68 @@ function buildHeaders(apiKey: string, agentId: AgentId): Record<string, string> 
   return { Authorization: `Bearer ${apiKey}` };
 }
 
+export type ProviderModelSource = 'primary' | 'fallback' | 'preset';
+
+export interface ResolveProviderModelsOptions {
+  primary: { agentId: AgentId; baseUrl: string; apiKey: string };
+  /**
+   * A second endpoint to try when the primary one has no model-list route.
+   * Anthropic-compatible gateways (a provider's `/anthropic` endpoint) usually
+   * omit `GET /models`, but the same provider's OpenAI-compatible endpoint has
+   * it, so we can still discover the model ids from there.
+   */
+  fallback?: { agentId: AgentId; baseUrl: string; apiKey: string };
+  /** Built-in model ids to use when neither endpoint returns a list. */
+  presetModelIds?: string[];
+  /** Injectable for testing; defaults to {@link fetchProviderModels}. */
+  fetcher?: (options: { agentId: AgentId; baseUrl: string; apiKey: string }) => Promise<string[]>;
+}
+
+/**
+ * Resolves a provider's model ids without hard-failing when the configured
+ * endpoint does not expose a model list. Tries the primary endpoint, then an
+ * optional compatible endpoint, and finally the built-in preset list, so the
+ * settings UI can always offer models the user can select or extend manually.
+ */
+export async function resolveProviderModels(
+  options: ResolveProviderModelsOptions,
+): Promise<{ models: string[]; source: ProviderModelSource }> {
+  const fetcher = options.fetcher ?? fetchProviderModels;
+  try {
+    const models = await fetcher(options.primary);
+    if (models.length > 0) {
+      return { models, source: 'primary' };
+    }
+  } catch (primaryError) {
+    return resolveProviderModelsFallback(options, fetcher, primaryError);
+  }
+  return resolveProviderModelsFallback(options, fetcher, null);
+}
+
+async function resolveProviderModelsFallback(
+  options: ResolveProviderModelsOptions,
+  fetcher: NonNullable<ResolveProviderModelsOptions['fetcher']>,
+  primaryError: unknown,
+): Promise<{ models: string[]; source: ProviderModelSource }> {
+  if (options.fallback?.baseUrl.trim()) {
+    try {
+      const models = await fetcher(options.fallback);
+      if (models.length > 0) {
+        return { models, source: 'fallback' };
+      }
+    } catch {
+      // Ignore and fall through to the preset list.
+    }
+  }
+  const preset = [...new Set((options.presetModelIds ?? []).filter(id => id.trim()))];
+  if (preset.length > 0) {
+    return { models: preset, source: 'preset' };
+  }
+  throw primaryError instanceof Error
+    ? primaryError
+    : new Error('Could not fetch models from the provider.');
+}
+
 /**
  * Fetches the models a provider endpoint supports. Doubles as a connection
  * test: a thrown error means the base URL or API key is wrong.
