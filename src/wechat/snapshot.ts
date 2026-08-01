@@ -19,6 +19,65 @@ const IMAGE_EXTENSION_TO_MIME: Record<string, string> = {
   webp: 'image/webp',
 };
 
+const IMAGE_MIME_TO_EXTENSION: Record<string, string> = {
+  'image/gif': 'gif',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
+
+function imageMimeTypeFromBytes(body: ArrayBuffer): string | null {
+  const bytes = new Uint8Array(body);
+  if (
+    bytes.length >= 8
+    && bytes[0] === 0x89
+    && bytes[1] === 0x50
+    && bytes[2] === 0x4e
+    && bytes[3] === 0x47
+    && bytes[4] === 0x0d
+    && bytes[5] === 0x0a
+    && bytes[6] === 0x1a
+    && bytes[7] === 0x0a
+  ) return 'image/png';
+  if (
+    bytes.length >= 3
+    && bytes[0] === 0xff
+    && bytes[1] === 0xd8
+    && bytes[2] === 0xff
+  ) return 'image/jpeg';
+  if (
+    bytes.length >= 6
+    && bytes[0] === 0x47
+    && bytes[1] === 0x49
+    && bytes[2] === 0x46
+    && bytes[3] === 0x38
+    && (bytes[4] === 0x37 || bytes[4] === 0x39)
+    && bytes[5] === 0x61
+  ) return 'image/gif';
+  if (
+    bytes.length >= 12
+    && bytes[0] === 0x52
+    && bytes[1] === 0x49
+    && bytes[2] === 0x46
+    && bytes[3] === 0x46
+    && bytes[8] === 0x57
+    && bytes[9] === 0x45
+    && bytes[10] === 0x42
+    && bytes[11] === 0x50
+  ) return 'image/webp';
+  return null;
+}
+
+function fileNameForMimeType(fileName: string, mimeType: string): string {
+  const currentExtension = path.posix.extname(fileName);
+  const currentMimeType = IMAGE_EXTENSION_TO_MIME[currentExtension.slice(1).toLowerCase()];
+  if (currentMimeType === mimeType) return fileName;
+  const expectedExtension = IMAGE_MIME_TO_EXTENSION[mimeType];
+  if (!expectedExtension) return fileName;
+  const stem = currentExtension ? fileName.slice(0, -currentExtension.length) : fileName;
+  return `${stem || 'remote-image'}.${expectedExtension}`;
+}
+
 function hashBytes(value: ArrayBuffer | string): string {
   return createHash('sha256')
     .update(typeof value === 'string' ? value : Buffer.from(value))
@@ -96,17 +155,16 @@ async function readRemoteAsset(url: string): Promise<WeChatAssetDraft> {
   if (response.status < 200 || response.status >= 300) {
     throw new Error(`HTTP ${response.status}`);
   }
-  const mimeType = response.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() || '';
-  if (!Object.values(IMAGE_EXTENSION_TO_MIME).includes(mimeType)) {
-    throw new Error(`不支持的图片类型 ${mimeType || 'unknown'}`);
-  }
   const body = response.arrayBuffer;
   if (!body.byteLength || body.byteLength > 10 * 1024 * 1024) {
     throw new Error('图片为空或超过 10 MB');
   }
+  const mimeType = imageMimeTypeFromBytes(body);
+  if (!mimeType) throw new Error('无法识别图片真实类型');
   const contentHash = hashBytes(body);
   const urlPath = new URL(url).pathname;
-  const fileName = path.posix.basename(urlPath) || `remote-${contentHash.slice(0, 8)}.png`;
+  const rawFileName = path.posix.basename(urlPath) || `remote-${contentHash.slice(0, 8)}`;
+  const fileName = fileNameForMimeType(rawFileName, mimeType);
   return {
     token: assetToken(contentHash),
     source: url,
@@ -123,7 +181,7 @@ async function replaceRemoteImages(
   assets: Map<string, WeChatAssetDraft>,
   warnings: WeChatWarning[],
 ): Promise<string> {
-  const matches = Array.from(markdown.matchAll(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)(?:\s+["'][^"']*["'])?\)/gi));
+  const matches = Array.from(markdown.matchAll(/!\[([^\]]*)\]\s*\((https?:\/\/[^)\s]+)(?:\s+["'][^"']*["'])?\)/gi));
   if (!matches.length) return markdown;
   const replacements = new Map<string, string>();
   for (const match of matches) {

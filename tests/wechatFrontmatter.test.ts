@@ -27,6 +27,6 @@ describe('WeChat publishing metadata', () => {
   });
 
   test('pins the first renderer contract', () => {
-    expect(WECHAT_RENDERER_VERSION).toBe('canghe-style-wechat-v1');
+    expect(WECHAT_RENDERER_VERSION).toBe('canghe-style-wechat-v2');
   });
 });

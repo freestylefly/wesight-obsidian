@@ -1,6 +1,7 @@
 import {
   ItemView,
   MarkdownView,
+  Menu,
   Notice,
   setIcon,
   TFile,
@@ -38,6 +39,8 @@ import { confirmShareAction } from './shareConfirm';
 
 export const WESIGHT_WECHAT_PREVIEW_VIEW_TYPE = 'wesight-wechat-preview';
 
+type WeChatPreviewTab = 'preview' | 'settings';
+
 interface WeChatPreviewViewOptions {
   auth: CloudAuthService;
   api: WeChatCloudApi;
@@ -52,6 +55,7 @@ export class WeChatPreviewView extends ItemView {
   private loading = false;
   private operation: string | null = null;
   private error: string | null = null;
+  private errorTitle = '预览生成失败';
   private duplicatePath: string | null = null;
   private staleDraft = false;
   private acknowledgedWarnings = false;
@@ -60,6 +64,7 @@ export class WeChatPreviewView extends ItemView {
   private digestValue = '';
   private temporaryCover: WeChatAssetDraft | null = null;
   private refreshTimer: number | null = null;
+  private activeTab: WeChatPreviewTab = 'preview';
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -109,7 +114,10 @@ export class WeChatPreviewView extends ItemView {
   }
 
   override getState(): Record<string, unknown> {
-    return { filePath: this.file?.path ?? null };
+    return {
+      filePath: this.file?.path ?? null,
+      activeTab: this.activeTab,
+    };
   }
 
   override async setState(
@@ -119,6 +127,7 @@ export class WeChatPreviewView extends ItemView {
     const filePath = typeof state.filePath === 'string' ? state.filePath : '';
     const file = filePath ? this.app.vault.getAbstractFileByPath(filePath) : null;
     if (file instanceof TFile) this.file = file;
+    this.activeTab = state.activeTab === 'settings' ? 'settings' : 'preview';
     await super.setState(state, result);
     if (this.contentEl.isConnected) await this.reload();
   }
@@ -139,6 +148,7 @@ export class WeChatPreviewView extends ItemView {
   private async reload(): Promise<void> {
     this.loading = true;
     this.error = null;
+    this.errorTitle = '预览生成失败';
     this.staleDraft = false;
     this.render();
     try {
@@ -219,13 +229,27 @@ export class WeChatPreviewView extends ItemView {
 
   private renderHeader(parent: HTMLElement): void {
     const header = parent.createDiv({ cls: 'wesight-wechat-preview-header' });
-    const title = header.createDiv();
-    title.createEl('strong', { text: '公众号预览' });
-    title.createSpan({ text: this.file?.basename ?? '当前笔记' });
+    const identity = header.createDiv({ cls: 'wesight-wechat-preview-identity' });
+    identity.createEl('strong', { text: '公众号预览' });
+    if (this.connection) {
+      const account = identity.createDiv({ cls: 'wesight-wechat-preview-account-chip' });
+      account.createSpan({
+        cls: 'wesight-wechat-preview-avatar',
+        text: (this.connection.displayName || '微').slice(-1),
+      });
+      account.createSpan({ text: this.connection.displayName || '微信公众号' });
+    } else {
+      identity.createSpan({
+        cls: 'wesight-wechat-preview-note-name',
+        text: this.file?.basename ?? '当前笔记',
+      });
+    }
+    const actions = header.createDiv({ cls: 'wesight-wechat-preview-header-actions' });
     const refresh = header.createEl('button', {
       cls: 'clickable-icon',
       attr: { type: 'button', 'aria-label': '刷新公众号排版' },
     });
+    actions.appendChild(refresh);
     setIcon(refresh, 'refresh-cw');
     refresh.disabled = this.loading || Boolean(this.operation);
     refresh.onclick = () => void this.reload();
@@ -259,37 +283,36 @@ export class WeChatPreviewView extends ItemView {
     const error = parent.createDiv({ cls: 'wesight-wechat-preview-error' });
     const icon = error.createSpan();
     setIcon(icon, 'circle-alert');
-    error.createEl('strong', { text: '预览生成失败' });
+    error.createEl('strong', { text: this.errorTitle });
     error.createEl('p', { text: this.error ?? '请稍后重试。' });
     const retry = error.createEl('button', { text: '重新生成' });
     retry.onclick = () => void this.reload();
   }
 
   private renderEditor(parent: HTMLElement, snapshot: WeChatPreviewSnapshot): void {
-    const controls = parent.createDiv({ cls: 'wesight-wechat-preview-controls' });
-    const account = controls.createDiv({ cls: 'wesight-wechat-preview-account' });
-    const logo = account.createDiv({ cls: 'wesight-wechat-logo' });
-    logo.createSpan({ text: '微' });
-    const accountCopy = account.createDiv();
-    accountCopy.createEl('strong', { text: this.connection?.displayName ?? '微信公众号' });
-    accountCopy.createSpan({ text: 'Canghe Style · Atom One Dark' });
+    this.renderTabs(parent, snapshot);
+    this.renderPublishingToolbar(parent, snapshot);
 
-    this.renderMetadataFields(controls);
-    this.renderCover(controls, snapshot);
-    this.renderWarnings(controls, snapshot);
     if (this.duplicatePath) {
       this.renderBanner(
-        controls,
+        parent,
         'circle-alert',
         `另一篇笔记“${this.duplicatePath}”关联了同一篇公众号草稿，本次只能另存为新草稿。`,
       );
     } else if (this.staleDraft) {
       this.renderBanner(
-        controls,
+        parent,
         'circle-alert',
         '原公众号草稿已删除、已发布或失效，本次将创建新草稿。',
       );
     }
+
+    if (this.activeTab === 'settings') {
+      this.renderPublishingSettings(parent, snapshot);
+      return;
+    }
+
+    this.renderPreviewSummary(parent, snapshot);
 
     const canvasWrap = parent.createDiv({ cls: 'wesight-wechat-preview-canvas-wrap' });
     const canvas = canvasWrap.createDiv({ cls: 'wesight-wechat-preview-canvas' });
@@ -298,45 +321,143 @@ export class WeChatPreviewView extends ItemView {
       this.error = error instanceof Error ? error.message : '排版渲染失败';
       this.render();
     });
+  }
 
-    const footer = parent.createDiv({ cls: 'wesight-wechat-preview-footer' });
-    if (this.operation) {
-      const progress = footer.createDiv({ cls: 'wesight-wechat-publish-progress' });
-      const icon = progress.createSpan();
-      setIcon(icon, 'loader-circle');
-      progress.createSpan({ text: this.operation });
-      return;
+  private renderTabs(parent: HTMLElement, snapshot: WeChatPreviewSnapshot): void {
+    const tabs = parent.createDiv({
+      cls: 'wesight-wechat-preview-tabs',
+      attr: { role: 'tablist', 'aria-label': '公众号预览页面' },
+    });
+    const preview = tabs.createEl('button', {
+      cls: this.activeTab === 'preview' ? 'is-active' : '',
+      text: '预览',
+      attr: {
+        type: 'button',
+        role: 'tab',
+        'aria-selected': String(this.activeTab === 'preview'),
+      },
+    });
+    preview.onclick = () => {
+      this.activeTab = 'preview';
+      this.render();
+    };
+    const settings = tabs.createEl('button', {
+      cls: this.activeTab === 'settings' ? 'is-active' : '',
+      attr: {
+        type: 'button',
+        role: 'tab',
+        'aria-selected': String(this.activeTab === 'settings'),
+      },
+    });
+    settings.createSpan({ text: '发布设置' });
+    if (snapshot.warnings.length) {
+      settings.createSpan({
+        cls: 'wesight-wechat-preview-tab-badge',
+        text: String(snapshot.warnings.length),
+      });
     }
+    settings.onclick = () => {
+      this.activeTab = 'settings';
+      this.render();
+    };
+  }
+
+  private renderPublishingToolbar(parent: HTMLElement, snapshot: WeChatPreviewSnapshot): void {
+    const toolbar = parent.createDiv({ cls: 'wesight-wechat-publish-toolbar' });
     const prepared = this.preparedSnapshot();
     const unchanged = Boolean(this.draft && prepared.contentHash === this.draft.contentHash);
     const updateExisting = Boolean(this.draft && !this.duplicatePath && !this.staleDraft);
-    const primary = footer.createEl('button', {
+    const hasBlockingWarnings = snapshot.warnings.some((warning) => warning.blocking);
+    const primary = toolbar.createEl('button', {
       cls: 'mod-cta wesight-wechat-publish-button',
       text: updateExisting ? '更新公众号草稿' : '同步到草稿箱',
+      attr: { type: 'button' },
     });
-    primary.disabled = unchanged || (snapshot.warnings.some((warning) => warning.blocking) && !this.acknowledgedWarnings);
+    primary.disabled = Boolean(this.operation)
+      || unchanged
+      || (hasBlockingWarnings && !this.acknowledgedWarnings);
     primary.onclick = () => void this.publish(false);
-    if (unchanged) {
-      footer.createSpan({
-        cls: 'wesight-wechat-unchanged',
-        text: '公众号草稿已经是当前笔记的最新内容',
-      });
+
+    const state = toolbar.createDiv({ cls: 'wesight-wechat-publish-state' });
+    const stateIcon = state.createSpan();
+    if (this.operation) {
+      state.addClass('is-loading');
+      setIcon(stateIcon, 'loader-circle');
+      state.createSpan({ text: this.operation });
+    } else if (unchanged) {
+      state.addClass('is-success');
+      setIcon(stateIcon, 'circle-check');
+      state.createSpan({ text: '草稿已是最新' });
+    } else if (updateExisting) {
+      setIcon(stateIcon, 'clock-3');
+      state.createSpan({ text: '草稿有更新待同步' });
+    } else {
+      setIcon(stateIcon, 'cloud-upload');
+      state.createSpan({ text: '准备同步到草稿箱' });
     }
+
+    const more = toolbar.createEl('button', {
+      cls: 'clickable-icon wesight-wechat-publish-more',
+      attr: { type: 'button', 'aria-label': '更多公众号草稿操作' },
+    });
+    setIcon(more, 'more-vertical');
+    more.disabled = Boolean(this.operation);
+    more.onclick = (event) => this.showPublishingMenu(event);
+  }
+
+  private showPublishingMenu(event: MouseEvent): void {
+    const menu = new Menu();
     if (this.draft) {
-      const asNew = footer.createEl('button', {
-        cls: 'wesight-wechat-secondary-action',
-        text: '另存为新草稿',
-      });
-      asNew.disabled = snapshot.warnings.some((warning) => warning.blocking) && !this.acknowledgedWarnings;
-      asNew.onclick = () => void this.publish(true);
+      const hasUnacknowledgedBlockingWarnings = Boolean(
+        this.snapshot?.warnings.some((warning) => warning.blocking)
+        && !this.acknowledgedWarnings,
+      );
+      menu.addItem((item) => item
+        .setTitle('另存为新草稿')
+        .setIcon('copy-plus')
+        .setDisabled(Boolean(this.operation) || hasUnacknowledgedBlockingWarnings)
+        .onClick(() => void this.publish(true)));
     }
-    if (this.draft) {
-      const open = footer.createEl('button', {
-        cls: 'wesight-wechat-link-button',
-        text: '打开公众号后台',
-      });
-      open.onclick = () => window.open('https://mp.weixin.qq.com/', '_blank', 'noopener,noreferrer');
-    }
+    menu.addItem((item) => item
+      .setTitle('打开公众号后台')
+      .setIcon('external-link')
+      .onClick(() => window.open('https://mp.weixin.qq.com/', '_blank', 'noopener,noreferrer')));
+    menu.showAtMouseEvent(event);
+  }
+
+  private renderPreviewSummary(parent: HTMLElement, snapshot: WeChatPreviewSnapshot): void {
+    const summary = parent.createDiv({ cls: 'wesight-wechat-preview-summary' });
+    const connection = summary.createDiv();
+    connection.createSpan({ cls: 'wesight-wechat-connected-dot' });
+    connection.createSpan({ text: `已连接 · ${this.file?.basename ?? snapshot.title}` });
+    const check = summary.createEl('button', {
+      attr: { type: 'button' },
+      text: snapshot.warnings.length ? `检查 ${snapshot.warnings.length} 项` : '发布检查通过',
+    });
+    const icon = check.createSpan();
+    setIcon(icon, snapshot.warnings.length ? 'chevron-right' : 'circle-check');
+    check.onclick = () => {
+      this.activeTab = 'settings';
+      this.render();
+    };
+  }
+
+  private renderPublishingSettings(parent: HTMLElement, snapshot: WeChatPreviewSnapshot): void {
+    const settings = parent.createDiv({ cls: 'wesight-wechat-publishing-settings' });
+    const articleSection = settings.createDiv({ cls: 'wesight-wechat-settings-section' });
+    articleSection.createEl('h2', { text: '文章信息' });
+    this.renderMetadataFields(articleSection);
+
+    const coverSection = settings.createDiv({ cls: 'wesight-wechat-settings-section' });
+    coverSection.createEl('h2', { text: '文章封面' });
+    this.renderCover(coverSection, snapshot);
+
+    const checkSection = settings.createDiv({ cls: 'wesight-wechat-settings-section' });
+    this.renderWarnings(checkSection, snapshot);
+    checkSection.createEl('p', {
+      cls: 'wesight-wechat-settings-hint',
+      text: '修改后可切回预览查看最终排版',
+    });
   }
 
   private renderMetadataFields(parent: HTMLElement): void {
@@ -382,18 +503,33 @@ export class WeChatPreviewView extends ItemView {
       setIcon(icon, 'image');
     }
     const copy = row.createDiv();
-    copy.createEl('strong', { text: '文章封面' });
-    copy.createSpan({ text: this.coverDescription(snapshot) });
+    copy.createEl('strong', { text: this.coverDescription(snapshot) });
+    copy.createSpan({ text: '推荐尺寸 2.35:1' });
     const choose = row.createEl('button', { text: '更换封面' });
     choose.onclick = () => this.chooseTemporaryCover();
   }
 
   private renderWarnings(parent: HTMLElement, snapshot: WeChatPreviewSnapshot): void {
-    if (!snapshot.warnings.length) return;
     const box = parent.createDiv({ cls: 'wesight-wechat-preview-warnings' });
-    box.createEl('strong', { text: `发布前检查到 ${snapshot.warnings.length} 项内容` });
-    const list = box.createEl('ul');
-    for (const warning of snapshot.warnings) list.createEl('li', { text: warning.message });
+    const heading = box.createDiv({ cls: 'wesight-wechat-warnings-heading' });
+    heading.createEl('h2', { text: '发布检查' });
+    if (snapshot.warnings.length) {
+      heading.createSpan({ text: `${snapshot.warnings.length} 项待确认` });
+    }
+    if (!snapshot.warnings.length) {
+      const success = box.createDiv({ cls: 'wesight-wechat-warning-item is-success' });
+      const icon = success.createSpan();
+      setIcon(icon, 'circle-check');
+      success.createSpan({ text: '当前内容已通过发布检查' });
+      return;
+    }
+    const list = box.createDiv({ cls: 'wesight-wechat-warning-list' });
+    for (const warning of snapshot.warnings) {
+      const item = list.createDiv({ cls: 'wesight-wechat-warning-item' });
+      const icon = item.createSpan();
+      setIcon(icon, 'triangle-alert');
+      item.createSpan({ text: warning.message });
+    }
     const acknowledgment = box.createEl('label');
     const checkbox = acknowledgment.createEl('input', { type: 'checkbox' });
     checkbox.checked = this.acknowledgedWarnings;
@@ -450,6 +586,7 @@ export class WeChatPreviewView extends ItemView {
 
     this.operation = '正在上传正文图片…';
     this.error = null;
+    this.errorTitle = '同步草稿失败';
     this.render();
     const hidden = document.body.createDiv({ cls: 'wesight-wechat-publish-render-host' });
     try {
@@ -459,9 +596,16 @@ export class WeChatPreviewView extends ItemView {
         const asset = contentAssets[index];
         this.operation = `正在上传正文图片 ${index + 1}/${contentAssets.length}…`;
         this.render();
-        const result = await this.options.api.uploadAsset('content', asset);
-        if (!result.url) throw new Error(`图片“${asset.fileName}”上传后没有返回地址`);
-        uploadedUrls.set(asset.token, result.url);
+        try {
+          const result = await this.options.api.uploadAsset('content', asset);
+          if (!result.url) throw new Error('上传后没有返回地址');
+          uploadedUrls.set(asset.token, result.url);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '上传失败';
+          throw new Error(
+            `正文图片 ${index + 1}/${contentAssets.length}“${asset.fileName}”上传失败：${message}`,
+          );
+        }
       }
 
       this.operation = '正在生成 Canghe Style 正文…';
