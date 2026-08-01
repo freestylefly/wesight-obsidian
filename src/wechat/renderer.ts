@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { App, Component, MarkdownRenderer } from 'obsidian';
+import { App, Component, MarkdownRenderer, sanitizeHTMLToDom } from 'obsidian';
 
 import type { WeChatAssetDraft, WeChatPreviewSnapshot } from './types';
 
@@ -38,21 +38,32 @@ const ATOM_ONE_DARK: Record<string, string> = {
   'hljs-strong': '#c9d1d9',
 };
 
+const CANGHE_FONT_FAMILY = 'Optima-Regular, PingFangSC-light';
+
 function styles(element: HTMLElement, values: Partial<CSSStyleDeclaration>): void {
   Object.assign(element.style, values);
 }
 
 function decorateCode(pre: HTMLElement): void {
   if (pre.parentElement?.classList.contains('wesight-wechat-code-section')) return;
+  const source = pre.querySelector<HTMLElement>(':scope > code');
+  const lines = source
+    ? source.innerHTML.replace(/\n$/, '').split('\n')
+    : [];
+  source?.remove();
+  for (const lineHtml of lines) {
+    const line = createEl('code');
+    if (lineHtml) line.appendChild(sanitizeHTMLToDom(lineHtml));
+    else line.createEl('br');
+    pre.appendChild(line);
+  }
   const wrapper = createEl('section');
   wrapper.className = 'wesight-wechat-code-section';
   styles(wrapper, {
-    display: 'block',
-    margin: '20px 0',
+    display: 'flex',
     border: '1px solid rgb(60, 66, 84)',
-    backgroundColor: '#282c34',
+    backgroundColor: 'rgb(39, 44, 54)',
     borderRadius: '8px',
-    overflow: 'hidden',
     boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
   });
   const header = createEl('section');
@@ -64,6 +75,8 @@ function decorateCode(pre: HTMLElement): void {
     lineHeight: '30px',
     letterSpacing: '0',
     backgroundColor: '#282c34',
+    borderRadius: '5px 5px 0 0',
+    marginBottom: '-7px',
   });
   for (const color of ['#ff5f56', '#ffbd2e', '#27c93f']) {
     const dot = createSpan();
@@ -79,7 +92,8 @@ function decorateCode(pre: HTMLElement): void {
     header.appendChild(dot);
   }
   pre.replaceWith(wrapper);
-  wrapper.append(header, pre);
+  wrapper.appendChild(pre);
+  pre.prepend(header);
 }
 
 function decorateHeading(heading: HTMLElement): void {
@@ -131,7 +145,9 @@ function wrapTables(root: HTMLElement): void {
 }
 
 export function applyCangheWechatStyles(root: HTMLElement): void {
-  for (const forbidden of Array.from(root.querySelectorAll('script,style,iframe,object,embed,form'))) {
+  for (const forbidden of Array.from(
+    root.querySelectorAll('script,style,iframe,object,embed,form,button'),
+  )) {
     forbidden.remove();
   }
   for (const input of Array.from(root.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))) {
@@ -144,9 +160,9 @@ export function applyCangheWechatStyles(root: HTMLElement): void {
   styles(root, {
     display: 'block',
     boxSizing: 'border-box',
-    padding: '8px',
+    padding: '8px 8px',
     color: '#333333',
-    fontFamily: 'Optima-Regular, Optima, PingFang SC, Microsoft YaHei, sans-serif',
+    fontFamily: CANGHE_FONT_FAMILY,
     fontSize: '16px',
     letterSpacing: '1.5px',
     overflowWrap: 'break-word',
@@ -158,7 +174,7 @@ export function applyCangheWechatStyles(root: HTMLElement): void {
     if (tag === 'p') {
       styles(element, {
         margin: element.closest('blockquote') ? '0' : '30px 8px',
-        fontFamily: 'Optima-Regular, Optima, PingFang SC, Microsoft YaHei, sans-serif',
+        fontFamily: CANGHE_FONT_FAMILY,
         fontSize: '16px',
         lineHeight: '32px',
         letterSpacing: '2px',
@@ -166,24 +182,30 @@ export function applyCangheWechatStyles(root: HTMLElement): void {
       });
     } else if (tag === 'h1') {
       styles(element, {
+        position: 'relative',
+        zIndex: '0',
         display: 'inline-block',
+        height: '40px',
         maxWidth: '100%',
-        minHeight: '40px',
         margin: '10px 0',
-        padding: '0 30px',
+        paddingRight: '30px',
+        paddingLeft: '30px',
         color: '#ffffff',
         backgroundColor: '#2ea765',
         borderBottomRightRadius: '100px',
         fontSize: '19px',
         fontWeight: '700',
         lineHeight: '40px',
+        overflow: 'visible',
+        boxShadow: '100vw 0 0 100vw rgb(251, 251, 251)',
+        clipPath: 'inset(0 -100vw 0 0)',
         boxSizing: 'border-box',
       });
     } else if (tag === 'h2') {
       styles(element, {
         position: 'relative',
         display: 'block',
-        margin: '16px 0 8px',
+        margin: '16px auto 8px',
         paddingBottom: '6px',
         color: '#2ea765',
         borderBottom: '4px solid #2ea765',
@@ -193,47 +215,53 @@ export function applyCangheWechatStyles(root: HTMLElement): void {
       });
     } else if (tag === 'h3') {
       styles(element, {
-        margin: '17px 0 5px',
-        padding: '6px 25px 5px 5px',
+        margin: '17px auto 5px',
+        paddingTop: '6px',
+        paddingRight: '25px',
+        paddingLeft: '5px',
         color: '#2ea765',
         borderBottom: '1px solid #dddddd',
         fontSize: '17px',
         fontWeight: '700',
-        lineHeight: '1.25',
+        lineHeight: '1.1',
         textDecoration: 'underline 3px #2ea765',
         textUnderlineOffset: '6px',
       });
     } else if (tag === 'h4') {
       styles(element, {
-        margin: '16px 0 5px',
-        padding: '6px 5px 5px',
+        margin: '16px auto 5px',
+        paddingTop: '6px',
+        paddingRight: '5px',
+        paddingLeft: '5px',
         color: '#2ea765',
         borderBottom: '1px solid #dddddd',
         fontSize: '16px',
         fontWeight: '700',
-        lineHeight: '1.25',
+        lineHeight: '1.1',
         textDecoration: 'underline 2px #2ea765',
         textUnderlineOffset: '5px',
       });
     } else if (tag === 'ul') {
       styles(element, {
-        margin: '8px 0',
-        paddingLeft: '28px',
+        marginBottom: '8px',
         color: '#595959',
         fontSize: '15px',
-        lineHeight: '1.8',
         listStyleType: 'circle',
       });
     } else if (tag === 'ol') {
       styles(element, {
-        margin: '8px 0',
-        padding: '8px 8px 8px 30px',
+        padding: '8px 8px',
         color: '#595959',
         fontSize: '15px',
-        lineHeight: '1.8',
+        fontFamily: CANGHE_FONT_FAMILY,
+        fontWeight: '400',
+        letterSpacing: '1.5px',
       });
     } else if (tag === 'li') {
-      styles(element, { marginBottom: '8px', fontSize: '16px' });
+      styles(element, {
+        marginBottom: '8px',
+        ...(element.closest('ol') ? { fontSize: '16px' } : {}),
+      });
     } else if (tag === 'blockquote') {
       styles(element, {
         margin: '20px 0',
@@ -252,7 +280,6 @@ export function applyCangheWechatStyles(root: HTMLElement): void {
       styles(element, {
         color: '#399003',
         fontWeight: '400',
-        textDecoration: 'none',
         borderBottom: '1px solid #42b983',
         overflowWrap: 'anywhere',
       });
@@ -265,7 +292,6 @@ export function applyCangheWechatStyles(root: HTMLElement): void {
     } else if (tag === 'hr') {
       styles(element, {
         height: '1px',
-        margin: '24px 0',
         padding: '0',
         border: '0',
         borderTop: '2px solid #2ea765',
@@ -288,7 +314,8 @@ export function applyCangheWechatStyles(root: HTMLElement): void {
         border: '1px solid #42b983',
         borderRadius: '8px',
         overflow: 'hidden',
-        fontSize: '14px',
+        fontSize: '16px',
+        overflowWrap: 'break-word',
       });
     } else if (tag === 'th') {
       styles(element, {
@@ -298,6 +325,10 @@ export function applyCangheWechatStyles(root: HTMLElement): void {
         borderBottom: '2px solid #dddddd',
         fontWeight: '700',
         textAlign: 'center',
+        width: 'auto',
+        maxWidth: '300px',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
       });
     } else if (tag === 'td') {
       styles(element, {
@@ -310,16 +341,20 @@ export function applyCangheWechatStyles(root: HTMLElement): void {
         borderBottom: '1px solid #dddddd',
         textAlign: 'left',
         verticalAlign: 'top',
+        width: 'auto',
+        overflow: 'hidden',
         overflowWrap: 'break-word',
+        textOverflow: 'ellipsis',
       });
     } else if (tag === 'pre') {
       styles(element, {
         display: 'block',
         margin: '0',
         padding: '0',
+        position: 'relative',
         color: '#abb2bf',
         backgroundColor: '#282c34',
-        borderRadius: '0 0 5px 5px',
+        borderRadius: '5px',
         overflowX: 'auto',
         whiteSpace: 'pre',
       });
@@ -331,19 +366,26 @@ export function applyCangheWechatStyles(root: HTMLElement): void {
         color: '#abb2bf',
         backgroundColor: 'transparent',
         fontFamily: 'Menlo, Monaco, Consolas, Courier New, monospace',
-        fontSize: '13px',
-        lineHeight: '1.6',
-        letterSpacing: '0',
+        fontSize: '0.8em',
+        lineHeight: '1.6em',
+        letterSpacing: '1.5px',
         whiteSpace: 'pre',
+        textWrap: 'nowrap',
       } : {
         display: 'inline',
-        padding: '2px 5px',
-        color: '#2ea765',
-        backgroundColor: '#f0fdf4',
-        borderRadius: '4px',
-        fontFamily: 'Menlo, Monaco, Consolas, Courier New, monospace',
-        fontSize: '0.88em',
-        letterSpacing: '0',
+        color: 'rgb(207, 208, 203)',
+      });
+    } else if (element.classList.contains('footnote-word')
+      || element.classList.contains('footnote-ref')) {
+      styles(element, { color: '#595959', fontWeight: '400' });
+    } else if (element.classList.contains('footnotes')) {
+      styles(element, {
+        padding: '20px',
+        color: '#595959',
+        backgroundColor: '#ffffff',
+        border: '1px solid #4caf50',
+        borderRadius: '6px',
+        fontSize: '16px',
       });
     }
     for (const className of Array.from(element.classList)) {
@@ -455,7 +497,8 @@ export async function replaceFormulaSvgs(
 
 export function serializeWeChatArticle(root: HTMLElement): string {
   const clone = root.cloneNode(true) as HTMLElement;
-  for (const element of Array.from(clone.querySelectorAll<HTMLElement>('*'))) {
+  const elements = [clone, ...Array.from(clone.querySelectorAll<HTMLElement>('*'))];
+  for (const element of elements) {
     for (const attribute of Array.from(element.attributes)) {
       if (!['href', 'src', 'alt', 'title', 'style', 'width', 'height'].includes(attribute.name)) {
         element.removeAttribute(attribute.name);
@@ -482,7 +525,5 @@ export function serializeWeChatArticle(root: HTMLElement): string {
     }
   }
   const serializer = new XMLSerializer();
-  return Array.from(clone.childNodes)
-    .map(node => serializer.serializeToString(node))
-    .join('');
+  return serializer.serializeToString(clone);
 }

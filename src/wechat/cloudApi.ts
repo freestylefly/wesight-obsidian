@@ -19,6 +19,49 @@ interface ApiEnvelope<T> {
   message?: string;
 }
 
+interface WeChatUploadTicket {
+  uploadUrl: string;
+  uploadToken: string;
+  expiresAt: string;
+}
+
+interface GatewayUploadEnvelope {
+  ok?: boolean;
+  data?: {
+    url?: string;
+    media_id?: string;
+  };
+  message?: string;
+  errcode?: number;
+}
+
+function directUploadErrorMessage(message: string | undefined): string {
+  if (message === 'invalid_upload_token' || message === 'upload_token_expired') {
+    return '图片上传凭证已失效，请重试';
+  }
+  if (message === 'invalid_file_size' || message === 'request_too_large') {
+    return '图片为空或超过 10 MB 限制';
+  }
+  if (message === 'invalid_mime_type' || message === 'invalid_file') {
+    return '图片内容与文件类型不一致';
+  }
+  return message || '阿里云图片网关上传失败';
+}
+
+function normalizeWeChatImageUrl(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new CloudApiError('微信返回的正文图片地址无效', 502);
+  }
+  if (url.protocol === 'http:') url.protocol = 'https:';
+  if (url.protocol !== 'https:') {
+    throw new CloudApiError('微信返回的正文图片地址不安全', 502);
+  }
+  return url.toString();
+}
+
 export class WeChatCloudApi {
   constructor(private readonly auth: CloudAuthService) {}
 
@@ -61,16 +104,54 @@ export class WeChatCloudApi {
     });
   }
 
-  uploadAsset(kind: 'content' | 'cover', asset: WeChatAssetDraft): Promise<UploadedWeChatAsset> {
-    return this.request({
-      url: `${API_BASE_URL}/api/wechat/assets`,
+  async uploadAsset(
+    kind: 'content' | 'cover',
+    asset: WeChatAssetDraft,
+  ): Promise<UploadedWeChatAsset> {
+    const ticket = await this.request<WeChatUploadTicket>({
+      url: `${API_BASE_URL}/api/wechat/assets/ticket`,
+      method: 'POST',
+      contentType: 'application/json',
+      body: JSON.stringify({
+        kind,
+        fileName: asset.fileName,
+        mimeType: asset.mimeType,
+        contentLength: asset.body.byteLength,
+      }),
+    });
+    const response = await requestUrl({
+      url: ticket.uploadUrl,
       method: 'POST',
       contentType: asset.mimeType,
       body: asset.body,
       headers: {
-        'x-wesight-wechat-kind': kind,
-        'x-wesight-file-name': encodeURIComponent(asset.fileName),
+        'x-wesight-upload-token': ticket.uploadToken,
       },
+      throw: false,
+    });
+    let payload: GatewayUploadEnvelope = {};
+    try {
+      payload = response.json as GatewayUploadEnvelope;
+    } catch {
+      payload = {};
+    }
+    if (response.status >= 400 || !payload.ok || !payload.data) {
+      const suffix = payload.errcode ? `（微信错误码 ${payload.errcode}）` : '';
+      throw new CloudApiError(
+        `${directUploadErrorMessage(payload.message)}${suffix}`,
+        response.status,
+      );
+    }
+    if (kind === 'content') {
+      if (!payload.data.url) throw new CloudApiError('微信未返回正文图片地址', 502);
+      return { kind, url: normalizeWeChatImageUrl(payload.data.url) };
+    }
+    if (!payload.data.media_id) throw new CloudApiError('微信未返回封面素材 ID', 502);
+    return this.request({
+      url: `${API_BASE_URL}/api/wechat/assets/complete`,
+      method: 'POST',
+      contentType: 'application/json',
+      body: JSON.stringify({ mediaId: payload.data.media_id }),
     });
   }
 

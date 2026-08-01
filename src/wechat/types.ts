@@ -1,4 +1,4 @@
-export const WECHAT_RENDERER_VERSION = 'canghe-style-wechat-v1';
+export const WECHAT_RENDERER_VERSION = 'canghe-style-wechat-v2';
 
 export interface WeChatConnectionState {
   id: string;
