@@ -27,7 +27,7 @@ function snapshot(contentHash = 'source-hash'): WeChatPreviewSnapshot {
 }
 
 describe('WeChat themes', () => {
-  test('keeps Canghe Style as the default followed by the six Skill themes', () => {
+  test('keeps Canghe Style as the default followed by the six Skill themes and AI custom theme', () => {
     expect(DEFAULT_WECHAT_THEME_ID).toBe('canghe-style');
     expect(WECHAT_THEME_DEFINITIONS.map(theme => theme.id)).toEqual([
       'canghe-style',
@@ -37,6 +37,7 @@ describe('WeChat themes', () => {
       'zen-whitespace',
       'moyu-ticket',
       'olive-journal',
+      'ai-custom',
     ]);
     expect(listWeChatThemes('template').map(theme => theme.label)).toEqual(['Canghe Style']);
     expect(listWeChatThemes('skill').map(theme => theme.label)).toEqual([
@@ -47,10 +48,12 @@ describe('WeChat themes', () => {
       '摸鱼票据风',
       '橄榄手记',
     ]);
+    expect(listWeChatThemes('custom').map(theme => theme.label)).toEqual(['AI自定义主题']);
   });
 
   test('recognizes registered ids and falls back to Canghe Style', () => {
     expect(isWeChatThemeId('moyu-green')).toBe(true);
+    expect(isWeChatThemeId('ai-custom')).toBe(true);
     expect(isWeChatThemeId('unknown')).toBe(false);
     expect(getWeChatTheme('unknown' as never).id).toBe(DEFAULT_WECHAT_THEME_ID);
   });

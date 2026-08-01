@@ -156,6 +156,10 @@ export interface WeSightObsidianSettings {
   feishuFolderToken: string;
   /** Theme used by the WeChat preview and draft publisher. */
   wechatThemeId: WeChatThemeId;
+  /** User-facing name of the reusable AI-generated WeChat theme. */
+  wechatCustomThemeName: string;
+  /** Style brief used to regenerate the reusable AI-generated WeChat theme. */
+  wechatCustomThemeDescription: string;
 }
 
 export const DEFAULT_CONFIG_SOURCES: ConfigSourcesByAgent = {
@@ -194,4 +198,6 @@ export const DEFAULT_SETTINGS: WeSightObsidianSettings = {
   maxContextFileChars: 40_000,
   feishuFolderToken: '',
   wechatThemeId: 'canghe-style',
+  wechatCustomThemeName: '',
+  wechatCustomThemeDescription: '',
 };
