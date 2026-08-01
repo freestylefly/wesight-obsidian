@@ -14,6 +14,7 @@ import type { WeChatPreviewSnapshot } from './types';
 import {
   getWeChatTheme,
   hashSkillThemeDocument,
+  type WeChatCustomThemePreferences,
   type WeChatThemeDocument,
   type WeChatThemeId,
 } from './themes';
@@ -29,6 +30,7 @@ export interface ThemeGenerationProgress {
 
 export interface GenerateThemeOptions {
   force?: boolean;
+  customTheme?: WeChatCustomThemePreferences;
   onProgress?: (progress: ThemeGenerationProgress) => void;
 }
 
@@ -63,27 +65,41 @@ export function resolveGzhSkillRoot(
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
   const theme = getWeChatTheme(themeId);
-  if (theme.kind !== 'skill' || !theme.skillReference) return null;
+  if (theme.kind === 'template') return null;
   for (const candidate of skillCandidates(env)) {
+    const themeSourceExists = theme.kind === 'custom'
+      ? fileExists(path.join(candidate, 'references', 'theme-generator.md'))
+      : Boolean(theme.skillReference && fileExists(path.join(candidate, theme.skillReference)));
     if (
       fileExists(path.join(candidate, 'SKILL.md'))
       && fileExists(path.join(candidate, 'references', 'theme-index.md'))
       && fileExists(path.join(candidate, 'references', 'common-components.md'))
-      && fileExists(path.join(candidate, theme.skillReference))
+      && themeSourceExists
       && fileExists(path.join(candidate, 'scripts', 'validate_gzh_html.py'))
     ) return candidate;
   }
   return null;
 }
 
-function skillSignature(skillRoot: string, themeReference: string): string {
+function skillSignature(skillRoot: string, themeId: WeChatThemeId): string {
+  const theme = getWeChatTheme(themeId);
+  const themeSource = theme.kind === 'custom'
+    ? path.join(skillRoot, 'references', 'theme-generator.md')
+    : path.join(skillRoot, theme.skillReference ?? '');
   const sources = [
     path.join(skillRoot, 'SKILL.md'),
     path.join(skillRoot, 'references', 'theme-index.md'),
     path.join(skillRoot, 'references', 'common-components.md'),
-    path.join(skillRoot, themeReference),
+    themeSource,
   ];
   return sha256(sources.map(source => fs.readFileSync(source, 'utf8')).join('\n---\n'));
+}
+
+function customThemeFromSettings(settings: WeSightObsidianSettings): WeChatCustomThemePreferences {
+  return {
+    name: settings.wechatCustomThemeName.trim(),
+    description: settings.wechatCustomThemeDescription.trim(),
+  };
 }
 
 function generatorSignature(
@@ -175,13 +191,24 @@ export function normalizeGeneratedThemeHtml(html: string): string {
 function generationPrompt(values: {
   skillRoot: string;
   themeLabel: string;
-  themeReference: string;
+  themeReference?: string;
+  customTheme?: WeChatCustomThemePreferences;
   inputPath: string;
   outputPath: string;
 }): string {
+  const themeInstruction = values.customTheme
+    ? [
+      `这是 WeSight 的 AI 自定义主题自动化流程。请完整读取 ${path.join(values.skillRoot, 'references', 'theme-generator.md')}。`,
+      `用户给主题取名为“${values.customTheme.name || 'AI自定义主题'}”。主题描述如下：\n${values.customTheme.description}`,
+      '先依据 theme-generator.md 推导主题结构模型、颜色系统、字体、圆角、阴影和组件语言，再把这套风格直接应用到当前文章。',
+      '用户会在 WeSight 的文章预览中整体确认本次风格，因此不要提问，也不要创建或修改 gzh-design Skill 内的主题文件。',
+    ]
+    : [
+      `本次固定使用主题“${values.themeLabel}”，主题组件库为 ${path.join(values.skillRoot, values.themeReference ?? '')}。`,
+    ];
   return [
     `请完整读取并严格执行 ${path.join(values.skillRoot, 'SKILL.md')}。`,
-    `本次固定使用主题“${values.themeLabel}”，主题组件库为 ${path.join(values.skillRoot, values.themeReference)}。`,
+    ...themeInstruction,
     `输入文章位于 ${values.inputPath}。这是全自动排版，不要提问，不要改变或遗漏原文实质内容。`,
     '必须原样保留所有 wesight-wechat-asset:// 开头的图片地址，不得替换、删除或重写。',
     '禁止使用 svg、iframe、object、embed、form、button、input、textarea、select、video、audio、canvas；装饰图标请改用纯文字或 emoji。',
@@ -204,16 +231,7 @@ export class WeChatThemeService {
   ): WeChatThemeDocument | null {
     const context = this.resolveContext(snapshot, themeId);
     if (!context) return null;
-    const cached = readJsonFile<CachedThemeDocument | null>(cachePath(context.key, this.env), null);
-    if (
-      !cached
-      || cached.version !== 1
-      || cached.cacheKey !== context.key
-      || cached.themeId !== themeId
-      || cached.sourceHash !== snapshot.contentHash
-    ) return null;
-    const errors = validateGeneratedThemeHtml(cached.html ?? '', usedAssetTokens(snapshot));
-    return errors.length ? null : cached;
+    return this.getCachedForContext(snapshot, themeId, context);
   }
 
   async generate(
@@ -222,17 +240,24 @@ export class WeChatThemeService {
     options: GenerateThemeOptions = {},
   ): Promise<WeChatThemeDocument> {
     const theme = getWeChatTheme(themeId);
-    if (theme.kind !== 'skill' || !theme.skillReference) {
+    if (theme.kind === 'template') {
       throw new Error('当前主题不需要通过 Skill 生成');
     }
-    const context = this.resolveContext(snapshot, themeId);
+    const settings = this.options.getSettings();
+    const customTheme = theme.kind === 'custom'
+      ? options.customTheme ?? customThemeFromSettings(settings)
+      : undefined;
+    if (theme.kind === 'custom' && !customTheme?.description.trim()) {
+      throw new Error('请先填写 AI 自定义主题描述');
+    }
+    const context = this.resolveContext(snapshot, themeId, customTheme);
     if (!context) {
       throw new Error(
         '未检测到 gzh-design Skill，请先按项目说明安装：https://github.com/isjiamu/gzh-design-skill',
       );
     }
     if (!options.force) {
-      const cached = this.getCached(snapshot, themeId);
+      const cached = this.getCachedForContext(snapshot, themeId, context);
       if (cached) return cached;
     }
 
@@ -240,11 +265,11 @@ export class WeChatThemeService {
     ensureDir(runDir);
     const inputPath = path.join(runDir, 'article.md');
     const outputPath = path.join(runDir, 'article.html');
-    const settings = this.options.getSettings();
     const agentId = settings.defaultAgentId;
     const outputParts: string[] = [];
     let runtimeError: string | null = null;
-    options.onProgress?.({ label: `正在使用 ${theme.label} 生成排版…` });
+    const themeLabel = customTheme?.name || theme.label;
+    options.onProgress?.({ label: `正在使用 ${themeLabel} 生成排版…` });
     try {
       fs.writeFileSync(inputPath, snapshot.markdown, { encoding: 'utf8', mode: 0o600 });
       await this.options.runtimeManager.runTurn({
@@ -252,8 +277,9 @@ export class WeChatThemeService {
         agentId,
         prompt: generationPrompt({
           skillRoot: context.skillRoot,
-          themeLabel: theme.label,
+          themeLabel,
           themeReference: theme.skillReference,
+          customTheme,
           inputPath,
           outputPath,
         }),
@@ -279,7 +305,7 @@ export class WeChatThemeService {
         : extractHtmlFromOutput(outputParts.join('\n'));
       if (!rawHtml) throw new Error('模型没有生成公众号 HTML 文件');
       const html = normalizeGeneratedThemeHtml(rawHtml);
-      options.onProgress?.({ label: `正在校验 ${theme.label} 排版…` });
+      options.onProgress?.({ label: `正在校验 ${themeLabel} 排版…` });
       const errors = validateGeneratedThemeHtml(html, usedAssetTokens(snapshot));
       if (errors.length) {
         appendLocalLog('wechat_theme_validation_failed', {
@@ -329,17 +355,21 @@ export class WeChatThemeService {
   private resolveContext(
     snapshot: WeChatPreviewSnapshot,
     themeId: WeChatThemeId,
+    customTheme?: WeChatCustomThemePreferences,
   ): { key: string; signature: string; skillRoot: string } | null {
     const theme = getWeChatTheme(themeId);
-    if (theme.kind !== 'skill' || !theme.skillReference) return null;
+    if (theme.kind === 'template') return null;
     const skillRoot = resolveGzhSkillRoot(themeId, this.env);
     if (!skillRoot) return null;
-    const skillFingerprint = skillSignature(skillRoot, theme.skillReference);
+    const skillFingerprint = skillSignature(skillRoot, themeId);
     const generatorFingerprint = generatorSignature(
       this.options.getSettings(),
       this.options.providerStore,
     );
-    const signature = [skillFingerprint, generatorFingerprint].join(':');
+    const themeFingerprint = theme.kind === 'custom'
+      ? sha256(JSON.stringify(customTheme ?? customThemeFromSettings(this.options.getSettings())))
+      : themeId;
+    const signature = [skillFingerprint, generatorFingerprint, themeFingerprint].join(':');
     return {
       skillRoot,
       signature,
@@ -347,8 +377,25 @@ export class WeChatThemeService {
         sourceHash: snapshot.contentHash,
         themeId,
         skillSignature: skillFingerprint,
-        generatorSignature: generatorFingerprint,
+        generatorSignature: [generatorFingerprint, themeFingerprint].join(':'),
       }),
     };
+  }
+
+  private getCachedForContext(
+    snapshot: WeChatPreviewSnapshot,
+    themeId: WeChatThemeId,
+    context: { key: string },
+  ): WeChatThemeDocument | null {
+    const cached = readJsonFile<CachedThemeDocument | null>(cachePath(context.key, this.env), null);
+    if (
+      !cached
+      || cached.version !== 1
+      || cached.cacheKey !== context.key
+      || cached.themeId !== themeId
+      || cached.sourceHash !== snapshot.contentHash
+    ) return null;
+    const errors = validateGeneratedThemeHtml(cached.html ?? '', usedAssetTokens(snapshot));
+    return errors.length ? null : cached;
   }
 }

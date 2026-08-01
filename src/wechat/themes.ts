@@ -9,9 +9,15 @@ export type WeChatThemeId =
   | 'graphite-minimal'
   | 'zen-whitespace'
   | 'moyu-ticket'
-  | 'olive-journal';
+  | 'olive-journal'
+  | 'ai-custom';
 
-export type WeChatThemeKind = 'template' | 'skill';
+export type WeChatThemeKind = 'template' | 'skill' | 'custom';
+
+export interface WeChatCustomThemePreferences {
+  name: string;
+  description: string;
+}
 
 export interface WeChatThemeDefinition {
   id: WeChatThemeId;
@@ -80,6 +86,12 @@ export const WECHAT_THEME_DEFINITIONS: readonly WeChatThemeDefinition[] = [
     kind: 'skill',
     color: '#8a8f32',
     skillReference: 'references/theme-olive-journal.md',
+  },
+  {
+    id: 'ai-custom',
+    label: 'AI自定义主题',
+    kind: 'custom',
+    color: '#8b5cf6',
   },
 ] as const;
 

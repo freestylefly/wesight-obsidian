@@ -306,5 +306,11 @@ function normalizeSettings(value: Partial<WeSightObsidianSettings> | null | unde
     wechatThemeId: isWeChatThemeId(value?.wechatThemeId)
       ? value.wechatThemeId
       : DEFAULT_WECHAT_THEME_ID,
+    wechatCustomThemeName: typeof value?.wechatCustomThemeName === 'string'
+      ? value.wechatCustomThemeName
+      : '',
+    wechatCustomThemeDescription: typeof value?.wechatCustomThemeDescription === 'string'
+      ? value.wechatCustomThemeDescription
+      : '',
   };
 }

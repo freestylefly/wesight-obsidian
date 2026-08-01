@@ -2932,6 +2932,45 @@ button.wesight-share-primary-button.is-wechat:hover {
   color: var(--text-normal);
 }
 
+.wesight-wechat-theme-menu-item.is-ai > span:nth-child(2) {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.wesight-wechat-custom-theme-intro {
+  margin: -4px 0 14px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.55;
+}
+
+.wesight-wechat-custom-theme-modal .setting-item {
+  align-items: flex-start;
+}
+
+.wesight-wechat-custom-theme-modal .setting-item-control {
+  min-width: min(360px, 58vw);
+}
+
+.wesight-wechat-custom-theme-modal input,
+.wesight-wechat-custom-theme-modal textarea {
+  width: 100%;
+}
+
+.wesight-wechat-custom-theme-description-setting .setting-item-control {
+  align-items: stretch;
+}
+
+.wesight-wechat-custom-theme-actions {
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.wesight-wechat-custom-theme-actions .setting-item-info {
+  display: none;
+}
+
 .wesight-wechat-theme-menu-icon,
 .wesight-wechat-theme-menu-arrow,
 .wesight-wechat-theme-option-check {

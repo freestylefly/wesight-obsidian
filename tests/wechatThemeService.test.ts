@@ -71,6 +71,7 @@ function createSkillRoot(root: string): string {
   fs.writeFileSync(path.join(skillRoot, 'references', 'theme-index.md'), '# themes\n');
   fs.writeFileSync(path.join(skillRoot, 'references', 'common-components.md'), '# common\n');
   fs.writeFileSync(path.join(skillRoot, 'references', 'theme-moyu-green.md'), '# green v1\n');
+  fs.writeFileSync(path.join(skillRoot, 'references', 'theme-generator.md'), '# generator v1\n');
   fs.writeFileSync(path.join(skillRoot, 'scripts', 'validate_gzh_html.py'), '# validator\n');
   return skillRoot;
 }
@@ -158,6 +159,7 @@ describe('WeChat theme Skill discovery and generation', () => {
     const standardHome = path.join(tempDir, 'standard-home');
     const standardRoot = createSkillRoot(path.join(standardHome, '.codex', 'skills'));
     expect(resolveGzhSkillRoot('moyu-green', { HOME: standardHome })).toBe(standardRoot);
+    expect(resolveGzhSkillRoot('ai-custom', env)).toBe(skillRoot);
     expect(resolveGzhSkillRoot('canghe-style', env)).toBeNull();
   });
 
@@ -216,6 +218,54 @@ describe('WeChat theme Skill discovery and generation', () => {
 
     await expect(service.generate(makeSnapshot(), 'moyu-green'))
       .resolves.toMatchObject({ html: validHtml() });
+  });
+
+  test('generates and caches a reusable AI custom theme from the saved style brief', async () => {
+    const runtimeManager = runtimeWriting(validHtml());
+    const runTurn = vi.spyOn(runtimeManager, 'runTurn');
+    const service = new WeChatThemeService({
+      runtimeManager,
+      providerStore,
+      getSettings: () => settings,
+      env,
+    });
+    const customTheme = {
+      name: '雾蓝科技刊',
+      description: '浅色科技杂志风，雾蓝色点缀，大留白，适合 AI 产品深度评测。',
+    };
+
+    const generated = await service.generate(makeSnapshot(), 'ai-custom', { customTheme });
+    expect(generated).toMatchObject({
+      themeId: 'ai-custom',
+      sourceHash: 'snapshot-v1',
+      html: validHtml(),
+    });
+    const request = runTurn.mock.calls[0][0];
+    expect(request.prompt).toContain('theme-generator.md');
+    expect(request.prompt).toContain('雾蓝科技刊');
+    expect(request.prompt).toContain(customTheme.description);
+    expect(request.prompt).toContain('wesight-wechat-asset://');
+
+    settings.wechatCustomThemeName = customTheme.name;
+    settings.wechatCustomThemeDescription = customTheme.description;
+    expect(service.getCached(makeSnapshot(), 'ai-custom')).toEqual(generated);
+    expect(await service.generate(makeSnapshot(), 'ai-custom')).toEqual(generated);
+    expect(runTurn).toHaveBeenCalledOnce();
+
+    settings.wechatCustomThemeDescription = '暖灰纸张质感，低饱和橙色点缀。';
+    expect(service.getCached(makeSnapshot(), 'ai-custom')).toBeNull();
+  });
+
+  test('requires a style description before generating an AI custom theme', async () => {
+    const service = new WeChatThemeService({
+      runtimeManager: runtimeWriting(validHtml()),
+      providerStore,
+      getSettings: () => settings,
+      env,
+    });
+
+    await expect(service.generate(makeSnapshot(), 'ai-custom'))
+      .rejects.toThrow('请先填写 AI 自定义主题描述');
   });
 
   test('removes decorative SVG generated from a theme component before caching', async () => {

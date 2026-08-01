@@ -425,7 +425,7 @@ export async function renderWeChatArticle(
   container.empty();
   container.classList.remove('wesight-wechat-canghe-article', 'wesight-wechat-skill-article');
   const themeDocument = options.themeDocument;
-  if (themeDocument && getWeChatTheme(themeDocument.themeId).kind === 'skill' && themeDocument.html) {
+  if (themeDocument && getWeChatTheme(themeDocument.themeId).kind !== 'template' && themeDocument.html) {
     container.classList.add('wesight-wechat-skill-article');
     const html = replaceAssetTokens(
       themeDocument.html,
