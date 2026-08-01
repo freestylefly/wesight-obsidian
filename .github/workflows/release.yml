@@ -56,5 +56,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --verify-tag \
             --title "$GITHUB_REF_NAME" \
-            --notes "Initial WeSight release for the Obsidian Community Plugins directory." \
+            --generate-notes \
             main.js manifest.json styles.css

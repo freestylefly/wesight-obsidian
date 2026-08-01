@@ -4,8 +4,8 @@ import path from 'path';
 
 import { ProviderStore } from '../src/storage/providerStore';
 
-function createSecretStorage() {
-  const values = new Map<string, string>();
+function createSecretStorage(initial: Record<string, string> = {}) {
+  const values = new Map<string, string>(Object.entries(initial));
   return {
     getSecret: (id: string) => values.get(id) ?? null,
     setSecret: (id: string, value: string) => {
@@ -77,9 +77,50 @@ describe('ProviderStore', () => {
 
     const store = new ProviderStore(secrets, env);
     expect(store.find('codex')?.apiKey).toBe('sk-legacy-secret');
-    expect(secrets.getSecret('wesight-provider-api-key:legacy-profile')).toBe('sk-legacy-secret');
+    expect(secrets.getSecret('wesight-provider-api-key-legacy-profile')).toBe('sk-legacy-secret');
     expect(fs.readFileSync(path.join(tempDir, 'providers.json'), 'utf8'))
       .not.toContain('sk-legacy-secret');
+  });
+
+  test('migrates API keys from the legacy SecretStorage id', () => {
+    const secrets = createSecretStorage({
+      'wesight-provider-api-key:legacy-profile': 'sk-legacy-secret',
+    });
+    fs.writeFileSync(path.join(tempDir, 'providers.json'), JSON.stringify({
+      version: 1,
+      profiles: [{
+        id: 'legacy-profile',
+        agentId: 'claude',
+        name: 'Moonshot',
+        apiKey: '',
+        baseUrl: 'https://api.moonshot.cn/anthropic',
+        model: 'kimi-k3',
+        defaultModel: 'kimi-k3',
+        models: ['kimi-k3'],
+        wireApi: 'chat',
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    }));
+
+    const store = new ProviderStore(secrets, env);
+    const profile = store.find('claude');
+    expect(profile?.apiKey).toBe('sk-legacy-secret');
+    expect(profile?.anthropicAuthMode).toBe('authToken');
+    expect(secrets.getSecret('wesight-provider-api-key-legacy-profile')).toBe('sk-legacy-secret');
+  });
+
+  test('infers official Anthropic API key authentication for old profiles', () => {
+    const store = new ProviderStore(createSecretStorage(), env);
+    const profile = store.save({
+      agentId: 'claude',
+      name: 'Claude',
+      apiKey: 'sk-test',
+      baseUrl: 'https://api.anthropic.com',
+      defaultModel: 'claude-sonnet-4-6',
+    });
+    expect(profile.anthropicAuthMode).toBe('apiKey');
   });
 
   test('validates imported provider profiles before saving', () => {

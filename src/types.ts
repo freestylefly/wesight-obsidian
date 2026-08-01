@@ -8,6 +8,8 @@ export type AgentStatusState = 'ready' | 'missing' | 'unsupported';
 
 export type ProviderWireApi = 'responses' | 'chat';
 
+export type AnthropicAuthMode = 'apiKey' | 'authToken';
+
 export interface AgentDescriptor {
   id: AgentId;
   displayName: string;
@@ -50,6 +52,8 @@ export interface ProviderProfile {
   models: string[];
   /** Codex provider protocol. Defaults to chat for OpenAI-compatible endpoints. */
   wireApi: ProviderWireApi;
+  /** Authentication header used by Claude Code for Anthropic-compatible endpoints. */
+  anthropicAuthMode?: AnthropicAuthMode;
   isDefault: boolean;
   createdAt: number;
   updatedAt: number;
@@ -106,7 +110,17 @@ export type RuntimeTurnEvent =
   | { type: 'session'; sessionId: string }
   | { type: 'text'; content: string }
   | { type: 'tool'; toolCall: ToolCallEvent }
-  | { type: 'error'; message: string; detail?: string }
+  | {
+    type: 'error';
+    message: string;
+    detail?: string;
+    statusCode?: number;
+    retryAfterSeconds?: number;
+    requestId?: string;
+    providerProfileId?: string;
+    /** Diagnostic-only context that should not be rendered in chat. */
+    diagnostic?: string;
+  }
   | { type: 'done'; sessionId?: string | null };
 
 export interface StoredConversation {

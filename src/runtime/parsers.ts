@@ -46,6 +46,12 @@ export function parseClaudeStreamLine(line: string): RuntimeTurnEvent[] {
   if (eventType === 'error') {
     events.push({ type: 'error', message: firstString(parsed.message, parsed.error) ?? stringify(parsed) });
   }
+  if (eventType === 'result' && (parsed.is_error === true || firstString(parsed.subtype)?.includes('error'))) {
+    events.push({
+      type: 'error',
+      message: firstString(parsed.result, parsed.error, parsed.message) ?? stringify(parsed),
+    });
+  }
 
   const sessionId = firstString(parsed.session_id, parsed.sessionId);
   if (sessionId) {

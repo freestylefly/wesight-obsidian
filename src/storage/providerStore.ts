@@ -2,9 +2,16 @@ import fs from 'fs';
 import type { SecretStorage } from 'obsidian';
 
 import { providersPath } from '../paths';
-import type { AgentId, ExportedProviderProfile, ProviderProfile, ProviderWireApi } from '../types';
+import type {
+  AgentId,
+  AnthropicAuthMode,
+  ExportedProviderProfile,
+  ProviderProfile,
+  ProviderWireApi,
+} from '../types';
 import { createId } from '../utils/id';
 import { readJsonFile, writeJsonFile } from '../utils/fs';
+import { inferAnthropicAuthMode } from '../utils/providerAuth';
 import { recordFromUnknown } from '../utils/records';
 
 interface ProviderStoreFile {
@@ -27,6 +34,7 @@ export interface ProviderProfileInput {
   defaultModel?: string;
   models?: string[];
   wireApi?: ProviderWireApi;
+  anthropicAuthMode?: AnthropicAuthMode;
   isDefault?: boolean;
 }
 
@@ -64,6 +72,12 @@ function normalizeProfile(profile: ProviderProfile): ProviderProfile {
     defaultModel,
     models: normalizeModels(profile.models, defaultModel),
     wireApi: inferWireApi(profile.baseUrl ?? '', profile.wireApi),
+    anthropicAuthMode: inferAnthropicAuthMode(
+      profile.agentId,
+      profile.name,
+      profile.baseUrl ?? '',
+      profile.anthropicAuthMode,
+    ),
     isDefault: Boolean(profile.isDefault),
     createdAt: Number(profile.createdAt) || Date.now(),
     updatedAt: Number(profile.updatedAt) || Date.now(),
@@ -122,6 +136,12 @@ export class ProviderStore {
       defaultModel,
       models: normalizeModels(input.models, defaultModel),
       wireApi: inferWireApi(input.baseUrl ?? '', input.wireApi),
+      anthropicAuthMode: inferAnthropicAuthMode(
+        input.agentId,
+        input.name,
+        input.baseUrl ?? '',
+        input.anthropicAuthMode,
+      ),
       isDefault: Boolean(input.isDefault),
       createdAt: now,
       updatedAt: now,
@@ -214,6 +234,7 @@ export class ProviderStore {
         defaultModel: profile.defaultModel,
         models: profile.models,
         wireApi: profile.wireApi,
+        anthropicAuthMode: profile.anthropicAuthMode,
         isDefault: profile.isDefault,
         createdAt: profile.createdAt,
         updatedAt: profile.updatedAt,
@@ -243,6 +264,9 @@ export class ProviderStore {
       const wireApi = profile.wireApi === 'responses' || profile.wireApi === 'chat'
         ? profile.wireApi
         : undefined;
+      const anthropicAuthMode = profile.anthropicAuthMode === 'apiKey' || profile.anthropicAuthMode === 'authToken'
+        ? profile.anthropicAuthMode
+        : undefined;
       const models = Array.isArray(profile.models)
         ? profile.models.filter((model): model is string => typeof model === 'string')
         : undefined;
@@ -258,6 +282,7 @@ export class ProviderStore {
         defaultModel: typeof profile.defaultModel === 'string' ? profile.defaultModel : '',
         models,
         wireApi,
+        anthropicAuthMode,
         isDefault: profile.isDefault === true,
       }));
     }
@@ -337,6 +362,21 @@ export class ProviderStore {
   }
 
   private readApiKey(profileId: string): string {
-    return this.secrets.getSecret(this.apiKeySecretId(profileId))?.trim() || '';
+    const current = this.readSecret(this.apiKeySecretId(profileId));
+    if (current) return current;
+
+    const legacy = this.readSecret(`wesight-provider-api-key:${profileId}`);
+    if (legacy) {
+      this.secrets.setSecret(this.apiKeySecretId(profileId), legacy);
+    }
+    return legacy;
+  }
+
+  private readSecret(id: string): string {
+    try {
+      return this.secrets.getSecret(id)?.trim() || '';
+    } catch {
+      return '';
+    }
   }
 }

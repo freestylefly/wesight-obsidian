@@ -47,9 +47,35 @@ describe('provider projection', () => {
     expect(fs.existsSync(codexHome)).toBe(false);
   });
 
-  test('maps Claude profile to Anthropic environment', () => {
-    const projection = prepareProviderProjection('claude', { ...profile, agentId: 'claude' }, env);
-    expect(projection.env.ANTHROPIC_API_KEY).toBe('sk-test');
+  test('maps compatible Claude providers to auth token and clears inherited API keys', () => {
+    const projection = prepareProviderProjection('claude', {
+      ...profile,
+      agentId: 'claude',
+      name: 'Moonshot',
+      baseUrl: 'https://api.moonshot.cn/anthropic',
+      anthropicAuthMode: 'authToken',
+    }, {
+      ...env,
+      ANTHROPIC_API_KEY: 'inherited-key',
+      ANTHROPIC_AUTH_TOKEN: 'inherited-token',
+    });
+    expect(projection.env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(projection.env.ANTHROPIC_AUTH_TOKEN).toBe('sk-test');
     expect(projection.env.ANTHROPIC_MODEL).toBe('gpt-5.4');
+  });
+
+  test('maps the official Anthropic provider to API key and clears inherited auth tokens', () => {
+    const projection = prepareProviderProjection('claude', {
+      ...profile,
+      agentId: 'claude',
+      name: 'Claude',
+      baseUrl: 'https://api.anthropic.com',
+      anthropicAuthMode: 'apiKey',
+    }, {
+      ...env,
+      ANTHROPIC_AUTH_TOKEN: 'inherited-token',
+    });
+    expect(projection.env.ANTHROPIC_API_KEY).toBe('sk-test');
+    expect(projection.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
   });
 });
