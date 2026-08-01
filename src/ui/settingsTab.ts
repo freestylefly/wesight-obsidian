@@ -5,6 +5,7 @@ import { logsDir, providersPath, tmpDir, wesightHome } from '../paths';
 import { ProviderStore } from '../storage/providerStore';
 import type {
   AgentId,
+  AnthropicAuthMode,
   ProviderProfile,
   ProviderWireApi,
   RuntimeConfigSource,
@@ -12,7 +13,8 @@ import type {
 } from '../types';
 import { RuntimeDiscovery, invalidateRuntimeDiscoveryCache } from '../runtime/discovery';
 import type { CloudAuthService } from '../share/cloudAuth';
-import { fetchProviderModels, resolveProviderModels } from '../utils/providerModels';
+import { inferAnthropicAuthMode, requiresProviderApiKey } from '../utils/providerAuth';
+import { fetchProviderModels, resolveProviderModels, testProviderConnection } from '../utils/providerModels';
 import type { WeChatCloudApi } from '../wechat/cloudApi';
 import { promptForText } from './textPromptModal';
 import { WeChatPublishingSettings } from './wechatPublishingSettings';
@@ -42,6 +44,7 @@ interface ProviderPreset {
   defaultApiFormat: ProviderApiFormat;
   baseUrls: Record<ProviderApiFormat, string>;
   models: ProviderModelPreset[];
+  anthropicAuthMode?: AnthropicAuthMode;
   apiKeyUrl?: string;
 }
 
@@ -79,6 +82,7 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
       { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
     ],
+    anthropicAuthMode: 'apiKey',
     apiKeyUrl: 'https://console.anthropic.com/settings/keys',
   },
   {
@@ -112,6 +116,7 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
       { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
     ],
+    anthropicAuthMode: 'authToken',
     apiKeyUrl: 'https://platform.deepseek.com/api_keys',
   },
   {
@@ -124,7 +129,11 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
       anthropic: 'https://api.moonshot.cn/anthropic',
       openai: 'https://api.moonshot.cn/v1',
     },
-    models: [{ id: 'kimi-k2.6', name: 'Kimi K2.6' }],
+    models: [
+      { id: 'kimi-k3', name: 'Kimi K3' },
+      { id: 'kimi-k2.6', name: 'Kimi K2.6' },
+    ],
+    anthropicAuthMode: 'authToken',
     apiKeyUrl: 'https://platform.moonshot.cn/console/api-keys',
   },
   {
@@ -143,6 +152,7 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'qwen3-coder-plus', name: 'Qwen3 Coder Plus' },
       { id: 'qwen3-coder-480b-a35b-instruct', name: 'Qwen3 Coder 480B' },
     ],
+    anthropicAuthMode: 'authToken',
     apiKeyUrl: 'https://bailian.console.aliyun.com/?apiKey=1',
   },
   {
@@ -161,6 +171,7 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'glm-4.7', name: 'GLM 4.7' },
       { id: 'glm-4.7-flash', name: 'GLM 4.7 Flash' },
     ],
+    anthropicAuthMode: 'authToken',
     apiKeyUrl: 'https://bigmodel.cn/usercenter/proj-mgmt/apikeys',
   },
   {
@@ -177,6 +188,7 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
       { id: 'MiniMax-M2.7', name: 'MiniMax M2.7' },
       { id: 'MiniMax-M3', name: 'MiniMax M3' },
     ],
+    anthropicAuthMode: 'authToken',
     apiKeyUrl: 'https://platform.minimaxi.com/user-center/basic-information/interface-key',
   },
 ];
@@ -355,6 +367,12 @@ export class WeSightSettingTab extends PluginSettingTab {
     let format = this.resolveInitialProviderFormat(preset, anyExistingProfile, agentFilter);
     let modelItems = toModelItems(anyExistingProfile, preset);
     let selectedModelId = anyExistingProfile?.defaultModel || anyExistingProfile?.model || modelItems[0]?.id || '';
+    let anthropicAuthMode = inferAnthropicAuthMode(
+      'claude',
+      preset.label,
+      anyExistingProfile?.baseUrl || preset.baseUrls.anthropic,
+      anyExistingProfile?.anthropicAuthMode ?? preset.anthropicAuthMode,
+    ) ?? 'authToken';
 
     const consoleEl = section.createDiv({ cls: 'wesight-provider-console' });
     const sidebar = consoleEl.createDiv({ cls: 'wesight-provider-sidebar' });
@@ -491,22 +509,42 @@ export class WeSightSettingTab extends PluginSettingTab {
     }
     formatHelp.setText(`请选择 API 协议格式：${providerFormatLabel(format)}`);
 
+    const authField = detail.createDiv({ cls: 'wesight-provider-field' });
+    authField.createDiv({ cls: 'wesight-provider-field-head' }).createSpan({ text: 'Claude 鉴权方式' });
+    const authOptions = authField.createDiv({ cls: 'wesight-api-format-options' });
+    const authGroupName = `wesight-provider-auth-${preset.key}-${agentFilter ?? 'all'}`;
+    for (const option of [
+      { value: 'authToken' as const, label: 'Auth Token（兼容服务）' },
+      { value: 'apiKey' as const, label: 'API Key（Anthropic 官方）' },
+    ]) {
+      const optionEl = authOptions.createEl('label');
+      const radio = optionEl.createEl('input', {
+        attr: { type: 'radio', name: authGroupName, value: option.value },
+      });
+      radio.checked = anthropicAuthMode === option.value;
+      radio.disabled = (agentFilter ?? providerAgentForFormat(format)) !== 'claude';
+      radio.onchange = () => {
+        if (radio.checked) anthropicAuthMode = option.value;
+      };
+      optionEl.createSpan({ text: option.label });
+    }
+    authField.createDiv({
+      cls: 'wesight-provider-help',
+      text: 'Moonshot 等 Anthropic 兼容服务使用 Auth Token；api.anthropic.com 使用 API Key。',
+    });
+
     const testRow = detail.createDiv({ cls: 'wesight-provider-test-row' });
     const testBtn = testRow.createEl('button', { text: '测试连接', attr: { type: 'button' } });
-    testBtn.onclick = () => void this.loadModelsIntoPanel({
+    testBtn.onclick = () => void this.testProviderConfiguration({
       preset,
       agentFilter,
       getFormat: () => format,
+      getAnthropicAuthMode: () => anthropicAuthMode,
+      getModel: () => selectedModelId || modelItems[0]?.id || '',
       baseUrlInput,
       apiKeyInput,
       existingApiKey: anyExistingProfile?.apiKey ?? '',
-      setModels: next => {
-        modelItems = mergeModelItems([...modelItems, ...next]);
-        selectedModelId = modelItems.find(item => item.id === selectedModelId)?.id ?? modelItems[0]?.id ?? '';
-      },
-      renderModelCards,
       trigger: testBtn,
-      noticePrefix: '连接成功',
     });
 
     const modelHead = detail.createDiv({ cls: 'wesight-provider-model-head' });
@@ -519,6 +557,7 @@ export class WeSightSettingTab extends PluginSettingTab {
       preset,
       agentFilter,
       getFormat: () => format,
+      getAnthropicAuthMode: () => anthropicAuthMode,
       baseUrlInput,
       apiKeyInput,
       existingApiKey: anyExistingProfile?.apiKey ?? '',
@@ -685,6 +724,7 @@ export class WeSightSettingTab extends PluginSettingTab {
       existingApiKey: anyExistingProfile?.apiKey ?? '',
       models: modelItems,
       defaultModel: selectedModelId || modelItems[0]?.id || '',
+      anthropicAuthMode,
     });
   }
 
@@ -741,6 +781,7 @@ export class WeSightSettingTab extends PluginSettingTab {
     preset: ProviderPreset;
     agentFilter?: AgentId;
     getFormat: () => ProviderApiFormat;
+    getAnthropicAuthMode: () => AnthropicAuthMode;
     baseUrlInput: HTMLInputElement;
     apiKeyInput: HTMLInputElement;
     existingApiKey: string;
@@ -760,6 +801,7 @@ export class WeSightSettingTab extends PluginSettingTab {
           agentId: options.agentFilter ?? providerAgentForFormat(format),
           baseUrl: options.baseUrlInput.value,
           apiKey,
+          anthropicAuthMode: options.getAnthropicAuthMode(),
         },
         fallback: altBaseUrl
           ? { agentId: providerAgentForFormat(altFormat), baseUrl: altBaseUrl, apiKey }
@@ -788,6 +830,37 @@ export class WeSightSettingTab extends PluginSettingTab {
     }
   }
 
+  private async testProviderConfiguration(options: {
+    preset: ProviderPreset;
+    agentFilter?: AgentId;
+    getFormat: () => ProviderApiFormat;
+    getAnthropicAuthMode: () => AnthropicAuthMode;
+    getModel: () => string;
+    baseUrlInput: HTMLInputElement;
+    apiKeyInput: HTMLInputElement;
+    existingApiKey: string;
+    trigger: HTMLButtonElement;
+  }): Promise<void> {
+    options.trigger.disabled = true;
+    try {
+      const format = options.getFormat();
+      const agentId = options.agentFilter ?? providerAgentForFormat(format);
+      await testProviderConnection({
+        agentId,
+        baseUrl: options.baseUrlInput.value,
+        apiKey: options.apiKeyInput.value || options.existingApiKey,
+        anthropicAuthMode: options.getAnthropicAuthMode(),
+        model: options.getModel(),
+        wireApi: providerWireApi(options.preset, format),
+      });
+      new Notice(`连接成功：${options.getModel()}`);
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    } finally {
+      options.trigger.disabled = false;
+    }
+  }
+
   private async saveProviderPresetProfile(options: {
     preset: ProviderPreset;
     agentFilter?: AgentId;
@@ -797,19 +870,26 @@ export class WeSightSettingTab extends PluginSettingTab {
     existingApiKey: string;
     models: ProviderModelPreset[];
     defaultModel: string;
+    anthropicAuthMode: AnthropicAuthMode;
   }): Promise<void> {
     try {
       const targetAgent = options.agentFilter ?? providerAgentForFormat(options.format);
       const existing = this.findPresetProfile(options.preset, targetAgent);
+      const baseUrl = options.baseUrl.trim() || options.preset.baseUrls[options.format];
+      const apiKey = options.apiKey || options.existingApiKey;
+      if (requiresProviderApiKey(baseUrl) && !apiKey.trim()) {
+        throw new Error('远程模型服务需要 API Key，请重新输入后保存。');
+      }
       const profile = this.deps.providerStore.save({
         agentId: targetAgent,
         id: existing?.id,
         name: options.preset.label,
         defaultModel: options.defaultModel,
         models: options.models.map(model => model.id),
-        baseUrl: options.baseUrl.trim() || options.preset.baseUrls[options.format],
-        apiKey: options.apiKey || options.existingApiKey,
+        baseUrl,
+        apiKey,
         wireApi: providerWireApi(options.preset, options.format),
+        anthropicAuthMode: targetAgent === 'claude' ? options.anthropicAuthMode : undefined,
         isDefault: true,
       });
       const settings = this.deps.getSettings();
@@ -1119,7 +1199,9 @@ function providerWireApi(preset: ProviderPreset, format: ProviderApiFormat): Pro
 }
 
 function toModelItems(profile: ProviderProfile | null, preset: ProviderPreset): ProviderModelPreset[] {
-  const ids = profile?.models.length ? profile.models : preset.models.map(model => model.id);
+  const ids = profile
+    ? [...profile.models, ...preset.models.map(model => model.id)]
+    : preset.models.map(model => model.id);
   const items = ids.map(id => {
     const presetModel = preset.models.find(model => model.id === id);
     return {

@@ -9,6 +9,11 @@ import {
   parseCodexStreamLine,
   parseOpenCodeStreamLine,
 } from './parsers';
+import {
+  classifyClaudeProviderError,
+  extractClaudeConnectorWarning,
+  stripClaudeConnectorWarning,
+} from './errors';
 
 export interface AgentAdapterOptions {
   agentId: AgentId;
@@ -19,12 +24,19 @@ export interface AgentAdapterOptions {
 
 export class AgentAdapter extends EventEmitter {
   private child: ChildProcess | null = null;
+  private terminalErrorEmitted = false;
+  private cancelled = false;
+  private pendingTerminalError: Extract<RuntimeTurnEvent, { type: 'error' }> | null = null;
+  private terminalErrorTimer: number | null = null;
 
   constructor(private readonly options: AgentAdapterOptions) {
     super();
   }
 
   run(request: ChatTurnRequest): Promise<void> {
+    this.terminalErrorEmitted = false;
+    this.cancelled = false;
+    this.clearPendingTerminalError();
     const baseEnv = mergeEnvironment(process.env, this.options.sharedEnvironmentVariables);
     const projection = request.configSource === 'providerProfile'
       ? prepareProviderProjection(this.options.agentId, this.options.providerProfile, baseEnv)
@@ -64,10 +76,19 @@ export class AgentAdapter extends EventEmitter {
       child.stderr?.on('data', (chunk: unknown) => {
         const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
         stderrTail = appendTail(stderrTail, text);
+        if (this.options.agentId === 'claude' && this.options.providerProfile) {
+          const classified = classifyClaudeProviderError(stderrTail, {
+            providerName: this.options.providerProfile?.name,
+            providerProfileId: this.options.providerProfile?.id,
+          });
+          if (classified) this.scheduleTerminalProviderError(classified);
+        }
       });
 
       child.on('error', error => {
+        this.clearPendingTerminalError();
         projection.cleanup();
+        this.terminalErrorEmitted = true;
         this.emitEvent({ type: 'error', message: `Failed to start ${this.options.agentId}: ${error.message}` });
         resolve();
       });
@@ -76,8 +97,18 @@ export class AgentAdapter extends EventEmitter {
         if (stdoutBuffer.trim()) {
           this.emitParsed(stdoutBuffer);
         }
+        this.flushTerminalProviderError();
         projection.cleanup();
         this.child = null;
+        if (this.terminalErrorEmitted) {
+          resolve();
+          return;
+        }
+        if (this.cancelled) {
+          this.emitEvent({ type: 'done' });
+          resolve();
+          return;
+        }
         if (code === 0) {
           if (!sawOutput) {
             this.emitEvent({ type: 'text', content: 'The runtime finished without visible output.' });
@@ -87,10 +118,16 @@ export class AgentAdapter extends EventEmitter {
           return;
         }
         const message = `${this.options.agentId} exited with code ${code ?? 'unknown'}${signal ? ` (${signal})` : ''}.`;
+        const providerClaudeRun = this.options.agentId === 'claude' && Boolean(this.options.providerProfile);
+        const cleanedStderr = providerClaudeRun
+          ? stripClaudeConnectorWarning(stderrTail)
+          : stderrTail.trim();
         this.emitEvent({
           type: 'error',
           message,
-          detail: stderrTail.trim() || undefined,
+          detail: cleanedStderr || undefined,
+          providerProfileId: this.options.providerProfile?.id,
+          diagnostic: providerClaudeRun ? extractClaudeConnectorWarning(stderrTail) : undefined,
         });
         resolve();
       });
@@ -100,6 +137,7 @@ export class AgentAdapter extends EventEmitter {
   cancel(): void {
     const child = this.child;
     if (!child) return;
+    this.cancelled = true;
     child.kill('SIGTERM');
     const killTimer = window.setTimeout(() => {
       if (child.exitCode === null && child.signalCode === null) {
@@ -197,8 +235,65 @@ export class AgentAdapter extends EventEmitter {
         ? parseCodexStreamLine(line)
         : parseOpenCodeStreamLine(line);
     for (const event of events) {
+      if (event.type === 'error') {
+        if (this.terminalErrorEmitted) continue;
+        const classified = this.options.agentId === 'claude' && this.options.providerProfile
+          ? classifyClaudeProviderError(`${event.message}\n${event.detail ?? ''}`, {
+            providerName: this.options.providerProfile?.name,
+            providerProfileId: this.options.providerProfile?.id,
+          })
+          : null;
+        if (classified) {
+          this.scheduleTerminalProviderError(classified);
+          continue;
+        }
+        this.terminalErrorEmitted = true;
+      }
       this.emitEvent(event);
     }
+  }
+
+  private emitTerminalProviderError(event: Extract<RuntimeTurnEvent, { type: 'error' }>): void {
+    if (this.terminalErrorEmitted) return;
+    this.clearPendingTerminalError();
+    this.terminalErrorEmitted = true;
+    this.emitEvent(event);
+    const child = this.child;
+    if (child && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM');
+    }
+  }
+
+  private scheduleTerminalProviderError(event: Extract<RuntimeTurnEvent, { type: 'error' }>): void {
+    if (this.terminalErrorEmitted) return;
+    const pending = this.pendingTerminalError;
+    this.pendingTerminalError = pending
+      ? {
+        ...event,
+        detail: event.detail && event.detail.length >= (pending.detail?.length ?? 0) ? event.detail : pending.detail,
+        statusCode: event.statusCode ?? pending.statusCode,
+        retryAfterSeconds: event.retryAfterSeconds ?? pending.retryAfterSeconds,
+        requestId: event.requestId ?? pending.requestId,
+        providerProfileId: event.providerProfileId ?? pending.providerProfileId,
+        diagnostic: event.diagnostic ?? pending.diagnostic,
+      }
+      : event;
+    if (this.terminalErrorTimer) window.clearTimeout(this.terminalErrorTimer);
+    // Claude often prints the request id on the next stderr line. A short
+    // debounce keeps the failure immediate while preserving that metadata.
+    this.terminalErrorTimer = window.setTimeout(() => this.flushTerminalProviderError(), 40);
+  }
+
+  private flushTerminalProviderError(): void {
+    const event = this.pendingTerminalError;
+    this.clearPendingTerminalError();
+    if (event) this.emitTerminalProviderError(event);
+  }
+
+  private clearPendingTerminalError(): void {
+    if (this.terminalErrorTimer) window.clearTimeout(this.terminalErrorTimer);
+    this.terminalErrorTimer = null;
+    this.pendingTerminalError = null;
   }
 
   private emitEvent(event: RuntimeTurnEvent): void {

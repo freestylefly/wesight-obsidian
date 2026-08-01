@@ -2,7 +2,13 @@ vi.mock('obsidian', () => ({
   requestUrl: vi.fn(),
 }));
 
-import { parseModelIds, resolveProviderModels } from '../src/utils/providerModels';
+import { requestUrl } from 'obsidian';
+
+import { parseModelIds, resolveProviderModels, testProviderConnection } from '../src/utils/providerModels';
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
 
 describe('parseModelIds', () => {
   test('reads OpenAI/Anthropic { data: [{ id }] } shape', () => {
@@ -68,12 +74,113 @@ describe('resolveProviderModels', () => {
     expect(result).toEqual({ models: ['deepseek-v4-pro'], source: 'preset' });
   });
 
-  test('rethrows the original error when there is nothing to fall back to', async () => {
+  test('surfaces authentication errors without falling back to presets', async () => {
+    const fetcher = vi.fn(async () => {
+      throw new Error('status 401 unauthorized');
+    });
     await expect(resolveProviderModels({
       primary,
+      fallback,
+      presetModelIds: ['preset-only'],
+      fetcher,
+    })).rejects.toThrow('API 鉴权失败（401）');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  test('reads authentication status from structured request errors', async () => {
+    const structuredError = Object.assign(new Error('forbidden'), { status: 403 });
+    await expect(resolveProviderModels({
+      primary,
+      presetModelIds: ['preset-only'],
       fetcher: async () => {
-        throw new Error('status 401 unauthorized');
+        throw structuredError;
       },
-    })).rejects.toThrow('status 401 unauthorized');
+    })).rejects.toThrow('API 鉴权失败（403）');
+  });
+
+  test('surfaces rate limits without retrying alternate model-list routes', async () => {
+    const fetcher = vi.fn(async () => {
+      throw new Error('request rejected (429)');
+    });
+    await expect(resolveProviderModels({
+      primary,
+      fallback,
+      presetModelIds: ['preset-only'],
+      fetcher,
+    })).rejects.toThrow('请求受限（429）');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  test('keeps rate-limit cooldown and request metadata in connection errors', async () => {
+    vi.mocked(requestUrl).mockRejectedValue(new Error(
+      'request rejected (429), wait 120 seconds, request id: request-123',
+    ));
+    await expect(testProviderConnection({
+      agentId: 'claude',
+      baseUrl: 'https://api.moonshot.cn/anthropic',
+      apiKey: 'sk-moonshot',
+      anthropicAuthMode: 'authToken',
+      model: 'kimi-k3',
+    })).rejects.toThrow('等待 120 秒');
+    await expect(testProviderConnection({
+      agentId: 'claude',
+      baseUrl: 'https://api.moonshot.cn/anthropic',
+      apiKey: 'sk-moonshot',
+      anthropicAuthMode: 'authToken',
+      model: 'kimi-k3',
+    })).rejects.toThrow('请求 ID：request-123');
+  });
+});
+
+describe('testProviderConnection', () => {
+  test('uses bearer auth for Moonshot Anthropic-compatible requests', async () => {
+    vi.mocked(requestUrl).mockResolvedValue({ json: {} } as never);
+    await testProviderConnection({
+      agentId: 'claude',
+      baseUrl: 'https://api.moonshot.cn/anthropic',
+      apiKey: 'sk-moonshot',
+      anthropicAuthMode: 'authToken',
+      model: 'kimi-k3',
+    });
+    const request: unknown = vi.mocked(requestUrl).mock.calls[0]?.[0];
+    expect(request).toMatchObject({
+      url: 'https://api.moonshot.cn/anthropic/v1/messages',
+      headers: { Authorization: 'Bearer sk-moonshot' },
+    });
+    const headers = request && typeof request === 'object'
+      ? (request as { headers?: Record<string, string> }).headers
+      : {};
+    expect(headers).not.toHaveProperty('x-api-key');
+  });
+
+  test('uses x-api-key for official Anthropic requests', async () => {
+    vi.mocked(requestUrl).mockResolvedValue({ json: {} } as never);
+    await testProviderConnection({
+      agentId: 'claude',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-anthropic',
+      anthropicAuthMode: 'apiKey',
+      model: 'claude-sonnet-4-6',
+    });
+    const request: unknown = vi.mocked(requestUrl).mock.calls[0]?.[0];
+    expect(request).toMatchObject({ headers: { 'x-api-key': 'sk-anthropic' } });
+    const headers = request && typeof request === 'object'
+      ? (request as { headers?: Record<string, string> }).headers
+      : {};
+    expect(headers).not.toHaveProperty('Authorization');
+  });
+
+  test('keeps an existing OpenAI-compatible version path', async () => {
+    vi.mocked(requestUrl).mockResolvedValue({ json: {} } as never);
+    await testProviderConnection({
+      agentId: 'codex',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      apiKey: 'google-key',
+      model: 'gemini-3.5-flash',
+      wireApi: 'chat',
+    });
+    expect(vi.mocked(requestUrl).mock.calls[0]?.[0]).toMatchObject({
+      url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    });
   });
 });

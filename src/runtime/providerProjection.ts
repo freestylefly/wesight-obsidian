@@ -4,6 +4,7 @@ import path from 'path';
 import { tmpDir } from '../paths';
 import type { AgentId, ProviderProfile } from '../types';
 import { ensureDir, safeRemoveDir, writeJsonFile } from '../utils/fs';
+import { resolveAnthropicAuthMode } from '../utils/providerAuth';
 
 export interface ProviderProjection {
   env: NodeJS.ProcessEnv;
@@ -69,9 +70,14 @@ export function prepareProviderProjection(
   if (agentId === 'claude') {
     const env = { ...baseEnv };
     const model = profileModel(profile);
+    delete env.ANTHROPIC_API_KEY;
+    delete env.ANTHROPIC_AUTH_TOKEN;
     if (profile.apiKey) {
-      env.ANTHROPIC_API_KEY = profile.apiKey;
-      env.ANTHROPIC_AUTH_TOKEN = profile.apiKey;
+      if (resolveAnthropicAuthMode(profile) === 'apiKey') {
+        env.ANTHROPIC_API_KEY = profile.apiKey;
+      } else {
+        env.ANTHROPIC_AUTH_TOKEN = profile.apiKey;
+      }
     }
     if (profile.baseUrl) {
       env.ANTHROPIC_BASE_URL = profile.baseUrl;

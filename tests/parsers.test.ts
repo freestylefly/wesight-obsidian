@@ -11,6 +11,15 @@ describe('stream parsers', () => {
     expect(events).toContainEqual({ type: 'text', content: 'hello' });
   });
 
+  test('parses Claude result errors', () => {
+    expect(parseClaudeStreamLine(JSON.stringify({
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      result: 'API Error: Request rejected (429)',
+    }))).toContainEqual({ type: 'error', message: 'API Error: Request rejected (429)' });
+  });
+
   test('parses Codex deltas and errors', () => {
     expect(parseCodexStreamLine(JSON.stringify({
       type: 'item.agent_message.delta',
