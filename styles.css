@@ -2801,10 +2801,10 @@ button.wesight-share-primary-button.is-wechat:hover {
 
 .wesight-wechat-publish-toolbar {
   display: grid;
-  grid-template-columns: minmax(145px, 0.85fr) minmax(132px, 1fr) 34px;
+  grid-template-columns: minmax(132px, 0.9fr) minmax(128px, 0.82fr) minmax(0, 1fr) 28px;
   align-items: center;
-  gap: 12px;
-  padding: 13px 18px;
+  gap: 8px;
+  padding: 13px 14px;
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
 }
@@ -2823,6 +2823,163 @@ button.wesight-share-primary-button.is-wechat:hover {
 .wesight-wechat-publish-button:hover:not(:disabled) {
   border-color: #06ad56 !important;
   background: #06ad56 !important;
+}
+
+.wesight-wechat-theme-trigger {
+  display: flex;
+  min-width: 0;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  box-shadow: none;
+  color: var(--text-normal);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.wesight-wechat-theme-trigger:hover:not(:disabled),
+.wesight-wechat-theme-trigger[aria-expanded='true'] {
+  border-color: rgba(7, 193, 96, 0.45);
+  background: rgba(7, 193, 96, 0.06);
+}
+
+.wesight-wechat-theme-trigger-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wesight-wechat-theme-trigger > span:last-child {
+  display: flex;
+  flex: 0 0 auto;
+}
+
+.wesight-wechat-theme-trigger svg {
+  width: 14px;
+  height: 14px;
+}
+
+.wesight-wechat-theme-trigger:disabled svg {
+  animation: wesight-share-spin 0.9s linear infinite;
+}
+
+.wesight-wechat-theme-menu,
+.wesight-wechat-theme-submenu {
+  position: fixed;
+  z-index: var(--layer-modal, 10000);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+}
+
+.wesight-wechat-theme-menu {
+  width: 158px;
+}
+
+.wesight-wechat-theme-submenu {
+  z-index: var(--layer-popover, 10001);
+  width: 224px;
+}
+
+.wesight-wechat-theme-menu-item {
+  display: flex;
+  min-width: 0;
+  min-height: 36px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.2;
+  outline: none;
+}
+
+.wesight-wechat-theme-menu-item:hover,
+.wesight-wechat-theme-menu-item:focus,
+.wesight-wechat-theme-menu-item.is-active,
+.wesight-wechat-theme-menu-item.is-selected {
+  background: rgba(7, 193, 96, 0.1);
+}
+
+.wesight-wechat-theme-menu-item.is-active,
+.wesight-wechat-theme-menu-item.is-selected {
+  color: #07994d;
+}
+
+.wesight-wechat-theme-menu-item.has-submenu > span:first-child:not(.wesight-wechat-theme-menu-icon) {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.wesight-wechat-theme-menu-item.is-ai {
+  margin-top: 3px;
+  border-top: 1px solid var(--background-modifier-border);
+  border-radius: 0 0 6px 6px;
+  color: var(--text-normal);
+}
+
+.wesight-wechat-theme-menu-icon,
+.wesight-wechat-theme-menu-arrow,
+.wesight-wechat-theme-option-check {
+  display: flex;
+  flex: 0 0 auto;
+}
+
+.wesight-wechat-theme-menu-icon {
+  color: #07b95b;
+}
+
+.wesight-wechat-theme-menu-arrow {
+  margin-left: auto;
+  color: var(--text-faint);
+}
+
+.wesight-wechat-theme-menu-icon svg,
+.wesight-wechat-theme-menu-arrow svg,
+.wesight-wechat-theme-option-check svg {
+  width: 14px;
+  height: 14px;
+}
+
+.wesight-wechat-theme-swatch {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 50%;
+}
+
+.wesight-wechat-theme-option-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wesight-wechat-theme-option-note {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.wesight-wechat-theme-option-check {
+  margin-left: auto;
+  color: #07b95b;
 }
 
 .wesight-wechat-publish-state {
@@ -3217,12 +3374,16 @@ body.theme-dark .wesight-wechat-publish-button {
   }
 
   .wesight-wechat-publish-toolbar {
-    grid-template-columns: minmax(130px, 1fr) 34px;
+    grid-template-columns: minmax(125px, 1fr) minmax(112px, 0.86fr) 28px;
   }
 
   .wesight-wechat-publish-state {
     grid-row: 2;
     grid-column: 1 / -1;
+  }
+
+  .wesight-wechat-publish-more {
+    grid-column: 3;
   }
 
   .wesight-wechat-publishing-settings {

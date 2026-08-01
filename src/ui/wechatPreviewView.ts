@@ -12,6 +12,7 @@ import {
 import { CloudAuthService } from '../share/cloudAuth';
 import { CloudApiError } from '../share/cloudApi';
 import { WeChatCloudApi } from '../wechat/cloudApi';
+import { WeChatThemeService } from '../wechat/themeService';
 import {
   WECHAT_CONTENT_HASH_FRONTMATTER_KEY,
   WECHAT_DRAFT_ID_FRONTMATTER_KEY,
@@ -34,6 +35,15 @@ import type {
   WeChatDraftState,
   WeChatPreviewSnapshot,
 } from '../wechat/types';
+import type { WeSightObsidianSettings } from '../types';
+import {
+  createTemplateThemeDocument,
+  getWeChatTheme,
+  listWeChatThemes,
+  type WeChatThemeDocument,
+  type WeChatThemeId,
+  type WeChatThemeKind,
+} from '../wechat/themes';
 import { recordValue } from '../utils/records';
 import { confirmShareAction } from './shareConfirm';
 
@@ -44,6 +54,9 @@ type WeChatPreviewTab = 'preview' | 'settings';
 interface WeChatPreviewViewOptions {
   auth: CloudAuthService;
   api: WeChatCloudApi;
+  themeService: WeChatThemeService;
+  getSettings: () => WeSightObsidianSettings;
+  saveSettings: () => Promise<void>;
   openSettings: () => void;
 }
 
@@ -65,6 +78,10 @@ export class WeChatPreviewView extends ItemView {
   private temporaryCover: WeChatAssetDraft | null = null;
   private refreshTimer: number | null = null;
   private activeTab: WeChatPreviewTab = 'preview';
+  private themeDocument: WeChatThemeDocument | null = null;
+  private themeMenuEl: HTMLElement | null = null;
+  private themeSubmenuEl: HTMLElement | null = null;
+  private themeMenuHideTimer: number | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -86,6 +103,14 @@ export class WeChatPreviewView extends ItemView {
   }
 
   override async onOpen(): Promise<void> {
+    this.registerDomEvent(document, 'click', event => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (
+        !target?.closest('.wesight-wechat-theme-trigger')
+        && !this.themeMenuEl?.contains(target)
+        && !this.themeSubmenuEl?.contains(target)
+      ) this.closeThemeMenus();
+    });
     this.register(this.options.auth.onChange(() => {
       void this.reload();
     }));
@@ -110,6 +135,7 @@ export class WeChatPreviewView extends ItemView {
   override async onClose(): Promise<void> {
     if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
+    this.closeThemeMenus();
     this.clearTemporaryCover();
   }
 
@@ -169,6 +195,7 @@ export class WeChatPreviewView extends ItemView {
       this.titleValue = this.snapshot.title;
       this.authorValue = this.snapshot.author;
       this.digestValue = this.snapshot.digest;
+      this.loadCachedThemeDocument(this.snapshot);
       const publishState = parseWeChatPublishState(
         this.app.metadataCache.getFileCache(this.file)?.frontmatter,
       );
@@ -252,7 +279,7 @@ export class WeChatPreviewView extends ItemView {
     actions.appendChild(refresh);
     setIcon(refresh, 'refresh-cw');
     refresh.disabled = this.loading || Boolean(this.operation);
-    refresh.onclick = () => void this.reload();
+    refresh.onclick = () => void this.refreshPreview();
   }
 
   private renderLogin(parent: HTMLElement): void {
@@ -307,6 +334,15 @@ export class WeChatPreviewView extends ItemView {
       );
     }
 
+    const prepared = this.preparedSnapshot();
+    if (this.themeNeedsGeneration(prepared)) {
+      this.renderBanner(
+        parent,
+        'sparkles',
+        `${getWeChatTheme(this.currentThemeId()).label} 主题待重新生成，当前暂时显示 Canghe Style 预览。`,
+      );
+    }
+
     if (this.activeTab === 'settings') {
       this.renderPublishingSettings(parent, snapshot);
       return;
@@ -317,7 +353,9 @@ export class WeChatPreviewView extends ItemView {
     const canvasWrap = parent.createDiv({ cls: 'wesight-wechat-preview-canvas-wrap' });
     const canvas = canvasWrap.createDiv({ cls: 'wesight-wechat-preview-canvas' });
     const article = canvas.createDiv({ cls: 'wesight-wechat-preview-article' });
-    void renderWeChatArticle(this.app, this, snapshot, article).catch((error) => {
+    void renderWeChatArticle(this.app, this, prepared, article, {
+      themeDocument: this.validThemeDocument(prepared),
+    }).catch((error) => {
       this.error = error instanceof Error ? error.message : '排版渲染失败';
       this.render();
     });
@@ -365,7 +403,10 @@ export class WeChatPreviewView extends ItemView {
   private renderPublishingToolbar(parent: HTMLElement, snapshot: WeChatPreviewSnapshot): void {
     const toolbar = parent.createDiv({ cls: 'wesight-wechat-publish-toolbar' });
     const prepared = this.preparedSnapshot();
-    const unchanged = Boolean(this.draft && prepared.contentHash === this.draft.contentHash);
+    const themeDocument = this.validThemeDocument(prepared);
+    const themeNeedsGeneration = this.themeNeedsGeneration(prepared);
+    const publicationHash = themeDocument?.contentHash ?? prepared.contentHash;
+    const unchanged = Boolean(this.draft && publicationHash === this.draft.contentHash);
     const updateExisting = Boolean(this.draft && !this.duplicatePath && !this.staleDraft);
     const hasBlockingWarnings = snapshot.warnings.some((warning) => warning.blocking);
     const primary = toolbar.createEl('button', {
@@ -375,8 +416,28 @@ export class WeChatPreviewView extends ItemView {
     });
     primary.disabled = Boolean(this.operation)
       || unchanged
+      || themeNeedsGeneration
       || (hasBlockingWarnings && !this.acknowledgedWarnings);
     primary.onclick = () => void this.publish(false);
+
+    const currentTheme = getWeChatTheme(this.currentThemeId());
+    const themeTrigger = toolbar.createEl('button', {
+      cls: 'wesight-wechat-theme-trigger',
+      attr: {
+        type: 'button',
+        'aria-label': `选择公众号主题，当前为 ${currentTheme.label}`,
+        'aria-haspopup': 'menu',
+        'aria-expanded': String(Boolean(this.themeMenuEl)),
+      },
+    });
+    themeTrigger.createSpan({
+      cls: 'wesight-wechat-theme-trigger-label',
+      text: `主题 · ${currentTheme.label}`,
+    });
+    const themeChevron = themeTrigger.createSpan();
+    setIcon(themeChevron, this.operation?.includes('主题') ? 'loader-circle' : 'chevron-down');
+    themeTrigger.disabled = Boolean(this.operation);
+    themeTrigger.onclick = event => this.showThemeMenu(event, themeTrigger);
 
     const state = toolbar.createDiv({ cls: 'wesight-wechat-publish-state' });
     const stateIcon = state.createSpan();
@@ -384,6 +445,9 @@ export class WeChatPreviewView extends ItemView {
       state.addClass('is-loading');
       setIcon(stateIcon, 'loader-circle');
       state.createSpan({ text: this.operation });
+    } else if (themeNeedsGeneration) {
+      setIcon(stateIcon, 'sparkles');
+      state.createSpan({ text: '主题待重新生成' });
     } else if (unchanged) {
       state.addClass('is-success');
       setIcon(stateIcon, 'circle-check');
@@ -403,6 +467,183 @@ export class WeChatPreviewView extends ItemView {
     setIcon(more, 'more-vertical');
     more.disabled = Boolean(this.operation);
     more.onclick = (event) => this.showPublishingMenu(event);
+  }
+
+  private showThemeMenu(event: MouseEvent, trigger: HTMLButtonElement): void {
+    event.stopPropagation();
+    if (this.themeMenuEl) {
+      this.closeThemeMenus();
+      trigger.setAttribute('aria-expanded', 'false');
+      return;
+    }
+    const menu = createDiv({ cls: 'wesight-wechat-theme-menu' });
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', '公众号主题');
+    this.renderThemeCategory(menu, 'template', '模板');
+    this.renderThemeCategory(menu, 'skill', '主题 Skill');
+
+    const ai = menu.createDiv({
+      cls: 'wesight-wechat-theme-menu-item has-submenu is-ai',
+      attr: { role: 'menuitem', tabindex: '0' },
+    });
+    const aiIcon = ai.createSpan({ cls: 'wesight-wechat-theme-menu-icon' });
+    setIcon(aiIcon, 'sparkles');
+    ai.createSpan({ text: 'AI自定义主题' });
+    const aiArrow = ai.createSpan({ cls: 'wesight-wechat-theme-menu-arrow' });
+    setIcon(aiArrow, 'chevron-right');
+    const showComingSoon = (aiEvent: Event): void => {
+      aiEvent.stopPropagation();
+      this.closeThemeMenus();
+      new Notice('AI自定义主题即将支持。');
+    };
+    ai.onclick = showComingSoon;
+    ai.onkeydown = aiEvent => {
+      if (aiEvent.key === 'Enter' || aiEvent.key === ' ') showComingSoon(aiEvent);
+      if (aiEvent.key === 'Escape') this.closeThemeMenus();
+    };
+
+    menu.addEventListener('mouseenter', () => this.cancelThemeMenuHide());
+    menu.addEventListener('mouseleave', () => this.scheduleThemeMenuHide());
+    document.body.appendChild(menu);
+    this.themeMenuEl = menu;
+    trigger.setAttribute('aria-expanded', 'true');
+    this.positionThemeMenu(menu, trigger.getBoundingClientRect(), 'below');
+    menu.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }
+
+  private renderThemeCategory(
+    menu: HTMLElement,
+    kind: WeChatThemeKind,
+    label: string,
+  ): void {
+    const item = menu.createDiv({
+      cls: 'wesight-wechat-theme-menu-item has-submenu',
+      attr: { role: 'menuitem', tabindex: '0' },
+    });
+    item.createSpan({ text: label });
+    const arrow = item.createSpan({ cls: 'wesight-wechat-theme-menu-arrow' });
+    setIcon(arrow, 'chevron-right');
+    const open = (event?: Event): void => {
+      event?.stopPropagation();
+      this.showThemeSubmenu(kind, item);
+    };
+    item.addEventListener('mouseenter', open);
+    item.addEventListener('mouseleave', () => this.scheduleThemeMenuHide());
+    item.onclick = open;
+    item.onfocus = () => this.showThemeSubmenu(kind, item);
+    item.onkeydown = itemEvent => {
+      if (itemEvent.key === 'Enter' || itemEvent.key === ' ' || itemEvent.key === 'ArrowRight') {
+        itemEvent.preventDefault();
+        open(itemEvent);
+        this.themeSubmenuEl?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+      }
+      if (itemEvent.key === 'ArrowDown') {
+        itemEvent.preventDefault();
+        (item.nextElementSibling as HTMLElement | null)?.focus();
+      }
+      if (itemEvent.key === 'ArrowUp') {
+        itemEvent.preventDefault();
+        (item.previousElementSibling as HTMLElement | null)?.focus();
+      }
+      if (itemEvent.key === 'Escape') this.closeThemeMenus();
+    };
+  }
+
+  private showThemeSubmenu(kind: WeChatThemeKind, trigger: HTMLElement): void {
+    this.cancelThemeMenuHide();
+    this.themeSubmenuEl?.remove();
+    this.themeSubmenuEl = null;
+    for (const item of Array.from(this.themeMenuEl?.querySelectorAll('.is-active') ?? [])) {
+      item.removeClass('is-active');
+    }
+    trigger.addClass('is-active');
+
+    const submenu = createDiv({ cls: 'wesight-wechat-theme-submenu' });
+    submenu.setAttribute('role', 'menu');
+    submenu.setAttribute('aria-label', kind === 'template' ? '模板' : '主题 Skill');
+    const currentThemeId = this.currentThemeId();
+    for (const theme of listWeChatThemes(kind)) {
+      const item = submenu.createDiv({
+        cls: 'wesight-wechat-theme-menu-item wesight-wechat-theme-option',
+        attr: { role: 'menuitem', tabindex: '0' },
+      });
+      item.toggleClass('is-selected', theme.id === currentThemeId);
+      const swatch = item.createSpan({ cls: 'wesight-wechat-theme-swatch' });
+      swatch.style.backgroundColor = theme.color;
+      item.createSpan({ cls: 'wesight-wechat-theme-option-label', text: theme.label });
+      if (theme.id === 'canghe-style') {
+        item.createSpan({ cls: 'wesight-wechat-theme-option-note', text: '默认' });
+      }
+      if (theme.id === currentThemeId) {
+        const check = item.createSpan({ cls: 'wesight-wechat-theme-option-check' });
+        setIcon(check, 'check');
+      }
+      const select = (selectEvent: Event): void => {
+        selectEvent.stopPropagation();
+        void this.selectTheme(theme.id);
+      };
+      item.onclick = select;
+      item.onkeydown = itemEvent => {
+        if (itemEvent.key === 'Enter' || itemEvent.key === ' ') select(itemEvent);
+        if (itemEvent.key === 'ArrowDown') {
+          itemEvent.preventDefault();
+          (item.nextElementSibling as HTMLElement | null)?.focus();
+        }
+        if (itemEvent.key === 'ArrowUp') {
+          itemEvent.preventDefault();
+          (item.previousElementSibling as HTMLElement | null)?.focus();
+        }
+        if (itemEvent.key === 'ArrowLeft') {
+          itemEvent.preventDefault();
+          trigger.focus();
+        }
+        if (itemEvent.key === 'Escape') this.closeThemeMenus();
+      };
+    }
+    submenu.addEventListener('mouseenter', () => this.cancelThemeMenuHide());
+    submenu.addEventListener('mouseleave', () => this.scheduleThemeMenuHide());
+    document.body.appendChild(submenu);
+    this.themeSubmenuEl = submenu;
+    this.positionThemeMenu(submenu, trigger.getBoundingClientRect(), 'side');
+  }
+
+  private positionThemeMenu(
+    menu: HTMLElement,
+    trigger: DOMRect,
+    placement: 'below' | 'side',
+  ): void {
+    const bounds = menu.getBoundingClientRect();
+    let left = placement === 'below' ? trigger.left : trigger.right + 4;
+    let top = placement === 'below' ? trigger.bottom + 4 : trigger.top - 4;
+    if (left + bounds.width > window.innerWidth - 8) {
+      left = placement === 'below'
+        ? Math.max(8, window.innerWidth - bounds.width - 8)
+        : trigger.left - bounds.width - 4;
+    }
+    if (top + bounds.height > window.innerHeight - 8) {
+      top = Math.max(8, window.innerHeight - bounds.height - 8);
+    }
+    menu.style.left = `${Math.max(8, left)}px`;
+    menu.style.top = `${Math.max(8, top)}px`;
+  }
+
+  private scheduleThemeMenuHide(): void {
+    this.cancelThemeMenuHide();
+    this.themeMenuHideTimer = window.setTimeout(() => this.closeThemeMenus(), 220);
+  }
+
+  private cancelThemeMenuHide(): void {
+    if (this.themeMenuHideTimer !== null) window.clearTimeout(this.themeMenuHideTimer);
+    this.themeMenuHideTimer = null;
+  }
+
+  private closeThemeMenus(): void {
+    this.cancelThemeMenuHide();
+    this.themeSubmenuEl?.remove();
+    this.themeMenuEl?.remove();
+    this.themeSubmenuEl = null;
+    this.themeMenuEl = null;
+    this.contentEl.querySelector('.wesight-wechat-theme-trigger')?.setAttribute('aria-expanded', 'false');
   }
 
   private showPublishingMenu(event: MouseEvent): void {
@@ -558,6 +799,88 @@ export class WeChatPreviewView extends ItemView {
     parent.createDiv({ cls: 'wesight-wechat-preview-empty', text });
   }
 
+  private currentThemeId(): WeChatThemeId {
+    return this.options.getSettings().wechatThemeId;
+  }
+
+  private loadCachedThemeDocument(snapshot: WeChatPreviewSnapshot): void {
+    const themeId = this.currentThemeId();
+    this.themeDocument = getWeChatTheme(themeId).kind === 'template'
+      ? createTemplateThemeDocument(snapshot)
+      : this.options.themeService.getCached(snapshot, themeId);
+  }
+
+  private validThemeDocument(snapshot: WeChatPreviewSnapshot): WeChatThemeDocument | null {
+    const themeId = this.currentThemeId();
+    if (getWeChatTheme(themeId).kind === 'template') {
+      return createTemplateThemeDocument(snapshot);
+    }
+    return this.themeDocument?.themeId === themeId
+      && this.themeDocument.sourceHash === snapshot.contentHash
+      ? this.themeDocument
+      : null;
+  }
+
+  private themeNeedsGeneration(snapshot: WeChatPreviewSnapshot): boolean {
+    return getWeChatTheme(this.currentThemeId()).kind === 'skill'
+      && !this.validThemeDocument(snapshot);
+  }
+
+  private async refreshPreview(): Promise<void> {
+    await this.reload();
+    if (!this.snapshot) return;
+    const themeId = this.currentThemeId();
+    if (getWeChatTheme(themeId).kind === 'skill' && this.themeNeedsGeneration(this.preparedSnapshot())) {
+      await this.generateSkillTheme(themeId, true);
+    }
+  }
+
+  private async selectTheme(themeId: WeChatThemeId): Promise<void> {
+    this.closeThemeMenus();
+    if (!this.snapshot) return;
+    if (getWeChatTheme(themeId).kind === 'skill') {
+      await this.generateSkillTheme(themeId, false);
+      return;
+    }
+    const settings = this.options.getSettings();
+    settings.wechatThemeId = themeId;
+    this.themeDocument = createTemplateThemeDocument(this.preparedSnapshot());
+    await this.options.saveSettings();
+    this.render();
+  }
+
+  private async generateSkillTheme(themeId: WeChatThemeId, force: boolean): Promise<void> {
+    if (!this.snapshot || this.operation) return;
+    const theme = getWeChatTheme(themeId);
+    const snapshot = this.preparedSnapshot();
+    const previousThemeId = this.currentThemeId();
+    const previousDocument = this.themeDocument;
+    this.operation = `正在生成 ${theme.label} 主题…`;
+    this.render();
+    try {
+      const document = await this.options.themeService.generate(snapshot, themeId, {
+        force,
+        onProgress: progress => {
+          this.operation = progress.label;
+          this.render();
+        },
+      });
+      const settings = this.options.getSettings();
+      settings.wechatThemeId = themeId;
+      this.themeDocument = document;
+      await this.options.saveSettings();
+      this.activeTab = 'preview';
+      new Notice(`${theme.label} 主题已生成。`);
+    } catch (error) {
+      this.options.getSettings().wechatThemeId = previousThemeId;
+      this.themeDocument = previousDocument;
+      new Notice(error instanceof Error ? error.message : `${theme.label} 主题生成失败`);
+    } finally {
+      this.operation = null;
+      this.render();
+    }
+  }
+
   private preparedSnapshot(): WeChatPreviewSnapshot {
     if (!this.snapshot) throw new Error('公众号预览尚未生成');
     return withWeChatSnapshotMetadata(this.snapshot, {
@@ -570,6 +893,12 @@ export class WeChatPreviewView extends ItemView {
   private async publish(asNew: boolean): Promise<void> {
     if (!this.file || !this.snapshot || !this.connection) return;
     const snapshot = this.preparedSnapshot();
+    const themeDocument = this.validThemeDocument(snapshot);
+    const theme = getWeChatTheme(this.currentThemeId());
+    if (theme.kind === 'skill' && !themeDocument) {
+      new Notice(`请先重新生成 ${theme.label} 主题预览。`);
+      return;
+    }
     if (!snapshot.title.trim()) {
       new Notice('请填写文章标题。');
       return;
@@ -608,17 +937,20 @@ export class WeChatPreviewView extends ItemView {
         }
       }
 
-      this.operation = '正在生成 Canghe Style 正文…';
+      this.operation = `正在生成 ${theme.label} 正文…`;
       this.render();
       const article = hidden.createDiv();
-      await renderWeChatArticle(this.app, this, snapshot, article, uploadedUrls);
+      await renderWeChatArticle(this.app, this, snapshot, article, {
+        uploadedUrls,
+        themeDocument,
+      });
       await replaceFormulaSvgs(article, async (asset) => {
         this.operation = '正在上传公式图片…';
         this.render();
         const result = await this.options.api.uploadAsset('content', asset);
         if (!result.url) throw new Error('公式图片上传失败');
         return result.url;
-      });
+      }, theme.kind === 'template');
       const content = serializeWeChatArticle(article);
       const thumbMediaId = await this.resolveCoverMediaId(snapshot);
       const payload: WeChatDraftPayload = {
@@ -626,7 +958,7 @@ export class WeChatPreviewView extends ItemView {
         ...(snapshot.author ? { author: snapshot.author } : {}),
         ...(snapshot.digest ? { digest: snapshot.digest } : {}),
         content,
-        contentHash: snapshot.contentHash,
+        contentHash: themeDocument?.contentHash ?? snapshot.contentHash,
         thumbMediaId,
         ...(snapshot.contentSourceUrl ? { contentSourceUrl: snapshot.contentSourceUrl } : {}),
         ...(snapshot.needOpenComment === undefined

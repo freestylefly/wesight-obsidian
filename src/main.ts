@@ -12,6 +12,8 @@ import { ShareCloudApi } from './share/cloudApi';
 import { LarkCliService } from './feishu/larkCli';
 import { SharePopoverController } from './ui/sharePopover';
 import { WeChatCloudApi } from './wechat/cloudApi';
+import { WeChatThemeService } from './wechat/themeService';
+import { DEFAULT_WECHAT_THEME_ID, isWeChatThemeId } from './wechat/themes';
 import {
   WeChatPreviewView,
   WESIGHT_WECHAT_PREVIEW_VIEW_TYPE,
@@ -32,6 +34,7 @@ export default class WeSightPlugin extends Plugin {
   cloudAuth!: CloudAuthService;
   shareCloudApi!: ShareCloudApi;
   wechatCloudApi!: WeChatCloudApi;
+  wechatThemeService!: WeChatThemeService;
   larkCli!: LarkCliService;
   sharePopover!: SharePopoverController;
   settingTab!: WeSightSettingTab;
@@ -46,6 +49,11 @@ export default class WeSightPlugin extends Plugin {
     this.cloudAuth = new CloudAuthService(this.app);
     this.shareCloudApi = new ShareCloudApi(this.cloudAuth);
     this.wechatCloudApi = new WeChatCloudApi(this.cloudAuth);
+    this.wechatThemeService = new WeChatThemeService({
+      runtimeManager: this.runtimeManager,
+      providerStore: this.providerStore,
+      getSettings: () => this.settings,
+    });
     this.larkCli = new LarkCliService();
     this.sharePopover = new SharePopoverController(
       this.app,
@@ -80,6 +88,9 @@ export default class WeSightPlugin extends Plugin {
       (leaf: WorkspaceLeaf) => new WeChatPreviewView(leaf, {
         auth: this.cloudAuth,
         api: this.wechatCloudApi,
+        themeService: this.wechatThemeService,
+        getSettings: () => this.settings,
+        saveSettings: () => this.saveSettings(),
         openSettings: () => this.openSettings('general'),
       }),
     );
@@ -292,5 +303,8 @@ function normalizeSettings(value: Partial<WeSightObsidianSettings> | null | unde
       ...DEFAULT_SETTINGS.localModelByAgent,
       ...(value?.localModelByAgent ?? {}),
     },
+    wechatThemeId: isWeChatThemeId(value?.wechatThemeId)
+      ? value.wechatThemeId
+      : DEFAULT_WECHAT_THEME_ID,
   };
 }
