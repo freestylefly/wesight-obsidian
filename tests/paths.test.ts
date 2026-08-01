@@ -5,6 +5,7 @@ import {
   larkCliAuthorizationRecordPath,
   providersPath,
   runtimeManagedDir,
+  wechatThemeCacheDir,
   wesightHome,
 } from '../src/paths';
 
@@ -16,6 +17,7 @@ describe('paths', () => {
     expect(larkCliAuthorizationRecordPath(env))
       .toBe('/tmp/wesight-test/lark/authorization.json');
     expect(providersPath(env)).toBe('/tmp/wesight-test/providers.json');
+    expect(wechatThemeCacheDir(env)).toBe('/tmp/wesight-test/cache/wechat-themes');
   });
 
   test('defaults to ~/.wesight', () => {

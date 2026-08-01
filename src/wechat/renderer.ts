@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import { App, Component, MarkdownRenderer, sanitizeHTMLToDom } from 'obsidian';
 
 import type { WeChatAssetDraft, WeChatPreviewSnapshot } from './types';
+import { getWeChatTheme, type WeChatThemeDocument } from './themes';
 
 const ATOM_ONE_DARK: Record<string, string> = {
   'hljs-comment': '#5c6370',
@@ -416,13 +417,27 @@ export async function renderWeChatArticle(
   component: Component,
   snapshot: WeChatPreviewSnapshot,
   container: HTMLElement,
-  uploadedUrls?: Map<string, string>,
+  options: {
+    uploadedUrls?: Map<string, string>;
+    themeDocument?: WeChatThemeDocument | null;
+  } = {},
 ): Promise<void> {
   container.empty();
+  container.classList.remove('wesight-wechat-canghe-article', 'wesight-wechat-skill-article');
+  const themeDocument = options.themeDocument;
+  if (themeDocument && getWeChatTheme(themeDocument.themeId).kind === 'skill' && themeDocument.html) {
+    container.classList.add('wesight-wechat-skill-article');
+    const html = replaceAssetTokens(
+      themeDocument.html,
+      assetMap(snapshot, options.uploadedUrls),
+    );
+    container.appendChild(sanitizeHTMLToDom(html));
+    return;
+  }
   container.classList.add('wesight-wechat-canghe-article');
   await MarkdownRenderer.render(
     app,
-    replaceAssetTokens(snapshot.markdown, assetMap(snapshot, uploadedUrls)),
+    replaceAssetTokens(snapshot.markdown, assetMap(snapshot, options.uploadedUrls)),
     container,
     snapshot.sourcePath,
     component,
@@ -469,6 +484,7 @@ async function svgToPng(svg: SVGElement): Promise<ArrayBuffer> {
 export async function replaceFormulaSvgs(
   root: HTMLElement,
   upload: (asset: WeChatAssetDraft) => Promise<string>,
+  applyCangheStyles = true,
 ): Promise<void> {
   const formulas = Array.from(root.querySelectorAll<SVGElement>('mjx-container svg, .math svg'));
   for (let index = 0; index < formulas.length; index += 1) {
@@ -492,7 +508,7 @@ export async function replaceFormulaSvgs(
     const target = svg.closest('mjx-container, .math') ?? svg;
     target.replaceWith(image);
   }
-  applyCangheWechatStyles(root);
+  if (applyCangheStyles) applyCangheWechatStyles(root);
 }
 
 export function serializeWeChatArticle(root: HTMLElement): string {

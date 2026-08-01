@@ -37,6 +37,10 @@ export function tmpDir(env: NodeJS.ProcessEnv = process.env): string {
   return path.join(wesightHome(env), 'tmp');
 }
 
+export function wechatThemeCacheDir(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(wesightHome(env), 'cache', 'wechat-themes');
+}
+
 export function vaultWesightDir(vaultBasePath: string): string {
   return path.join(vaultBasePath, '.wesight');
 }

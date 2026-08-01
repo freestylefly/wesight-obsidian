@@ -1,0 +1,120 @@
+import { createHash } from 'crypto';
+
+import type { WeChatPreviewSnapshot } from './types';
+
+export type WeChatThemeId =
+  | 'canghe-style'
+  | 'moyu-green'
+  | 'red-white'
+  | 'graphite-minimal'
+  | 'zen-whitespace'
+  | 'moyu-ticket'
+  | 'olive-journal';
+
+export type WeChatThemeKind = 'template' | 'skill';
+
+export interface WeChatThemeDefinition {
+  id: WeChatThemeId;
+  label: string;
+  kind: WeChatThemeKind;
+  color: string;
+  skillReference?: string;
+}
+
+export interface WeChatThemeDocument {
+  themeId: WeChatThemeId;
+  sourceHash: string;
+  contentHash: string;
+  html: string | null;
+  generatedAt: string | null;
+  generatorSignature: string;
+}
+
+export const DEFAULT_WECHAT_THEME_ID: WeChatThemeId = 'canghe-style';
+
+export const WECHAT_THEME_DEFINITIONS: readonly WeChatThemeDefinition[] = [
+  {
+    id: 'canghe-style',
+    label: 'Canghe Style',
+    kind: 'template',
+    color: '#2ea765',
+  },
+  {
+    id: 'moyu-green',
+    label: '摸鱼绿',
+    kind: 'skill',
+    color: '#059669',
+    skillReference: 'references/theme-moyu-green.md',
+  },
+  {
+    id: 'red-white',
+    label: '红白色系',
+    kind: 'skill',
+    color: '#dc2626',
+    skillReference: 'references/theme-red-white.md',
+  },
+  {
+    id: 'graphite-minimal',
+    label: '石墨极简风',
+    kind: 'skill',
+    color: '#52525b',
+    skillReference: 'references/theme-graphite-minimal.md',
+  },
+  {
+    id: 'zen-whitespace',
+    label: '留白禅意风',
+    kind: 'skill',
+    color: '#4a5d52',
+    skillReference: 'references/theme-zen-whitespace.md',
+  },
+  {
+    id: 'moyu-ticket',
+    label: '摸鱼票据风',
+    kind: 'skill',
+    color: '#f0b84b',
+    skillReference: 'references/theme-moyu-ticket.md',
+  },
+  {
+    id: 'olive-journal',
+    label: '橄榄手记',
+    kind: 'skill',
+    color: '#8a8f32',
+    skillReference: 'references/theme-olive-journal.md',
+  },
+] as const;
+
+const THEME_BY_ID = new Map(WECHAT_THEME_DEFINITIONS.map(theme => [theme.id, theme]));
+
+export function isWeChatThemeId(value: unknown): value is WeChatThemeId {
+  return typeof value === 'string' && THEME_BY_ID.has(value as WeChatThemeId);
+}
+
+export function getWeChatTheme(themeId: WeChatThemeId): WeChatThemeDefinition {
+  return THEME_BY_ID.get(themeId) ?? THEME_BY_ID.get(DEFAULT_WECHAT_THEME_ID)!;
+}
+
+export function listWeChatThemes(kind: WeChatThemeKind): WeChatThemeDefinition[] {
+  return WECHAT_THEME_DEFINITIONS.filter(theme => theme.kind === kind);
+}
+
+export function createTemplateThemeDocument(
+  snapshot: WeChatPreviewSnapshot,
+): WeChatThemeDocument {
+  return {
+    themeId: DEFAULT_WECHAT_THEME_ID,
+    sourceHash: snapshot.contentHash,
+    contentHash: snapshot.contentHash,
+    html: null,
+    generatedAt: null,
+    generatorSignature: snapshot.rendererVersion,
+  };
+}
+
+export function hashSkillThemeDocument(values: {
+  sourceHash: string;
+  themeId: WeChatThemeId;
+  html: string;
+  generatorSignature: string;
+}): string {
+  return createHash('sha256').update(JSON.stringify(values)).digest('hex');
+}

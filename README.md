@@ -7,6 +7,7 @@ Run Claude Code, Codex, and OpenCode as local AI collaborators inside an Obsidia
 - Obsidian 1.11.4 or later on desktop.
 - At least one supported agent CLI installed independently: [Claude Code](https://code.claude.com/), [Codex](https://github.com/openai/codex), or [OpenCode](https://opencode.ai/).
 - The optional Feishu workflow requires an independently installed [Lark CLI](https://github.com/larksuite/cli#installation).
+- Optional Skill-generated WeChat themes require an independently installed [gzh-design Skill](https://github.com/isjiamu/gzh-design-skill).
 
 WeSight detects existing executables from the configured path, the system path, and compatible legacy WeSight runtime locations. It does not install or update CLI tools, agent runtimes, or their dependencies.
 
@@ -43,6 +44,8 @@ Open the sharing panel and choose **公众号草稿**, or run **WeSight: 同步�
 
 This workflow requires a WeSight account and a WeChat Official Account with access to the material, article-image, and draft APIs. The WeSight fixed-egress IP must be added to the account allowlist. AppSecret and WeChat access tokens are encrypted by WeSight Cloud and do not enter the vault or plugin data.
 
+Canghe Style is the default local template. The theme selector can also generate layouts with the installed gzh-design Skill through the currently selected agent CLI, provider profile, and model. Skill generation sends the article Markdown to that provider, preserves image references as local tokens, validates the generated inline HTML, and caches successful results locally. Image bytes are uploaded only when you explicitly create or update a WeChat draft.
+
 ## Accounts and network use
 
 Local chat and inline editing do not require a WeSight account. A WeSight account is required for internet sharing and WeChat publishing. Feishu publishing uses the account configured by Lark CLI.
@@ -52,6 +55,7 @@ The plugin connects to remote services only for features that need them:
 - `api.wesight.ai` handles WeSight sign-in, share snapshots, share assets, comments configuration, and WeChat draft operations.
 - `share.wesight.ai` hosts links created by the internet-sharing feature.
 - The provider URL selected in settings may be contacted to load its model list. Agent subprocesses contact providers according to their own configuration.
+- Generating a Skill-based WeChat theme sends the article Markdown to the provider used by the selected agent configuration.
 - Lark CLI contacts Feishu when you configure, authorize, create, or update a document.
 - Remote images referenced by a note may be downloaded when generating a WeChat preview or draft.
 
@@ -66,6 +70,7 @@ The desktop plugin also accesses these paths outside the vault:
 - `~/.wesight/providers.json` stores non-secret provider metadata.
 - Obsidian SecretStorage stores provider API keys and the WeSight refresh token.
 - `~/.wesight/tmp/` contains permission-restricted per-run provider configuration, which can include a provider API key and is removed when the subprocess finishes.
+- `~/.wesight/cache/wechat-themes/` stores validated generated WeChat theme HTML and invalidates entries when the article, Skill, provider profile, or model changes.
 - `~/.wesight/logs/` contains local operational logs.
 - `~/.wesight/lark/authorization.json` records non-secret Feishu authorization status.
 - Existing CLI executables and their configuration files are read or executed as needed. Compatible legacy executables under `~/.wesight/runtimes/` can still be detected.

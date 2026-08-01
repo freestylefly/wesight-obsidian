@@ -1,3 +1,5 @@
+import type { WeChatThemeId } from './wechat/themes';
+
 export type AgentId = 'claude' | 'codex' | 'opencode';
 
 export type RuntimeConfigSource = 'localCli' | 'providerProfile';
@@ -152,6 +154,8 @@ export interface WeSightObsidianSettings {
   maxContextFileChars: number;
   /** Shared Feishu folder created in the current user's Drive root. */
   feishuFolderToken: string;
+  /** Theme used by the WeChat preview and draft publisher. */
+  wechatThemeId: WeChatThemeId;
 }
 
 export const DEFAULT_CONFIG_SOURCES: ConfigSourcesByAgent = {
@@ -189,4 +193,5 @@ export const DEFAULT_SETTINGS: WeSightObsidianSettings = {
   planModeDefault: false,
   maxContextFileChars: 40_000,
   feishuFolderToken: '',
+  wechatThemeId: 'canghe-style',
 };
