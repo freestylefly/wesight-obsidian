@@ -106,6 +106,10 @@ export interface ChatTurnRequest {
   systemPrompt?: string;
   planMode?: boolean;
   attachments?: FileAttachment[];
+  /** Runs generation without tools, project customizations, or session persistence. */
+  textOnly?: boolean;
+  /** Cancels only this runtime turn without stopping other active agents. */
+  signal?: AbortSignal;
 }
 
 export type RuntimeTurnEvent =

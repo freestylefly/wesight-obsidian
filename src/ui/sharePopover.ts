@@ -271,10 +271,10 @@ class SharePopover {
       cls: 'wesight-share-tabs',
       attr: { role: 'tablist', 'aria-label': '分享方式' },
     });
-    const options: Array<{ id: SharePopoverTab; label: string }> = [
-      { id: 'internet', label: '互联网分享' },
-      { id: 'feishu', label: '飞书文档' },
-      { id: 'wechat', label: '公众号草稿' },
+    const options: Array<{ id: SharePopoverTab; label: string; ariaLabel: string }> = [
+      { id: 'internet', label: '互联网', ariaLabel: '互联网分享' },
+      { id: 'feishu', label: '飞书', ariaLabel: '飞书文档' },
+      { id: 'wechat', label: '公众号', ariaLabel: '公众号草稿' },
     ];
     for (const option of options) {
       const selected = this.activeTab === option.id;
@@ -284,6 +284,7 @@ class SharePopover {
         attr: {
           type: 'button',
           role: 'tab',
+          'aria-label': option.ariaLabel,
           'aria-selected': String(selected),
         },
       });

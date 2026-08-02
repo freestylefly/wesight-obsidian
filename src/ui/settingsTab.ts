@@ -18,6 +18,7 @@ import { fetchProviderModels, resolveProviderModels, testProviderConnection } fr
 import type { WeChatCloudApi } from '../wechat/cloudApi';
 import { promptForText } from './textPromptModal';
 import { WeChatPublishingSettings } from './wechatPublishingSettings';
+import { initializeStoredSecretInput, resolveSecretInput } from './secretInput';
 
 interface SettingsTabDeps {
   getSettings: () => WeSightObsidianSettings;
@@ -442,9 +443,13 @@ export class WeSightSettingTab extends PluginSettingTab {
     const apiKeyInput = secretWrap.createEl('input', {
       attr: {
         type: 'password',
-        placeholder: anyExistingProfile?.apiKey ? '留空则保留已保存的 API key' : '输入你的 API key',
+        placeholder: '输入你的 API key',
+        'aria-label': anyExistingProfile?.apiKey
+          ? 'API key 已安全保存，输入新值可替换'
+          : '输入 API key',
       },
     });
+    initializeStoredSecretInput(apiKeyInput, Boolean(anyExistingProfile?.apiKey));
     const reveal = secretWrap.createEl('button', {
       cls: 'wesight-provider-icon-btn',
       attr: { type: 'button', 'aria-label': '显示 API key' },
@@ -720,7 +725,7 @@ export class WeSightSettingTab extends PluginSettingTab {
       agentFilter,
       format,
       baseUrl: baseUrlInput.value,
-      apiKey: apiKeyInput.value,
+      apiKey: resolveSecretInput(apiKeyInput.value, anyExistingProfile?.apiKey ?? ''),
       existingApiKey: anyExistingProfile?.apiKey ?? '',
       models: modelItems,
       defaultModel: selectedModelId || modelItems[0]?.id || '',
@@ -793,7 +798,7 @@ export class WeSightSettingTab extends PluginSettingTab {
     options.trigger.disabled = true;
     try {
       const format = options.getFormat();
-      const apiKey = options.apiKeyInput.value || options.existingApiKey;
+      const apiKey = resolveSecretInput(options.apiKeyInput.value, options.existingApiKey);
       const altFormat: ProviderApiFormat = format === 'anthropic' ? 'openai' : 'anthropic';
       const altBaseUrl = options.preset.baseUrls[altFormat];
       const { models: fetched, source } = await resolveProviderModels({
@@ -848,7 +853,7 @@ export class WeSightSettingTab extends PluginSettingTab {
       await testProviderConnection({
         agentId,
         baseUrl: options.baseUrlInput.value,
-        apiKey: options.apiKeyInput.value || options.existingApiKey,
+        apiKey: resolveSecretInput(options.apiKeyInput.value, options.existingApiKey),
         anthropicAuthMode: options.getAnthropicAuthMode(),
         model: options.getModel(),
         wireApi: providerWireApi(options.preset, format),
@@ -957,8 +962,9 @@ export class WeSightSettingTab extends PluginSettingTab {
     const models = form.createEl('textarea', { cls: 'full', attr: { placeholder: 'Models, one per line' } });
     models.rows = 4;
     models.value = (editing?.models ?? []).join('\n');
-    const apiKey = form.createEl('input', { attr: { placeholder: editing ? 'API key unchanged' : 'API key', type: 'password' } });
+    const apiKey = form.createEl('input', { attr: { placeholder: 'API key', type: 'password' } });
     apiKey.addClass('full');
+    initializeStoredSecretInput(apiKey, Boolean(editing?.apiKey));
 
     const load = form.createEl('button', { text: 'Load models' });
     load.onclick = () => {
@@ -1005,7 +1011,7 @@ export class WeSightSettingTab extends PluginSettingTab {
       const fetched = await fetchProviderModels({
         agentId: elements.agent.value as AgentId,
         baseUrl: elements.baseUrl.value,
-        apiKey: elements.apiKey.value || elements.existingApiKey,
+        apiKey: resolveSecretInput(elements.apiKey.value, elements.existingApiKey),
       });
       elements.models.value = fetched.join('\n');
       if (!elements.defaultModel.value && fetched[0]) {
@@ -1036,7 +1042,7 @@ export class WeSightSettingTab extends PluginSettingTab {
         defaultModel: elements.defaultModel.value,
         models: modelList,
         baseUrl: elements.baseUrl.value,
-        apiKey: elements.apiKey.value || elements.editing?.apiKey || '',
+        apiKey: resolveSecretInput(elements.apiKey.value, elements.editing?.apiKey ?? ''),
         wireApi: elements.wireApi.value as ProviderWireApi,
         isDefault: elements.editing?.isDefault,
       });

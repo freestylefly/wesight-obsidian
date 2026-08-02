@@ -50,6 +50,11 @@ export class RuntimeManager {
       onEvent(event);
     };
 
+    if (request.signal?.aborted) {
+      deliver({ type: 'done' });
+      return;
+    }
+
     const settings = this.getSettings();
     const status = new RuntimeDiscovery({
       configuredPaths: settings.configuredPaths,
@@ -107,6 +112,8 @@ export class RuntimeManager {
       sharedEnvironmentVariables: settings.sharedEnvironmentVariables,
       providerProfile: profile,
     });
+    const cancelAdapter = (): void => adapter.cancel();
+    request.signal?.addEventListener('abort', cancelAdapter, { once: true });
     this.activeAdapters.add(adapter);
     const startedAt = Date.now();
     appendLocalLog('runtime_turn_start', {
@@ -125,8 +132,10 @@ export class RuntimeManager {
         agentId: request.agentId,
         providerProfileId: profile?.id,
         durationMs: Date.now() - startedAt,
+        cancelled: Boolean(request.signal?.aborted),
       });
     } finally {
+      request.signal?.removeEventListener('abort', cancelAdapter);
       unsubscribe();
       this.activeAdapters.delete(adapter);
     }

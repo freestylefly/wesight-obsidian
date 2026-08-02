@@ -103,4 +103,33 @@ describe('AgentAdapter Claude provider failures', () => {
     expect(events).toContainEqual({ type: 'done' });
     expect(events.some(event => event.type === 'error')).toBe(false);
   });
+
+  test('starts text-only turns without tools, customizations, or session persistence', async () => {
+    const argsPath = path.join(tempDir, 'args.json');
+    const binaryPath = path.join(tempDir, 'fake-claude');
+    fs.writeFileSync(binaryPath, [
+      '#!/bin/sh',
+      `printf '%s\\n' "$@" > ${JSON.stringify(argsPath)}`,
+      'cat >/dev/null',
+      'echo \'{"type":"result","subtype":"success","result":"done"}\'',
+    ].join('\n'));
+    fs.chmodSync(binaryPath, 0o755);
+    const adapter = new AgentAdapter({
+      agentId: 'claude',
+      binaryPath,
+      sharedEnvironmentVariables: '',
+      providerProfile: profile,
+    });
+
+    await adapter.run({ ...request, textOnly: true });
+
+    const args = fs.readFileSync(argsPath, 'utf8').split('\n');
+    expect(args).toContain('--safe-mode');
+    expect(args).toContain('--disable-slash-commands');
+    expect(args).toContain('--tools');
+    expect(args).toContain('--no-session-persistence');
+    expect(args).toContain('--effort');
+    expect(args).toContain('low');
+    expect(args).toContain('--system-prompt');
+  });
 });

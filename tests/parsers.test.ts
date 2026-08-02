@@ -11,6 +11,52 @@ describe('stream parsers', () => {
     expect(events).toContainEqual({ type: 'text', content: 'hello' });
   });
 
+  test('parses Claude nested content block deltas', () => {
+    expect(parseClaudeStreamLine(JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: '<section>' },
+      },
+    }))).toContainEqual({ type: 'text', content: '<section>' });
+  });
+
+  test('preserves whitespace-only Claude text deltas', () => {
+    expect(parseClaudeStreamLine(JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: ' ' },
+      },
+    }))).toEqual([{ type: 'text', content: ' ' }]);
+  });
+
+  test('ignores Claude tool results that contain HTML examples', () => {
+    expect(parseClaudeStreamLine(JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          content: '<section><p>Skill 组件示例</p></section>',
+        }],
+      },
+    }))).toEqual([]);
+  });
+
+  test('keeps assistant text while ignoring non-text content blocks', () => {
+    expect(parseClaudeStreamLine(JSON.stringify({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'tool_result', content: '<section>工具输出</section>' },
+          { type: 'text', text: '<section>正文</section>' },
+        ],
+      },
+    }))).toEqual([{ type: 'text', content: '<section>正文</section>' }]);
+  });
+
   test('parses Claude result errors', () => {
     expect(parseClaudeStreamLine(JSON.stringify({
       type: 'result',
@@ -36,5 +82,9 @@ describe('stream parsers', () => {
       type: 'message',
       text: 'done',
     }))).toContainEqual({ type: 'text', content: 'done' });
+    expect(parseOpenCodeStreamLine(JSON.stringify({
+      type: 'part.updated',
+      part: { type: 'text', text: '<section>' },
+    }))).toContainEqual({ type: 'text', content: '<section>' });
   });
 });

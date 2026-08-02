@@ -1606,7 +1606,7 @@ button.wesight-provider-icon-btn svg {
 
 .wesight-share-tabs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   min-height: 52px;
   padding: 0 20px;
   border-bottom: 1px solid var(--background-modifier-border);
@@ -1624,6 +1624,7 @@ button.wesight-share-tab {
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 550;
+  white-space: nowrap;
 }
 
 button.wesight-share-tab::after {
@@ -2678,6 +2679,7 @@ button.wesight-share-primary-button.is-wechat:hover {
 }
 
 .wesight-wechat-preview-view {
+  position: relative;
   display: flex;
   height: 100%;
   min-width: 320px;
@@ -2703,6 +2705,15 @@ button.wesight-share-primary-button.is-wechat:hover {
 .wesight-wechat-preview-header-actions {
   display: flex;
   align-items: center;
+}
+
+.wesight-wechat-preview-header-actions .clickable-icon.is-stop {
+  background: rgba(220, 38, 38, 0.1);
+  color: #dc2626;
+}
+
+.wesight-wechat-preview-header-actions .clickable-icon.is-stop:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.16);
 }
 
 .wesight-wechat-preview-identity {
@@ -3327,6 +3338,46 @@ button.wesight-share-primary-button.is-wechat:hover {
 
 .wesight-wechat-preview-article {
   color-scheme: light;
+}
+
+.wesight-wechat-streaming-preview {
+  display: block;
+  width: 100%;
+  min-height: 240px;
+  border: 0;
+  background: transparent;
+  color-scheme: light;
+}
+
+.wesight-wechat-preview-follow {
+  position: absolute;
+  z-index: 4;
+  bottom: 18px;
+  left: 50%;
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 7px 12px;
+  border: 1px solid rgba(7, 193, 96, 0.35);
+  border-radius: 999px;
+  background: var(--background-primary);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  color: #07994d;
+  font-size: 12px;
+  font-weight: 600;
+  transform: translateX(-50%);
+}
+
+.wesight-wechat-preview-follow:hover {
+  border-color: rgba(7, 193, 96, 0.58);
+  background: rgba(7, 193, 96, 0.08);
+}
+
+.wesight-wechat-preview-follow svg {
+  width: 14px;
+  height: 14px;
 }
 
 .wesight-wechat-secondary-action {
