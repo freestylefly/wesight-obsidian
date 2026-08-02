@@ -11,6 +11,7 @@ import { createId } from '../utils/id';
 import { ensureDir, fileExists, readJsonFile, safeRemoveDir, writeJsonFile } from '../utils/fs';
 import { tmpDir, wechatThemeCacheDir } from '../paths';
 import type { WeChatPreviewSnapshot } from './types';
+import { materializeBundledGzhDesign } from './bundledGzhDesign';
 import {
   getWeChatTheme,
   hashSkillThemeDocument,
@@ -109,7 +110,17 @@ export function resolveGzhSkillRoot(
       && fileExists(path.join(candidate, 'scripts', 'validate_gzh_html.py'))
     ) return candidate;
   }
-  return null;
+  const bundledRoot = materializeBundledGzhDesign(env);
+  const bundledThemeSourceExists = theme.kind === 'custom'
+    ? fileExists(path.join(bundledRoot, 'references', 'theme-generator.md'))
+    : Boolean(theme.skillReference && fileExists(path.join(bundledRoot, theme.skillReference)));
+  return fileExists(path.join(bundledRoot, 'SKILL.md'))
+    && fileExists(path.join(bundledRoot, 'references', 'theme-index.md'))
+    && fileExists(path.join(bundledRoot, 'references', 'common-components.md'))
+    && bundledThemeSourceExists
+    && fileExists(path.join(bundledRoot, 'scripts', 'validate_gzh_html.py'))
+    ? bundledRoot
+    : null;
 }
 
 function skillSourceReferences(themeId: WeChatThemeId): string[] {
@@ -544,11 +555,7 @@ export class WeChatThemeService {
       throw new Error('请先填写 AI 自定义主题描述');
     }
     const context = this.resolveContext(snapshot, themeId, customTheme);
-    if (!context) {
-      throw new Error(
-        '未检测到 gzh-design Skill，请先按项目说明安装：https://github.com/isjiamu/gzh-design-skill',
-      );
-    }
+    if (!context) throw new Error('插件内置的 gzh-design 主题资源不可用，请重新安装 WeSight');
     if (!options.force) {
       const cached = this.getCachedForContext(snapshot, themeId, context);
       if (cached) return cached;

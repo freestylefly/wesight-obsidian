@@ -183,7 +183,7 @@ describe('WeChat theme Skill discovery and generation', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  test('finds an explicit Skill path and a standard Codex Skill path', () => {
+  test('prefers an explicit Skill path and supports a standard Codex Skill path', () => {
     expect(resolveGzhSkillRoot('moyu-green', env)).toBe(skillRoot);
 
     const standardHome = path.join(tempDir, 'standard-home');
@@ -193,9 +193,38 @@ describe('WeChat theme Skill discovery and generation', () => {
     expect(resolveGzhSkillRoot('canghe-style', env)).toBeNull();
   });
 
-  test('ignores incomplete Skill installations', () => {
+  test('falls back to the bundled Skill when a local installation is incomplete', () => {
     fs.rmSync(path.join(skillRoot, 'references', 'common-components.md'));
-    expect(resolveGzhSkillRoot('moyu-green', env)).toBeNull();
+    const resolved = resolveGzhSkillRoot('moyu-green', env);
+
+    expect(resolved).toBe(path.join(
+      env.WESIGHT_HOME!,
+      'bundled-skills',
+      'gzh-design',
+      'ba1f4175519b481cb3566616c9e5178705067904',
+    ));
+    expect(fs.readFileSync(path.join(resolved!, 'SKILL.md'), 'utf8'))
+      .toContain('# 公众号文章排版 Skill');
+    expect(fs.readFileSync(path.join(resolved!, 'LICENSE.txt'), 'utf8'))
+      .toContain('Copyright (C) 2026 甲木 (Jiamu) × 摸鱼小李 (Moyu Xiaoli)');
+    expect(resolveGzhSkillRoot('ai-custom', env)).toBe(resolved);
+  });
+
+  test('materializes the bundled Skill on a computer without any local Skill', () => {
+    const emptyEnv = {
+      HOME: path.join(tempDir, 'new-computer-home'),
+      WESIGHT_HOME: path.join(tempDir, 'new-computer-wesight-home'),
+    };
+    const resolved = resolveGzhSkillRoot('olive-journal', emptyEnv);
+
+    expect(resolved).toBeTruthy();
+    expect(resolved).toContain(path.join('bundled-skills', 'gzh-design'));
+    expect(fs.readFileSync(
+      path.join(resolved!, 'references', 'theme-olive-journal.md'),
+      'utf8',
+    )).toContain('橄榄手记');
+    expect(fs.readFileSync(path.join(resolved!, 'UPSTREAM.md'), 'utf8'))
+      .toContain('isjiamu/gzh-design-skill');
   });
 
   test('rejects Skill context files that escape the resolved Skill root', () => {
