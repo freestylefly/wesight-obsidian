@@ -1,14 +1,10 @@
-WeSight Obsidian plugin
-Copyright (C) 2026 WeSight contributors
+gzh-design-skill — 微信公众号排版技能
+Copyright (C) 2026 甲木 (Jiamu) × 摸鱼小李 (Moyu Xiaoli)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version. See the full text below.
-
-This distribution includes gzh-design-skill resources. Their original
-copyright and license notice is preserved in
-vendor/gzh-design-skill/LICENSE.txt.
 
 ================================================================================
 

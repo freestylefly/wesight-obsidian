@@ -7,7 +7,7 @@ Run Claude Code, Codex, and OpenCode as local AI collaborators inside an Obsidia
 - Obsidian 1.11.4 or later on desktop.
 - At least one supported agent CLI installed independently: [Claude Code](https://code.claude.com/), [Codex](https://github.com/openai/codex), or [OpenCode](https://opencode.ai/).
 - The optional Feishu workflow requires an independently installed [Lark CLI](https://github.com/larksuite/cli#installation).
-- Optional Skill-generated WeChat themes require an independently installed [gzh-design Skill](https://github.com/isjiamu/gzh-design-skill).
+- Skill-generated WeChat themes use the bundled [gzh-design Skill](https://github.com/isjiamu/gzh-design-skill). A compatible local installation can still override the bundled copy for development.
 
 WeSight detects existing executables from the configured path, the system path, and compatible legacy WeSight runtime locations. It does not install or update CLI tools, agent runtimes, or their dependencies.
 
@@ -44,7 +44,7 @@ Open the sharing panel and choose **公众号草稿**, or run **WeSight: 同步�
 
 This workflow requires a WeSight account and a WeChat Official Account with access to the material, article-image, and draft APIs. The WeSight fixed-egress IP must be added to the account allowlist. AppSecret and WeChat access tokens are encrypted by WeSight Cloud and do not enter the vault or plugin data.
 
-Canghe Style is the default local template. The theme selector can also generate layouts with the installed gzh-design Skill through the currently selected agent CLI, provider profile, and model. Six registered Skill themes are available, and **AI自定义主题** lets you name and describe a reusable style brief that is applied to the current article and retained for later articles. Skill generation sends the article Markdown and, for a custom theme, its style brief to that provider, preserves image references as local tokens, validates the generated inline HTML, and caches successful results locally. Image bytes are uploaded only when you explicitly create or update a WeChat draft.
+Canghe Style is the default local template. The theme selector can also generate layouts with the bundled gzh-design Skill through the currently selected agent CLI, provider profile, and model. Six registered Skill themes are available, and **AI自定义主题** lets you name and describe a reusable style brief that is applied to the current article and retained for later articles. Skill generation sends the article Markdown and, for a custom theme, its style brief to that provider, preserves image references as local tokens, validates the generated inline HTML, and caches successful results locally. Image bytes are uploaded only when you explicitly create or update a WeChat draft.
 
 ## Accounts and network use
 
@@ -71,6 +71,7 @@ The desktop plugin also accesses these paths outside the vault:
 - Obsidian SecretStorage stores provider API keys and the WeSight refresh token.
 - `~/.wesight/tmp/` contains permission-restricted per-run provider configuration, which can include a provider API key and is removed when the subprocess finishes.
 - `~/.wesight/cache/wechat-themes/` stores validated generated WeChat theme HTML and invalidates entries when the article, Skill, provider profile, model, or AI custom-theme brief changes.
+- `~/.wesight/bundled-skills/gzh-design/` materializes the theme resources embedded in the plugin bundle.
 - `~/.wesight/logs/` contains local operational logs.
 - `~/.wesight/lark/authorization.json` records non-secret Feishu authorization status.
 - Existing CLI executables and their configuration files are read or executed as needed. Compatible legacy executables under `~/.wesight/runtimes/` can still be detected.
@@ -92,4 +93,4 @@ Report bugs and request features through [GitHub Issues](https://github.com/free
 
 ## License
 
-[MIT](LICENSE)
+[GNU AGPL-3.0-or-later](LICENSE). The bundled gzh-design Skill keeps its original copyright, license, and source provenance under [`vendor/gzh-design-skill`](vendor/gzh-design-skill), with a summary in [Third-Party Notices](THIRD_PARTY_NOTICES.md).

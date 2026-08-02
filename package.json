@@ -1,6 +1,6 @@
 {
   "name": "wesight-obsidian",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "WeSight Obsidian plugin for local agent runtimes.",
   "type": "module",
   "main": "main.js",
@@ -21,7 +21,7 @@
     "opencode"
   ],
   "author": "WeSight",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@types/node": "^24.10.1",
