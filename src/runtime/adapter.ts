@@ -167,6 +167,21 @@ export class AgentAdapter extends EventEmitter {
         '--verbose',
         '--include-partial-messages',
       ];
+      if (request.textOnly) {
+        args.push(
+          '--safe-mode',
+          '--disable-slash-commands',
+          '--tools',
+          '',
+          '--no-session-persistence',
+          '--prompt-suggestions',
+          'false',
+          '--effort',
+          'low',
+          '--system-prompt',
+          'Follow the user instructions exactly and return only the requested text output.',
+        );
+      }
       const model = request.configSource === 'providerProfile'
         ? this.options.providerProfile?.defaultModel || this.options.providerProfile?.model
         : request.model;

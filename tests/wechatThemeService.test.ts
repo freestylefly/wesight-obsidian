@@ -10,6 +10,10 @@ import {
   type WeSightObsidianSettings,
 } from '../src/types';
 import {
+  extractStreamingThemeHtml,
+  mergeRuntimeText,
+  prepareThemeGenerationContext,
+  ThemeGenerationCancelledError,
   WeChatThemeService,
   normalizeGeneratedThemeHtml,
   resolveGzhSkillRoot,
@@ -78,7 +82,11 @@ function createSkillRoot(root: string): string {
 
 function runtimeWriting(
   output: string | null,
-  options: { asText?: boolean; error?: { message: string; detail?: string } } = {},
+  options: {
+    asText?: boolean;
+    chunks?: string[];
+    error?: { message: string; detail?: string };
+  } = {},
 ): RuntimeManager {
   return {
     runTurn: vi.fn(async (request: ChatTurnRequest, onEvent: RuntimeEventListener) => {
@@ -86,7 +94,9 @@ function runtimeWriting(
         onEvent({ type: 'error', ...options.error });
         return;
       }
-      if (output && options.asText) onEvent({ type: 'text', content: `完成\n${output}\n` });
+      if (options.chunks) {
+        for (const chunk of options.chunks) onEvent({ type: 'text', content: chunk });
+      } else if (output && options.asText) onEvent({ type: 'text', content: `完成\n${output}\n` });
       else if (output) fs.writeFileSync(path.join(request.cwd, 'article.html'), output);
       onEvent({ type: 'done' });
     }),
@@ -94,6 +104,25 @@ function runtimeWriting(
 }
 
 describe('WeChat theme generation validation', () => {
+  test('extracts partial section HTML and ignores runtime preamble or trailing text', () => {
+    expect(extractStreamingThemeHtml('模型正在准备')).toBeNull();
+    expect(extractStreamingThemeHtml('准备\n```html\n<section><p>正文'))
+      .toBe('<section><p>正文');
+    expect(extractStreamingThemeHtml('准备\n<section><p>正文</p></section>\n完成'))
+      .toBe('<section><p>正文</p></section>');
+    expect(extractStreamingThemeHtml(
+      '准备\n<section><section>正文</section></section><section>重复累计消息</section>',
+    )).toBe('<section><section>正文</section></section>');
+  });
+
+  test('merges runtime deltas while replacing cumulative messages', () => {
+    expect(mergeRuntimeText('<section>', '<p>正文')).toBe('<section><p>正文');
+    expect(mergeRuntimeText('<section>', '<section><p>正文')).toBe('<section><p>正文');
+    expect(mergeRuntimeText('<section>', '<section>')).toBe('<section>');
+    const complete = '<section style="margin:0 32px;"><span leaf="">正文</span></section>';
+    expect(mergeRuntimeText(complete, complete)).toBe(complete);
+  });
+
   test('accepts a compliant section and all expected image tokens', () => {
     expect(validateGeneratedThemeHtml(validHtml(), [ASSET_TOKEN])).toEqual([]);
   });
@@ -108,6 +137,7 @@ describe('WeChat theme generation validation', () => {
     ['css variables', '<section style="color:var(--text)"></section>', '不安全或不兼容的 CSS'],
     ['javascript url', '<section><a href="javascript:alert(1)"></a></section>', '不安全链接'],
     ['missing leaf wrappers', '<section><p>中文正文。</p></section>', '缺少 span leaf'],
+    ['multiple roots', '<section><span leaf="">一</span></section><section><span leaf="">二</span></section>', '只能包含一个根 section'],
   ])('rejects %s', (_name, html, expected) => {
     expect(validateGeneratedThemeHtml(html).join('；')).toContain(expected);
   });
@@ -168,6 +198,87 @@ describe('WeChat theme Skill discovery and generation', () => {
     expect(resolveGzhSkillRoot('moyu-green', env)).toBeNull();
   });
 
+  test('rejects Skill context files that escape the resolved Skill root', () => {
+    const themePath = path.join(skillRoot, 'references', 'theme-moyu-green.md');
+    const outsidePath = path.join(tempDir, 'outside-theme.md');
+    fs.writeFileSync(outsidePath, '# outside\n');
+    fs.rmSync(themePath);
+    fs.symlinkSync(outsidePath, themePath);
+
+    expect(() => prepareThemeGenerationContext(skillRoot, 'moyu-green', '正文'))
+      .toThrow('gzh-design Skill 文件路径越界');
+  });
+
+  test('rejects oversized Skill files and articles before starting a runtime', () => {
+    fs.writeFileSync(
+      path.join(skillRoot, 'references', 'theme-moyu-green.md'),
+      Buffer.alloc(256 * 1024 + 1, 'x'),
+    );
+    expect(() => prepareThemeGenerationContext(skillRoot, 'moyu-green', '正文'))
+      .toThrow('上下文文件超过 256 KB');
+
+    fs.writeFileSync(path.join(skillRoot, 'references', 'theme-moyu-green.md'), '# green\n');
+    expect(() => prepareThemeGenerationContext(
+      skillRoot,
+      'moyu-green',
+      '文'.repeat(512 * 1024),
+    )).toThrow('公众号文章超过 512 KB');
+  });
+
+  test('keeps structural components and removes unrelated Skill context', () => {
+    fs.writeFileSync(path.join(skillRoot, 'SKILL.md'), [
+      '# gzh-design',
+      '## 工作流',
+      '### 3. 解析 Markdown 结构',
+      '保留解析规则。',
+      '### 4. 按配方选组件组合',
+      '保留装配规则。',
+      '## 添加新主题的规范',
+      '本次生成不需要。',
+    ].join('\n'));
+    fs.writeFileSync(path.join(skillRoot, 'references', 'common-components.md'), [
+      '# common',
+      '## 一、代码块组件',
+      '<section>code</section>',
+      '## 二、图片 / GIF 组件',
+      '<section>image</section>',
+      '## 三、小标签标题组件',
+      '<section>label</section>',
+    ].join('\n'));
+    fs.writeFileSync(path.join(skillRoot, 'references', 'theme-moyu-green.md'), [
+      '# green',
+      '## 设计变量速查表',
+      'green tokens',
+      '## 组件 1 全局容器',
+      '<section>root</section>',
+      '## 组件 2 正文段落 paragraph',
+      '<p>body</p>',
+      '## 组件 3 无关装饰组件',
+      '<section>unused</section>',
+      '## 组件 4 图片容器',
+      '<section>image</section>',
+      '## 组件 5 尾部作者签名区',
+      '<section>footer</section>',
+      '## 完整文章模板骨架',
+      '<section>skeleton</section>',
+    ].join('\n'));
+
+    const context = prepareThemeGenerationContext(
+      skillRoot,
+      'moyu-green',
+      `## 案例\n正文\n\n![](${ASSET_TOKEN})`,
+    );
+
+    expect(context.skillRules).toContain('保留解析规则');
+    expect(context.skillRules).not.toContain('添加新主题');
+    expect(context.commonComponents).toContain('<section>image</section>');
+    expect(context.commonComponents).not.toContain('<section>code</section>');
+    expect(context.themeComponents).toContain('<p>body</p>');
+    expect(context.themeComponents).toContain('<section>footer</section>');
+    expect(context.themeComponents).not.toContain('<section>unused</section>');
+    expect(context.bytes.sourceTotal).toBeGreaterThan(context.bytes.total);
+  });
+
   test('caches generated HTML and invalidates it for article, model, and Skill changes', async () => {
     const runtimeManager = runtimeWriting(validHtml());
     const runTurn = vi.spyOn(runtimeManager, 'runTurn');
@@ -186,10 +297,19 @@ describe('WeChat theme Skill discovery and generation', () => {
       html: validHtml(),
     });
     expect(first.contentHash).not.toBe('snapshot-v1');
-    expect(progress).toHaveBeenCalledWith({ label: '正在使用 摸鱼绿 生成排版…' });
+    expect(progress).toHaveBeenCalledWith({
+      phase: 'preparing',
+      label: '正在读取 摸鱼绿 主题组件…',
+    });
     expect(runTurn).toHaveBeenCalledOnce();
     expect(service.getCached(makeSnapshot(), 'moyu-green')).toEqual(first);
+    const readFile = vi.spyOn(fs, 'readFileSync');
     expect(await service.generate(makeSnapshot(), 'moyu-green')).toEqual(first);
+    const skillReads = readFile.mock.calls
+      .map(call => String(call[0]))
+      .filter(filePath => filePath.startsWith(skillRoot));
+    readFile.mockRestore();
+    expect(skillReads).toEqual([]);
     expect(runTurn).toHaveBeenCalledOnce();
 
     await service.generate(makeSnapshot('snapshot-v2'), 'moyu-green');
@@ -220,6 +340,84 @@ describe('WeChat theme Skill discovery and generation', () => {
       .resolves.toMatchObject({ html: validHtml() });
   });
 
+  test('streams cumulative section previews before validating and caching the final HTML', async () => {
+    const html = validHtml();
+    const chunks = [
+      '正在读取主题组件\n```html\n',
+      html.slice(0, 28),
+      html.slice(28, 92),
+      html.slice(92),
+      '\n```\n',
+    ];
+    const runtimeManager = runtimeWriting(null, { chunks });
+    const runTurn = vi.spyOn(runtimeManager, 'runTurn');
+    const service = new WeChatThemeService({
+      runtimeManager,
+      providerStore,
+      getSettings: () => settings,
+      env,
+    });
+    const previews: string[] = [];
+    const progress = vi.fn();
+
+    const result = await service.generate(makeSnapshot(), 'moyu-green', {
+      onProgress: progress,
+      onPreview: preview => previews.push(preview),
+    });
+
+    expect(previews.length).toBeGreaterThanOrEqual(3);
+    expect(previews.map(preview => preview.length)).toEqual(
+      [...previews.map(preview => preview.length)].sort((left, right) => left - right),
+    );
+    expect(previews.at(-1)).toBe(html);
+    expect(result.html).toBe(html);
+    expect(progress).toHaveBeenCalledWith({
+      phase: 'streaming',
+      label: '正在生成 摸鱼绿 主题…',
+    });
+    expect(progress).toHaveBeenCalledWith({
+      phase: 'validating',
+      label: '正在校验 摸鱼绿 排版…',
+    });
+    const request = runTurn.mock.calls[0][0];
+    expect(request.textOnly).toBe(true);
+    expect(request.prompt).toContain('最终回复只能包含公众号正文 section 片段');
+    expect(request.prompt).toContain('不要创建或修改任何输出文件');
+    expect(request.prompt).toContain('禁止调用文件读取、搜索、写入或其他工具');
+    expect(request.prompt).toContain('===== GZH-DESIGN SKILL RULES START =====\n# gzh-design');
+    expect(request.prompt).toContain('===== COMMON COMPONENTS START =====\n# common');
+    expect(request.prompt).toContain('===== THEME COMPONENTS (摸鱼绿) START =====\n# green v1');
+    expect(request.prompt).toContain(`===== ARTICLE MARKDOWN START =====\n${makeSnapshot().markdown}`);
+    expect(request.prompt).not.toContain(path.join(skillRoot, 'SKILL.md'));
+    expect(request.prompt).not.toContain('===== CUSTOM THEME GENERATOR START =====');
+  });
+
+  test('cancels one streaming generation without caching its partial HTML', async () => {
+    const controller = new AbortController();
+    const onPreview = vi.fn();
+    const runtimeManager = {
+      runTurn: vi.fn(async (_request: ChatTurnRequest, onEvent: RuntimeEventListener) => {
+        onEvent({ type: 'text', content: '<section><p><span leaf="">部分正文' });
+        controller.abort();
+        onEvent({ type: 'done' });
+      }),
+    } as unknown as RuntimeManager;
+    const service = new WeChatThemeService({
+      runtimeManager,
+      providerStore,
+      getSettings: () => settings,
+      env,
+    });
+
+    await expect(service.generate(makeSnapshot(), 'moyu-green', {
+      signal: controller.signal,
+      onPreview,
+    })).rejects.toBeInstanceOf(ThemeGenerationCancelledError);
+    expect(onPreview).toHaveBeenCalledOnce();
+    expect(service.getCached(makeSnapshot(), 'moyu-green')).toBeNull();
+    expect(settings.wechatThemeId).toBe('canghe-style');
+  });
+
   test('generates and caches a reusable AI custom theme from the saved style brief', async () => {
     const runtimeManager = runtimeWriting(validHtml());
     const runTurn = vi.spyOn(runtimeManager, 'runTurn');
@@ -245,6 +443,8 @@ describe('WeChat theme Skill discovery and generation', () => {
     expect(request.prompt).toContain('雾蓝科技刊');
     expect(request.prompt).toContain(customTheme.description);
     expect(request.prompt).toContain('wesight-wechat-asset://');
+    expect(request.prompt).toContain('===== CUSTOM THEME GENERATOR START =====\n# generator v1');
+    expect(request.prompt).not.toContain('===== THEME COMPONENTS (');
 
     settings.wechatCustomThemeName = customTheme.name;
     settings.wechatCustomThemeDescription = customTheme.description;

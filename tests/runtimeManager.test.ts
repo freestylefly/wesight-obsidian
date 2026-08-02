@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { setTimeout as delay } from 'timers/promises';
 
 import { invalidateRuntimeDiscoveryCache } from '../src/runtime/discovery';
 import { RuntimeManager } from '../src/runtime/runtimeManager';
@@ -129,5 +130,45 @@ describe('RuntimeManager provider safeguards', () => {
       expect(secondEvents[0].retryAfterSeconds).toBeGreaterThan(0);
       expect(secondEvents[0].message).toContain('仍在冷却中');
     }
+  });
+
+  test('aborts only the runtime turn associated with one signal', async () => {
+    const binaryPath = path.join(tempDir, 'fake-claude');
+    fs.writeFileSync(binaryPath, [
+      '#!/bin/sh',
+      'payload=$(cat)',
+      'case "$payload" in',
+      '  *SLOW*) exec sleep 5 ;;',
+      '  *) sleep 0.2; echo \'{"type":"assistant","message":{"content":[{"type":"text","text":"FAST"}]}}\' ;;',
+      'esac',
+    ].join('\n'));
+    fs.chmodSync(binaryPath, 0o755);
+    const profile = makeProfile('sk-test');
+    const providerStore = { find: () => profile } as unknown as ProviderStore;
+    const manager = new RuntimeManager(providerStore, () => makeSettings(binaryPath));
+    const controller = new AbortController();
+    const slowEvents: RuntimeTurnEvent[] = [];
+    const fastEvents: RuntimeTurnEvent[] = [];
+
+    const slowRun = manager.runTurn({
+      ...request,
+      conversationId: 'slow-turn',
+      prompt: 'SLOW',
+      signal: controller.signal,
+    }, event => slowEvents.push(event));
+    await delay(50);
+    const fastRun = manager.runTurn({
+      ...request,
+      conversationId: 'fast-turn',
+      prompt: 'FAST',
+    }, event => fastEvents.push(event));
+    await delay(50);
+    controller.abort();
+    await Promise.all([slowRun, fastRun]);
+
+    expect(slowEvents).toContainEqual({ type: 'done' });
+    expect(slowEvents.some(event => event.type === 'error')).toBe(false);
+    expect(fastEvents).toContainEqual({ type: 'text', content: 'FAST' });
+    expect(fastEvents).toContainEqual({ type: 'done' });
   });
 });

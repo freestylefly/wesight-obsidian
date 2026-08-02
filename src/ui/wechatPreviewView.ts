@@ -12,7 +12,10 @@ import {
 import { CloudAuthService } from '../share/cloudAuth';
 import { CloudApiError } from '../share/cloudApi';
 import { WeChatCloudApi } from '../wechat/cloudApi';
-import { WeChatThemeService } from '../wechat/themeService';
+import {
+  ThemeGenerationCancelledError,
+  WeChatThemeService,
+} from '../wechat/themeService';
 import {
   WECHAT_CONTENT_HASH_FRONTMATTER_KEY,
   WECHAT_DRAFT_ID_FRONTMATTER_KEY,
@@ -21,6 +24,7 @@ import {
 } from '../wechat/frontmatter';
 import {
   renderWeChatArticle,
+  renderStreamingWeChatThemePreview,
   replaceFormulaSvgs,
   serializeWeChatArticle,
 } from '../wechat/renderer';
@@ -48,6 +52,7 @@ import {
 import { recordValue } from '../utils/records';
 import { confirmShareAction } from './shareConfirm';
 import { promptForCustomWeChatTheme } from './wechatCustomThemeModal';
+import { StreamingPreviewAutoFollow } from './streamingPreviewAutoFollow';
 
 export const WESIGHT_WECHAT_PREVIEW_VIEW_TYPE = 'wesight-wechat-preview';
 
@@ -84,6 +89,23 @@ export class WeChatPreviewView extends ItemView {
   private themeMenuEl: HTMLElement | null = null;
   private themeSubmenuEl: HTMLElement | null = null;
   private themeMenuHideTimer: number | null = null;
+  private themeGenerationController: AbortController | null = null;
+  private themeGenerationStopping = false;
+  private themeGenerationId = 0;
+  private pendingThemeId: WeChatThemeId | null = null;
+  private pendingCustomTheme: WeChatCustomThemePreferences | null = null;
+  private streamingThemeHtml: string | null = null;
+  private streamingPreviewIframe: HTMLIFrameElement | null = null;
+  private streamingPreviewTimer: number | null = null;
+  private lastStreamingPreviewAt = 0;
+  private readonly streamingPreviewAutoFollow = new StreamingPreviewAutoFollow();
+  private streamingPreviewScrollEl: HTMLElement | null = null;
+  private streamingPreviewScrollFrame: number | null = null;
+  private lastStreamingPreviewScrollTop = 0;
+  private streamingPreviewTouchY: number | null = null;
+  private streamingPreviewScrollbarDragging = false;
+  private pendingPreviewScrollRestore: { top: number; followBottom: boolean } | null = null;
+  private themeGenerationError: string | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -135,6 +157,7 @@ export class WeChatPreviewView extends ItemView {
   }
 
   override async onClose(): Promise<void> {
+    this.invalidateThemeGeneration();
     if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
     this.closeThemeMenus();
@@ -152,6 +175,7 @@ export class WeChatPreviewView extends ItemView {
     state: Record<string, unknown>,
     result: ViewStateResult,
   ): Promise<void> {
+    this.invalidateThemeGeneration();
     const filePath = typeof state.filePath === 'string' ? state.filePath : '';
     const file = filePath ? this.app.vault.getAbstractFileByPath(filePath) : null;
     if (file instanceof TFile) this.file = file;
@@ -162,6 +186,7 @@ export class WeChatPreviewView extends ItemView {
 
   async setFile(file: TFile): Promise<void> {
     if (this.file?.path === file.path && this.snapshot) return;
+    this.invalidateThemeGeneration();
     this.file = file;
     this.clearTemporaryCover();
     this.acknowledgedWarnings = false;
@@ -174,8 +199,10 @@ export class WeChatPreviewView extends ItemView {
   }
 
   private async reload(): Promise<void> {
+    this.invalidateThemeGeneration();
     this.loading = true;
     this.error = null;
+    this.themeGenerationError = null;
     this.errorTitle = '预览生成失败';
     this.staleDraft = false;
     this.render();
@@ -276,12 +303,21 @@ export class WeChatPreviewView extends ItemView {
     const actions = header.createDiv({ cls: 'wesight-wechat-preview-header-actions' });
     const refresh = header.createEl('button', {
       cls: 'clickable-icon',
-      attr: { type: 'button', 'aria-label': '刷新公众号排版' },
+      attr: {
+        type: 'button',
+        'aria-label': this.themeGenerationController ? '停止公众号主题生成' : '刷新公众号排版',
+      },
     });
     actions.appendChild(refresh);
-    setIcon(refresh, 'refresh-cw');
-    refresh.disabled = this.loading || Boolean(this.operation);
-    refresh.onclick = () => void this.refreshPreview();
+    setIcon(refresh, this.themeGenerationController ? 'square' : 'refresh-cw');
+    refresh.toggleClass('is-stop', Boolean(this.themeGenerationController));
+    refresh.disabled = this.loading
+      || this.themeGenerationStopping
+      || (Boolean(this.operation) && !this.themeGenerationController);
+    refresh.onclick = () => {
+      if (this.themeGenerationController) this.stopThemeGeneration();
+      else void this.refreshPreview();
+    };
   }
 
   private renderLogin(parent: HTMLElement): void {
@@ -336,8 +372,12 @@ export class WeChatPreviewView extends ItemView {
       );
     }
 
+    if (this.themeGenerationError) {
+      this.renderBanner(parent, 'circle-alert', `主题生成失败：${this.themeGenerationError}`);
+    }
+
     const prepared = this.preparedSnapshot();
-    if (this.themeNeedsGeneration(prepared)) {
+    if (this.themeNeedsGeneration(prepared) && !this.themeGenerationController) {
       this.renderBanner(
         parent,
         'sparkles',
@@ -354,13 +394,35 @@ export class WeChatPreviewView extends ItemView {
 
     const canvasWrap = parent.createDiv({ cls: 'wesight-wechat-preview-canvas-wrap' });
     const canvas = canvasWrap.createDiv({ cls: 'wesight-wechat-preview-canvas' });
+    if (this.streamingThemeHtml !== null && this.themeGenerationController) {
+      this.bindStreamingPreviewAutoFollow(canvasWrap);
+      const iframe = canvas.createEl('iframe', {
+        cls: 'wesight-wechat-streaming-preview',
+        attr: {
+          title: `${this.currentThemeLabel()} 流式排版预览`,
+          sandbox: 'allow-same-origin',
+          referrerpolicy: 'no-referrer',
+        },
+      });
+      this.streamingPreviewIframe = iframe;
+      renderStreamingWeChatThemePreview(prepared, iframe, this.streamingThemeHtml, {
+        onResize: () => this.scheduleStreamingPreviewAutoScroll(canvasWrap),
+        onUserScrollUp: () => this.pauseStreamingPreviewAutoFollow(),
+        onUserWheel: deltaY => this.forwardStreamingPreviewWheel(canvasWrap, deltaY),
+      });
+      this.updateStreamingPreviewFollowButton();
+      return;
+    }
+    this.streamingPreviewIframe = null;
     const article = canvas.createDiv({ cls: 'wesight-wechat-preview-article' });
     void renderWeChatArticle(this.app, this, prepared, article, {
       themeDocument: this.validThemeDocument(prepared),
-    }).catch((error) => {
-      this.error = error instanceof Error ? error.message : '排版渲染失败';
-      this.render();
-    });
+    })
+      .then(() => this.restorePreviewScroll(canvasWrap))
+      .catch((error) => {
+        this.error = error instanceof Error ? error.message : '排版渲染失败';
+        this.render();
+      });
   }
 
   private renderTabs(parent: HTMLElement, snapshot: WeChatPreviewSnapshot): void {
@@ -803,13 +865,15 @@ export class WeChatPreviewView extends ItemView {
   }
 
   private currentThemeId(): WeChatThemeId {
-    return this.options.getSettings().wechatThemeId;
+    return this.pendingThemeId ?? this.options.getSettings().wechatThemeId;
   }
 
   private currentThemeLabel(): string {
     const theme = getWeChatTheme(this.currentThemeId());
     if (theme.kind !== 'custom') return theme.label;
-    return this.options.getSettings().wechatCustomThemeName.trim() || theme.label;
+    return this.pendingCustomTheme?.name.trim()
+      || this.options.getSettings().wechatCustomThemeName.trim()
+      || theme.label;
   }
 
   private loadCachedThemeDocument(snapshot: WeChatPreviewSnapshot): void {
@@ -840,7 +904,7 @@ export class WeChatPreviewView extends ItemView {
     if (!this.snapshot) return;
     const themeId = this.currentThemeId();
     const theme = getWeChatTheme(themeId);
-    if (theme.kind !== 'template' && this.themeNeedsGeneration(this.preparedSnapshot())) {
+    if (theme.kind !== 'template') {
       if (theme.kind === 'custom' && !this.customThemePreferences().description) {
         await this.configureCustomTheme();
       } else {
@@ -857,6 +921,8 @@ export class WeChatPreviewView extends ItemView {
       return;
     }
     const settings = this.options.getSettings();
+    this.pendingThemeId = null;
+    this.pendingCustomTheme = null;
     settings.wechatThemeId = themeId;
     this.themeDocument = createTemplateThemeDocument(this.preparedSnapshot());
     await this.options.saveSettings();
@@ -887,40 +953,274 @@ export class WeChatPreviewView extends ItemView {
     const theme = getWeChatTheme(themeId);
     const themeLabel = customTheme?.name || theme.label;
     const snapshot = this.preparedSnapshot();
-    const previousThemeId = this.currentThemeId();
     const previousDocument = this.themeDocument;
     const settings = this.options.getSettings();
+    const previousThemeId = settings.wechatThemeId;
     const previousCustomTheme = this.customThemePreferences();
-    settings.wechatThemeId = themeId;
-    if (customTheme) {
-      settings.wechatCustomThemeName = customTheme.name;
-      settings.wechatCustomThemeDescription = customTheme.description;
-    }
-    this.operation = `正在生成 ${themeLabel} 主题…`;
+    const generationId = ++this.themeGenerationId;
+    const controller = new AbortController();
+    let generated = false;
+    const previousPreviewScrollTop = this.currentPreviewScrollTop();
+    this.themeGenerationController = controller;
+    this.themeGenerationStopping = false;
+    this.pendingThemeId = themeId;
+    this.pendingCustomTheme = customTheme ?? null;
+    this.streamingThemeHtml = '';
+    this.streamingPreviewAutoFollow.start();
+    this.themeGenerationError = null;
+    this.activeTab = 'preview';
+    this.operation = `正在读取 ${themeLabel} 主题组件…`;
     this.render();
     try {
       const document = await this.options.themeService.generate(snapshot, themeId, {
         force,
         customTheme,
+        signal: controller.signal,
         onProgress: progress => {
+          if (generationId !== this.themeGenerationId) return;
           this.operation = progress.label;
-          this.render();
+          this.updateThemeGenerationStatus(progress.label);
+        },
+        onPreview: html => {
+          if (generationId === this.themeGenerationId) this.queueStreamingThemePreview(html);
         },
       });
+      if (generationId !== this.themeGenerationId || controller.signal.aborted) return;
+      settings.wechatThemeId = themeId;
+      if (customTheme) {
+        settings.wechatCustomThemeName = customTheme.name;
+        settings.wechatCustomThemeDescription = customTheme.description;
+      }
       this.themeDocument = document;
       await this.options.saveSettings();
-      this.activeTab = 'preview';
+      generated = true;
       new Notice(`${themeLabel} 主题已生成。`);
     } catch (error) {
+      if (generationId !== this.themeGenerationId) return;
       settings.wechatThemeId = previousThemeId;
       settings.wechatCustomThemeName = previousCustomTheme.name;
       settings.wechatCustomThemeDescription = previousCustomTheme.description;
       this.themeDocument = previousDocument;
-      new Notice(error instanceof Error ? error.message : `${themeLabel} 主题生成失败`);
+      const cancelled = controller.signal.aborted || error instanceof ThemeGenerationCancelledError;
+      if (cancelled) {
+        new Notice('已停止主题生成，已恢复上一次预览。');
+      } else {
+        const message = error instanceof Error ? error.message : `${themeLabel} 主题生成失败`;
+        this.themeGenerationError = message;
+        new Notice(message);
+      }
     } finally {
-      this.operation = null;
-      this.render();
+      if (generationId === this.themeGenerationId) {
+        this.pendingPreviewScrollRestore = generated
+          ? this.captureStreamingPreviewScroll()
+          : { top: previousPreviewScrollTop, followBottom: false };
+        this.clearStreamingPreviewTimer();
+        this.resetStreamingPreviewAutoFollow();
+        this.themeGenerationController = null;
+        this.themeGenerationStopping = false;
+        this.pendingThemeId = null;
+        this.pendingCustomTheme = null;
+        this.streamingThemeHtml = null;
+        this.streamingPreviewIframe = null;
+        this.operation = null;
+        this.render();
+      }
     }
+  }
+
+  private stopThemeGeneration(): void {
+    if (!this.themeGenerationController || this.themeGenerationStopping) return;
+    this.themeGenerationStopping = true;
+    this.operation = '正在停止主题生成…';
+    this.themeGenerationController.abort();
+    this.render();
+  }
+
+  private invalidateThemeGeneration(): void {
+    const controller = this.themeGenerationController;
+    this.pendingPreviewScrollRestore = null;
+    if (!controller && this.streamingPreviewTimer === null) {
+      this.resetStreamingPreviewAutoFollow();
+      return;
+    }
+    this.themeGenerationId += 1;
+    controller?.abort();
+    this.clearStreamingPreviewTimer();
+    this.resetStreamingPreviewAutoFollow();
+    this.themeGenerationController = null;
+    this.themeGenerationStopping = false;
+    this.pendingThemeId = null;
+    this.pendingCustomTheme = null;
+    this.streamingThemeHtml = null;
+    this.streamingPreviewIframe = null;
+    this.operation = null;
+  }
+
+  private queueStreamingThemePreview(html: string): void {
+    this.streamingThemeHtml = html;
+    if (this.streamingPreviewTimer !== null) return;
+    const elapsed = Date.now() - this.lastStreamingPreviewAt;
+    this.streamingPreviewTimer = window.setTimeout(() => {
+      this.streamingPreviewTimer = null;
+      this.lastStreamingPreviewAt = Date.now();
+      if (this.snapshot && this.streamingPreviewIframe && this.streamingThemeHtml !== null) {
+        renderStreamingWeChatThemePreview(
+          this.preparedSnapshot(),
+          this.streamingPreviewIframe,
+          this.streamingThemeHtml,
+          {
+            onResize: () => {
+              if (this.streamingPreviewScrollEl) {
+                this.scheduleStreamingPreviewAutoScroll(this.streamingPreviewScrollEl);
+              }
+            },
+            onUserScrollUp: () => this.pauseStreamingPreviewAutoFollow(),
+            onUserWheel: deltaY => {
+              if (this.streamingPreviewScrollEl) {
+                this.forwardStreamingPreviewWheel(this.streamingPreviewScrollEl, deltaY);
+              }
+            },
+          },
+        );
+      }
+    }, Math.max(0, 100 - elapsed));
+  }
+
+  private clearStreamingPreviewTimer(): void {
+    if (this.streamingPreviewTimer !== null) window.clearTimeout(this.streamingPreviewTimer);
+    this.streamingPreviewTimer = null;
+  }
+
+  private bindStreamingPreviewAutoFollow(viewport: HTMLElement): void {
+    this.streamingPreviewScrollEl = viewport;
+    this.lastStreamingPreviewScrollTop = viewport.scrollTop;
+    viewport.addEventListener('wheel', (event) => {
+      if (
+        event.deltaY < 0
+        && viewport.scrollTop > 0
+        && this.streamingPreviewAutoFollow.pause()
+      ) {
+        this.updateStreamingPreviewFollowButton();
+      }
+    }, { passive: true });
+    viewport.addEventListener('touchstart', (event) => {
+      this.streamingPreviewTouchY = event.touches[0]?.clientY ?? null;
+    }, { passive: true });
+    viewport.addEventListener('touchmove', (event) => {
+      const currentY = event.touches[0]?.clientY;
+      if (currentY === undefined || this.streamingPreviewTouchY === null) return;
+      if (currentY - this.streamingPreviewTouchY > 6 && this.streamingPreviewAutoFollow.pause()) {
+        this.updateStreamingPreviewFollowButton();
+      }
+      this.streamingPreviewTouchY = currentY;
+    }, { passive: true });
+    viewport.addEventListener('mousedown', (event) => {
+      const bounds = viewport.getBoundingClientRect();
+      this.streamingPreviewScrollbarDragging = event.clientX >= bounds.right - 18;
+      if (!this.streamingPreviewScrollbarDragging) return;
+      document.addEventListener('mouseup', () => {
+        this.streamingPreviewScrollbarDragging = false;
+      }, { once: true });
+    });
+    viewport.addEventListener('scroll', () => {
+      const movedUp = viewport.scrollTop < this.lastStreamingPreviewScrollTop - 1;
+      this.lastStreamingPreviewScrollTop = viewport.scrollTop;
+      const userInitiated = this.streamingPreviewScrollbarDragging || movedUp;
+      if (this.streamingPreviewAutoFollow.observeScroll(viewport, userInitiated)) {
+        this.updateStreamingPreviewFollowButton();
+      }
+    }, { passive: true });
+  }
+
+  private pauseStreamingPreviewAutoFollow(): void {
+    if (this.streamingPreviewAutoFollow.pause()) {
+      this.updateStreamingPreviewFollowButton();
+    }
+  }
+
+  private scheduleStreamingPreviewAutoScroll(viewport: HTMLElement): void {
+    if (
+      viewport !== this.streamingPreviewScrollEl
+      || !viewport.isConnected
+      || !this.streamingPreviewAutoFollow.isFollowing
+    ) return;
+    if (this.streamingPreviewScrollFrame !== null) return;
+    this.streamingPreviewScrollFrame = window.requestAnimationFrame(() => {
+      this.streamingPreviewScrollFrame = null;
+      if (
+        viewport !== this.streamingPreviewScrollEl
+        || !viewport.isConnected
+        || !this.streamingPreviewAutoFollow.isFollowing
+      ) return;
+      viewport.scrollTop = viewport.scrollHeight;
+      this.lastStreamingPreviewScrollTop = viewport.scrollTop;
+    });
+  }
+
+  private forwardStreamingPreviewWheel(viewport: HTMLElement, deltaY: number): void {
+    if (viewport !== this.streamingPreviewScrollEl || !viewport.isConnected) return;
+    viewport.scrollTop += deltaY;
+    this.lastStreamingPreviewScrollTop = viewport.scrollTop;
+  }
+
+  private updateStreamingPreviewFollowButton(): void {
+    this.contentEl.querySelector('.wesight-wechat-preview-follow')?.remove();
+    if (!this.themeGenerationController || !this.streamingPreviewAutoFollow.isPaused) return;
+    const button = this.contentEl.createEl('button', {
+      cls: 'wesight-wechat-preview-follow',
+      attr: { type: 'button', 'aria-label': '继续跟随最新生成内容' },
+    });
+    const icon = button.createSpan();
+    setIcon(icon, 'arrow-down');
+    button.createSpan({ text: '继续跟随' });
+    button.onclick = () => {
+      this.streamingPreviewAutoFollow.resume();
+      this.updateStreamingPreviewFollowButton();
+      if (this.streamingPreviewScrollEl) {
+        this.scheduleStreamingPreviewAutoScroll(this.streamingPreviewScrollEl);
+      }
+    };
+  }
+
+  private resetStreamingPreviewAutoFollow(): void {
+    this.streamingPreviewAutoFollow.stop();
+    if (this.streamingPreviewScrollFrame !== null) {
+      window.cancelAnimationFrame(this.streamingPreviewScrollFrame);
+    }
+    this.streamingPreviewScrollFrame = null;
+    this.streamingPreviewScrollEl = null;
+    this.streamingPreviewTouchY = null;
+    this.streamingPreviewScrollbarDragging = false;
+    this.lastStreamingPreviewScrollTop = 0;
+    this.contentEl.querySelector('.wesight-wechat-preview-follow')?.remove();
+  }
+
+  private updateThemeGenerationStatus(label: string): void {
+    const status = this.contentEl.querySelector('.wesight-wechat-publish-state > span:last-child');
+    if (status) status.textContent = label;
+  }
+
+  private currentPreviewScrollTop(): number {
+    return this.contentEl.querySelector<HTMLElement>('.wesight-wechat-preview-canvas-wrap')?.scrollTop ?? 0;
+  }
+
+  private captureStreamingPreviewScroll(): { top: number; followBottom: boolean } {
+    return {
+      top: this.streamingPreviewScrollEl?.scrollTop ?? 0,
+      followBottom: this.streamingPreviewAutoFollow.isFollowing,
+    };
+  }
+
+  private restorePreviewScroll(viewport: HTMLElement): void {
+    const pending = this.pendingPreviewScrollRestore;
+    if (!pending) return;
+    window.requestAnimationFrame(() => {
+      if (!viewport.isConnected || this.streamingThemeHtml !== null) return;
+      viewport.scrollTop = pending.followBottom
+        ? viewport.scrollHeight
+        : Math.min(pending.top, Math.max(0, viewport.scrollHeight - viewport.clientHeight));
+      if (this.pendingPreviewScrollRestore === pending) this.pendingPreviewScrollRestore = null;
+    });
   }
 
   private preparedSnapshot(): WeChatPreviewSnapshot {

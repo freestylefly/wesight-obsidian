@@ -3,6 +3,10 @@ import { App, Component, MarkdownRenderer, sanitizeHTMLToDom } from 'obsidian';
 
 import type { WeChatAssetDraft, WeChatPreviewSnapshot } from './types';
 import { getWeChatTheme, type WeChatThemeDocument } from './themes';
+import {
+  buildStreamingThemePreviewDocument,
+  sanitizeStreamingThemeHtml,
+} from './streamingPreview';
 
 const ATOM_ONE_DARK: Record<string, string> = {
   'hljs-comment': '#5c6370',
@@ -40,6 +44,16 @@ const ATOM_ONE_DARK: Record<string, string> = {
 };
 
 const CANGHE_FONT_FAMILY = 'Optima-Regular, PingFangSC-light';
+const STREAMING_IMAGE_RESIZE_BOUND = new WeakSet<HTMLImageElement>();
+const STREAMING_INTERACTION_BOUND = new WeakSet<Document>();
+const STREAMING_INTERACTION_OPTIONS = new WeakMap<Document, StreamingPreviewRenderOptions>();
+const STREAMING_TOUCH_Y = new WeakMap<Document, number>();
+
+interface StreamingPreviewRenderOptions {
+  onResize?: () => void;
+  onUserScrollUp?: () => void;
+  onUserWheel?: (deltaY: number) => void;
+}
 
 function styles(element: HTMLElement, values: Partial<CSSStyleDeclaration>): void {
   Object.assign(element.style, values);
@@ -410,6 +424,137 @@ function replaceAssetTokens(
   let result = markdown;
   for (const [token, url] of replacements) result = result.split(token).join(url);
   return result;
+}
+
+function canMorphStreamingNode(current: Node, next: Node): boolean {
+  if (current.nodeType !== next.nodeType) return false;
+  if (current.nodeType === Node.ELEMENT_NODE) {
+    return (current as Element).tagName === (next as Element).tagName;
+  }
+  return true;
+}
+
+function syncStreamingAttributes(current: Element, next: Element): void {
+  for (const attribute of Array.from(current.attributes)) {
+    if (!next.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
+  }
+  for (const attribute of Array.from(next.attributes)) {
+    if (current.getAttribute(attribute.name) !== attribute.value) {
+      current.setAttribute(attribute.name, attribute.value);
+    }
+  }
+}
+
+function morphStreamingChildren(current: Node & ParentNode, next: ParentNode): void {
+  const currentChildren = Array.from(current.childNodes);
+  const nextChildren = Array.from(next.childNodes);
+  const sharedLength = Math.min(currentChildren.length, nextChildren.length);
+
+  for (let index = 0; index < sharedLength; index += 1) {
+    const currentChild = currentChildren[index];
+    const nextChild = nextChildren[index];
+    if (!canMorphStreamingNode(currentChild, nextChild)) {
+      currentChild.replaceWith(nextChild);
+      continue;
+    }
+    if (currentChild.nodeType === Node.TEXT_NODE || currentChild.nodeType === Node.COMMENT_NODE) {
+      if (currentChild.nodeValue !== nextChild.nodeValue) currentChild.nodeValue = nextChild.nodeValue;
+      continue;
+    }
+    if (currentChild.nodeType === Node.ELEMENT_NODE) {
+      const currentElement = currentChild as Element;
+      const nextElement = nextChild as Element;
+      syncStreamingAttributes(currentElement, nextElement);
+      morphStreamingChildren(currentElement, nextElement);
+    }
+  }
+
+  for (const child of currentChildren.slice(nextChildren.length)) child.remove();
+  for (const child of nextChildren.slice(currentChildren.length)) current.appendChild(child);
+}
+
+function resizeStreamingIframe(
+  iframe: HTMLIFrameElement,
+  onResize?: () => void,
+): void {
+  const document = iframe.contentDocument;
+  if (!document) return;
+  const height = Math.max(
+    240,
+    document.documentElement?.scrollHeight ?? 0,
+    document.body?.scrollHeight ?? 0,
+  );
+  iframe.style.height = `${height}px`;
+  onResize?.();
+  for (const image of Array.from(document.images)) {
+    if (image.complete || STREAMING_IMAGE_RESIZE_BOUND.has(image)) continue;
+    STREAMING_IMAGE_RESIZE_BOUND.add(image);
+    const settled = (): void => {
+      image.removeEventListener('load', settled);
+      image.removeEventListener('error', settled);
+      resizeStreamingIframe(iframe, onResize);
+    };
+    image.addEventListener('load', settled);
+    image.addEventListener('error', settled);
+  }
+}
+
+function bindStreamingPreviewInteraction(
+  document: Document,
+  options: StreamingPreviewRenderOptions,
+): void {
+  STREAMING_INTERACTION_OPTIONS.set(document, options);
+  if (STREAMING_INTERACTION_BOUND.has(document)) return;
+  STREAMING_INTERACTION_BOUND.add(document);
+  document.addEventListener('wheel', (event) => {
+    const currentOptions = STREAMING_INTERACTION_OPTIONS.get(document);
+    if (event.deltaY < 0) currentOptions?.onUserScrollUp?.();
+    currentOptions?.onUserWheel?.(event.deltaY);
+  }, { passive: true });
+  document.addEventListener('touchstart', (event) => {
+    const y = event.touches[0]?.clientY;
+    if (y !== undefined) STREAMING_TOUCH_Y.set(document, y);
+  }, { passive: true });
+  document.addEventListener('touchmove', (event) => {
+    const previousY = STREAMING_TOUCH_Y.get(document);
+    const currentY = event.touches[0]?.clientY;
+    if (previousY === undefined || currentY === undefined) return;
+    if (currentY - previousY > 6) {
+      STREAMING_INTERACTION_OPTIONS.get(document)?.onUserScrollUp?.();
+    }
+    STREAMING_TOUCH_Y.set(document, currentY);
+  }, { passive: true });
+}
+
+export function renderStreamingWeChatThemePreview(
+  snapshot: WeChatPreviewSnapshot,
+  iframe: HTMLIFrameElement,
+  html: string,
+  options: StreamingPreviewRenderOptions = {},
+): void {
+  const replaced = replaceAssetTokens(html, assetMap(snapshot));
+  const safeHtml = sanitizeStreamingThemeHtml(replaced);
+  if (iframe.dataset.wesightStreamingReady !== 'true') {
+    iframe.dataset.wesightStreamingReady = 'true';
+    iframe.onload = () => {
+      if (iframe.contentDocument) bindStreamingPreviewInteraction(iframe.contentDocument, options);
+      resizeStreamingIframe(iframe, options.onResize);
+    };
+    iframe.srcdoc = buildStreamingThemePreviewDocument(replaced);
+    return;
+  }
+  const document = iframe.contentDocument;
+  if (document?.body) {
+    bindStreamingPreviewInteraction(document, options);
+    const nextBody = sanitizeHTMLToDom(
+      safeHtml
+        || '<p style="margin:24px 0;text-align:center;color:#8b949e;font-size:13px;">正在读取主题并生成排版…</p>',
+    );
+    morphStreamingChildren(document.body, nextBody);
+    window.requestAnimationFrame(() => resizeStreamingIframe(iframe, options.onResize));
+    return;
+  }
+  iframe.srcdoc = buildStreamingThemePreviewDocument(replaced);
 }
 
 export async function renderWeChatArticle(
