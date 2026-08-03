@@ -2,7 +2,19 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { CodexAppServerClient } from '../src/runtime/codexAppServer';
+import { buildCodexAppServerArgs, CodexAppServerClient } from '../src/runtime/codexAppServer';
+
+describe('Codex App Server arguments', () => {
+  test('overrides legacy service-tier values with a current CLI value', () => {
+    expect(buildCodexAppServerArgs()).toEqual([
+      'app-server',
+      '-c',
+      'service_tier="fast"',
+      '--listen',
+      'stdio://',
+    ]);
+  });
+});
 
 describe('CodexAppServerClient', () => {
   let tempDir: string;

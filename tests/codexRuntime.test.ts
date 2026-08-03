@@ -10,6 +10,7 @@ class FakeAppServerClient extends EventEmitter {
   connectedExecutablePath: string | null = null;
   requests: Array<{ method: string; params: unknown }> = [];
   imageGeneration = true;
+  emitWarning = false;
   private threadNumber = 0;
 
   async connect(options: { executablePath: string }): Promise<void> {
@@ -50,6 +51,12 @@ class FakeAppServerClient extends EventEmitter {
       const turnId = `turn-${threadId}`;
       const input = value.input as Array<Record<string, string>>;
       const prompt = input.find(item => item.type === 'text')?.text ?? '';
+      if (this.emitWarning) {
+        process.nextTick(() => this.emit('notification', 'warning', {
+          threadId,
+          message: 'Model metadata fallback warning',
+        }));
+      }
       if (prompt !== 'HOLD') {
         process.nextTick(() => this.emitCompletedTurn(threadId, turnId, prompt));
       }
@@ -226,6 +233,20 @@ describe('CodexAppServerRuntime', () => {
     expect(status.imageGeneration).toBe(false);
     expect(events).toContainEqual({ type: 'text', content: 'reply:CHAT_ONLY' });
     expect(events.at(-1)).toEqual({ type: 'done', sessionId: 'thread-1' });
+    await runtime.shutdown();
+  });
+
+  test('does not turn non-fatal App Server warnings into chat errors', async () => {
+    const client = new FakeAppServerClient();
+    client.emitWarning = true;
+    const runtime = new CodexAppServerRuntime(client as unknown as CodexAppServerClient);
+    const events: RuntimeTurnEvent[] = [];
+
+    await runtime.runTurn(request('WARNING_ONLY'), connection, event => events.push(event));
+
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(events).toContainEqual({ type: 'text', content: 'reply:WARNING_ONLY' });
+    expect(events.at(-1)).toMatchObject({ type: 'done' });
     await runtime.shutdown();
   });
 });
