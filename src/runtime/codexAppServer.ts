@@ -28,6 +28,17 @@ export interface CodexAppServerConnectOptions {
   clientVersion?: string;
 }
 
+/**
+ * Codex CLI has changed the accepted service-tier values over time. The
+ * desktop config can retain an older `default`/`priority` value, which makes
+ * a newer app-server reject the whole configuration before a thread starts.
+ * `fast` is accepted by current CLI versions and is safely omitted by Codex
+ * when the selected model does not advertise that tier.
+ */
+export function buildCodexAppServerArgs(): string[] {
+  return ['app-server', '-c', 'service_tier="fast"', '--listen', 'stdio://'];
+}
+
 export class CodexAppServerClient extends EventEmitter {
   private child: ChildProcess | null = null;
   private executablePath: string | null = null;
@@ -60,7 +71,7 @@ export class CodexAppServerClient extends EventEmitter {
     this.stderrTail = '';
     this.executablePath = options.executablePath;
 
-    const child = spawn(options.executablePath, ['app-server', '--listen', 'stdio://'], {
+    const child = spawn(options.executablePath, buildCodexAppServerArgs(), {
       env: options.env ?? process.env,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,

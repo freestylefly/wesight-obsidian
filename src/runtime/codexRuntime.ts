@@ -392,8 +392,9 @@ export class CodexAppServerRuntime extends EventEmitter {
       return;
     }
     if (method === 'warning') {
-      const message = stringAt(params, 'message');
-      if (message) active.listener({ type: 'error', message });
+      // App Server warnings are non-fatal diagnostics (for example an
+      // unavailable service tier or fallback model metadata). Rendering them
+      // as a red assistant error makes a successful turn look failed.
       return;
     }
     if (method === 'turn/completed') {

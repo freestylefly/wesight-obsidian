@@ -25,6 +25,7 @@ import { RuntimeDiscovery } from '../runtime/discovery';
 import { RuntimeManager } from '../runtime/runtimeManager';
 import { getClaudeDetectedLocalModel, listLocalModels } from '../runtime/localModels';
 import { RuntimeSetupModal } from './runtimeSetupModal';
+import { shouldRenderToolEvent } from './toolEventVisibility';
 
 export const WESIGHT_VIEW_TYPE = 'wesight-chat-view';
 
@@ -1427,6 +1428,7 @@ export class WeSightChatView extends ItemView {
         assistantEl.removeClass('is-streaming');
         this.scheduleScrollToBottom();
       } else if (event.type === 'tool') {
+        if (!shouldRenderToolEvent(agentId, event.toolCall)) return;
         const line = `\n\n• ${event.toolCall.name} ${event.toolCall.status}`;
         assistantMessage.content += line;
         appendDelta(line);
