@@ -90,6 +90,8 @@ export type ChatArtifact = ChatImageArtifact;
 
 export interface ChatMessageMetadata extends Record<string, unknown> {
   artifacts?: ChatArtifact[];
+  /** Total elapsed time of the assistant turn in milliseconds. */
+  durationMs?: number;
 }
 
 export interface ToolCallEvent {

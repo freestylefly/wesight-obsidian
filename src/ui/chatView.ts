@@ -55,15 +55,19 @@ export class WeSightChatView extends ItemView {
   private inputEl!: HTMLTextAreaElement;
   private statusEl!: HTMLElement;
   private accountSlotEl!: HTMLElement;
-  private setupButtonEl!: HTMLButtonElement;
+  private historyButtonEl!: HTMLButtonElement;
+  private historyPopoverEl: HTMLElement | null = null;
+  private historyTriggerEl: HTMLElement | null = null;
   private sendButtonEl!: HTMLButtonElement;
   private stopButtonEl!: HTMLButtonElement;
   private suggestEl: HTMLElement | null = null;
   private running = false;
+  private cancelledByUser = false;
   private viewInitialized = false;
   private dropdownCloseRegistered = false;
   private contextTrackingRegistered = false;
   private contextRowEl: HTMLElement | null = null;
+  private cancelHintEl: HTMLElement | null = null;
   private activeEditorContext: ActiveEditorContext | null = null;
   private observedMarkdownView: MarkdownView | null = null;
   private dismissedContextSignature: string | null = null;
@@ -133,6 +137,7 @@ export class WeSightChatView extends ItemView {
   override async onClose(): Promise<void> {
     // Submenus live on document.body, so they outlive contentEl unless removed here.
     this.hideConfigSubmenu();
+    this.hideHistoryPopover();
     this.accountMenu?.hide();
     this.accountMenu = null;
     this.authUnsubscribe?.();
@@ -175,6 +180,10 @@ export class WeSightChatView extends ItemView {
            !target.closest('.wesight-model-option.has-submenu'))) {
         this.hideModelSubmenu();
       }
+    }
+    // Close history popover if clicking outside
+    if (this.historyPopoverEl && (!target || (!this.historyPopoverEl.contains(target) && target !== this.historyButtonEl))) {
+      this.hideHistoryPopover();
     }
   }
 
@@ -338,10 +347,13 @@ export class WeSightChatView extends ItemView {
     newChatButton.ariaLabel = 'New WeSight chat';
     newChatButton.onclick = () => void this.startNewConversation();
 
-    this.setupButtonEl = headerActions.createEl('button', { cls: 'clickable-icon wesight-header-btn' });
-    setIcon(this.setupButtonEl, 'circle-help');
-    this.setupButtonEl.ariaLabel = 'Set up current agent';
-    this.setupButtonEl.onclick = () => this.openRuntimeSetup();
+    this.historyButtonEl = headerActions.createEl('button', { cls: 'clickable-icon wesight-header-btn' });
+    setIcon(this.historyButtonEl, 'history');
+    this.historyButtonEl.ariaLabel = '历史对话记录';
+    this.historyButtonEl.onclick = event => {
+      event.stopPropagation();
+      this.toggleHistoryPopover(this.historyButtonEl);
+    };
 
     const settingsButton = headerActions.createEl('button', { cls: 'clickable-icon wesight-header-btn' });
     setIcon(settingsButton, 'settings');
@@ -361,6 +373,9 @@ export class WeSightChatView extends ItemView {
     this.contextRowEl = inputWrapper.createDiv({ cls: 'wesight-context-row' });
     this.renderActiveContextChip();
 
+    this.cancelHintEl = inputWrapper.createDiv({ cls: 'wesight-cancel-hint', text: '按下ESC取消当前任务' });
+    this.cancelHintEl.toggleClass('is-visible', false);
+
     this.inputEl = inputWrapper.createEl('textarea', {
       cls: 'wesight-input',
       attr: {
@@ -375,6 +390,12 @@ export class WeSightChatView extends ItemView {
         void this.sendMessage();
       }
       if (event.key === 'Escape') {
+        if (this.running) {
+          event.preventDefault();
+          event.stopPropagation();
+          this.cancelledByUser = true;
+          this.deps.runtimeManager.cancel();
+        }
         this.clearSuggestions();
       }
     };
@@ -407,7 +428,10 @@ export class WeSightChatView extends ItemView {
     setIcon(this.stopButtonEl, 'square');
     this.stopButtonEl.ariaLabel = 'Stop active run';
     this.stopButtonEl.disabled = !this.running;
-    this.stopButtonEl.onclick = () => this.deps.runtimeManager.cancel();
+    this.stopButtonEl.onclick = () => {
+      this.cancelledByUser = true;
+      this.deps.runtimeManager.cancel();
+    };
 
     this.sendButtonEl = toolbarRight.createEl('button', { cls: 'clickable-icon wesight-send-btn' });
     setIcon(this.sendButtonEl, 'arrow-up');
@@ -825,6 +849,107 @@ export class WeSightChatView extends ItemView {
     }
   }
 
+  private toggleHistoryPopover(triggerEl: HTMLElement): void {
+    if (this.historyPopoverEl) {
+      this.hideHistoryPopover();
+      return;
+    }
+    this.historyTriggerEl = triggerEl;
+    void this.showHistoryPopover();
+  }
+
+  private async showHistoryPopover(): Promise<void> {
+    const triggerEl = this.historyTriggerEl;
+    this.hideHistoryPopover();
+    if (!triggerEl) return;
+    const popover = createDiv({ cls: 'wesight-history-popover' });
+    popover.createDiv({ cls: 'wesight-history-header', text: '历史对话' });
+    const list = popover.createDiv({ cls: 'wesight-history-list' });
+    const conversations = await this.deps.vaultStore.listConversations();
+    if (conversations.length === 0) {
+      list.createDiv({ cls: 'wesight-history-empty', text: '暂无历史对话' });
+    } else {
+      for (const conversation of conversations) {
+        this.renderHistoryItem(list, conversation);
+      }
+    }
+    document.body.appendChild(popover);
+    void popover.offsetHeight;
+
+    const triggerRect = triggerEl.getBoundingClientRect();
+    const popoverRect = popover.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    let top = triggerRect.bottom + 4;
+    let left = triggerRect.left;
+    if (left + popoverRect.width > viewportWidth - 8) {
+      left = Math.max(8, viewportWidth - popoverRect.width - 8);
+    }
+    if (top + popoverRect.height > viewportHeight - 8) {
+      top = Math.max(8, triggerRect.top - popoverRect.height - 4);
+    }
+    popover.style.top = `${top}px`;
+    popover.style.left = `${left}px`;
+    popover.setCssProps({ zIndex: 'var(--layer-modal, 10000)' });
+    popover.addClass('is-open');
+    this.historyPopoverEl = popover;
+  }
+
+  private hideHistoryPopover(): void {
+    this.historyTriggerEl = null;
+    if (this.historyPopoverEl) {
+      this.historyPopoverEl.remove();
+      this.historyPopoverEl = null;
+    }
+  }
+
+  private renderHistoryItem(parent: HTMLElement, conversation: StoredConversation): void {
+    const isCurrent = this.conversation?.id === conversation.id;
+    const item = parent.createDiv({ cls: `wesight-history-item${isCurrent ? ' is-current' : ''}` });
+    const icon = item.createSpan({ cls: 'wesight-history-item-icon' });
+    setIcon(icon, isCurrent ? 'check' : (HISTORY_AGENT_ICONS[conversation.agentId] ?? 'message-circle'));
+    const body = item.createDiv({ cls: 'wesight-history-item-body' });
+    body.createDiv({ cls: 'wesight-history-item-title', text: conversation.title || '未命名对话' });
+    body.createDiv({
+      cls: 'wesight-history-item-meta',
+      text: `${getAgentDescriptor(conversation.agentId).displayName} · ${formatRelativeTime(conversation.updatedAt)}`,
+    });
+    item.onclick = () => {
+      void this.openHistoryConversation(conversation);
+    };
+    const deleteButton = item.createEl('button', { cls: 'clickable-icon wesight-history-item-delete' });
+    setIcon(deleteButton, 'trash-2');
+    deleteButton.ariaLabel = '删除对话';
+    deleteButton.onclick = event => {
+      event.stopPropagation();
+      void this.deleteHistoryConversation(conversation.id);
+    };
+  }
+
+  private async openHistoryConversation(conversation: StoredConversation): Promise<void> {
+    this.hideHistoryPopover();
+    this.conversation = conversation;
+    if (this.agentId !== conversation.agentId) {
+      this.agentId = conversation.agentId;
+    }
+    this.render();
+    this.renderMessages();
+    this.refreshStatus();
+  }
+
+  private async deleteHistoryConversation(id: string): Promise<void> {
+    await this.deps.vaultStore.deleteConversation(id);
+    if (this.conversation?.id === id) {
+      this.ensureConversation(true);
+      this.renderMessages();
+    }
+    this.hideHistoryPopover();
+    if (this.historyButtonEl) {
+      this.historyTriggerEl = this.historyButtonEl;
+      void this.showHistoryPopover();
+    }
+  }
+
   private scheduleHideSubmenu(): void {
     if (this.submenuHideTimeout) {
       window.clearTimeout(this.submenuHideTimeout);
@@ -1144,10 +1269,6 @@ export class WeSightChatView extends ItemView {
       : status.found
         ? `${status.descriptor.shortName} ready`
         : `${status.descriptor.shortName} missing`);
-    this.setupButtonEl?.toggleClass('needs-setup', !status.found);
-    this.setupButtonEl?.setAttribute('title', status.found
-      ? `${status.descriptor.displayName} is available`
-      : `Install ${status.descriptor.displayName}`);
     this.updateRunControls();
   }
 
@@ -1188,6 +1309,14 @@ export class WeSightChatView extends ItemView {
     for (const artifact of message.metadata?.artifacts ?? []) {
       if (artifact.type === 'image') this.renderImageArtifact(item, artifact);
     }
+    if (message.role === 'assistant' && typeof message.metadata?.durationMs === 'number') {
+      this.renderTurnDuration(item, message.metadata.durationMs);
+    }
+  }
+
+  private renderTurnDuration(parent: HTMLElement, durationMs: number): void {
+    const seconds = Math.max(0, durationMs) / 1000;
+    parent.createDiv({ cls: 'wesight-turn-duration', text: `总耗时 ${seconds.toFixed(1)}s` });
   }
 
 
@@ -1222,6 +1351,7 @@ export class WeSightChatView extends ItemView {
 
   private async sendMessage(): Promise<void> {
     if (this.running) return;
+    this.cancelledByUser = false;
     const rawPrompt = this.inputEl.value.trim();
     if (!rawPrompt) return;
     this.ensureConversation();
@@ -1282,6 +1412,10 @@ export class WeSightChatView extends ItemView {
     };
     const agentId = this.agentId;
     const onEvent = (event: RuntimeTurnEvent): void => {
+      // A user-requested cancel must not surface runtime teardown output
+      // (for example a JSON shutdown line) mid-stream; the turn ends with
+      // the cancellation notice instead.
+      if (this.cancelledByUser) return;
       if (event.type === 'session') {
         conversation.sessionIds = {
           ...(conversation.sessionIds ?? {}),
@@ -1325,6 +1459,7 @@ export class WeSightChatView extends ItemView {
       }
     };
 
+    const turnStartedAt = Date.now();
     this.running = true;
     this.updateRunControls();
     try {
@@ -1351,13 +1486,27 @@ export class WeSightChatView extends ItemView {
       }
       assistantEl.removeClass('is-streaming');
     } finally {
+      const durationMs = Date.now() - turnStartedAt;
+      assistantMessage.metadata = {
+        ...(assistantMessage.metadata ?? {}),
+        durationMs,
+      };
       conversation.updatedAt = Date.now();
       await this.deps.vaultStore.replaceConversation(conversation);
       this.running = false;
       this.updateRunControls();
       this.refreshStatus();
+      if (this.cancelledByUser) {
+        this.cancelledByUser = false;
+        assistantMessage.role = 'assistant';
+        assistantMessage.content = '当前任务已取消';
+        assistantEl.removeClass('is-error');
+      }
       if (assistantEl.isConnected) {
         await this.renderMessageMarkdown(assistantEl, assistantMessage);
+        if (assistantMessage.role === 'assistant') {
+          this.renderTurnDuration(assistantEl, durationMs);
+        }
       }
     }
   }
@@ -1525,6 +1674,7 @@ export class WeSightChatView extends ItemView {
     if (this.stopButtonEl) {
       this.stopButtonEl.disabled = !this.running;
     }
+    this.cancelHintEl?.toggleClass('is-visible', this.running);
   }
 
   private attachActiveNote(): void {
@@ -1650,4 +1800,25 @@ function mergeAttachments(attachments: FileAttachment[]): FileAttachment[] {
 
 function configSourceLabel(source: RuntimeConfigSource): string {
   return source === 'providerProfile' ? 'WeSight 配置' : '本机配置';
+}
+
+
+const HISTORY_AGENT_ICONS: Record<AgentId, string> = {
+  claude: 'bot',
+  codex: 'terminal',
+  opencode: 'code',
+};
+
+function formatRelativeTime(timestamp: number): string {
+  const diff = Math.max(0, Date.now() - timestamp);
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} 天前`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} 个月前`;
+  return `${Math.floor(months / 12)} 年前`;
 }

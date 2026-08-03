@@ -83,6 +83,12 @@ export class VaultStore {
     await this.writeConversationsFile(file);
   }
 
+  async deleteConversation(id: string): Promise<void> {
+    const file = await this.readConversationsFile();
+    file.conversations = file.conversations.filter(item => item.id !== id);
+    await this.writeConversationsFile(file);
+  }
+
   async listCommands(): Promise<SlashCommand[]> {
     return this.readJsonFile<SlashCommand[]>(COMMANDS_PATH, []);
   }
