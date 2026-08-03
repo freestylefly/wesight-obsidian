@@ -40,6 +40,7 @@ export class SharePopoverController {
     private readonly saveSettings: () => Promise<void>,
     private readonly openWeChatSettings: () => void,
     private readonly openWeChatPreview: (file: TFile) => Promise<void>,
+    private readonly openWeChatArticleStats: (file: TFile) => Promise<void>,
   ) {}
 
   open(
@@ -58,6 +59,7 @@ export class SharePopoverController {
       this.saveSettings,
       this.openWeChatSettings,
       this.openWeChatPreview,
+      this.openWeChatArticleStats,
       file,
       anchor ?? null,
       initialTab,
@@ -104,6 +106,7 @@ class SharePopover {
     saveSettings: () => Promise<void>,
     openWeChatSettings: () => void,
     openWeChatPreview: (file: TFile) => Promise<void>,
+    openWeChatArticleStats: (file: TFile) => Promise<void>,
     private readonly file: TFile,
     private readonly anchor: HTMLElement | null,
     private activeTab: SharePopoverTab,
@@ -129,6 +132,10 @@ class SharePopover {
       openPreview: async (target) => {
         this.close();
         await openWeChatPreview(target);
+      },
+      openArticleStats: async (target) => {
+        this.close();
+        await openWeChatArticleStats(target);
       },
     });
   }

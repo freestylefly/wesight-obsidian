@@ -1,9 +1,18 @@
-import type { AgentStatus, ChatTurnRequest, ProviderProfile, RuntimeTurnEvent, WeSightObsidianSettings } from '../types';
+import type {
+  AgentStatus,
+  ChatTurnRequest,
+  CodexRuntimeStatus,
+  ProviderProfile,
+  RuntimeTurnEvent,
+  WeSightObsidianSettings,
+} from '../types';
 import { ProviderStore } from '../storage/providerStore';
 import { appendLocalLog } from '../storage/localLog';
 import { providerHost, requiresProviderApiKey, resolveAnthropicAuthMode } from '../utils/providerAuth';
 import { RuntimeDiscovery } from './discovery';
 import { AgentAdapter } from './adapter';
+import { mergeEnvironment } from '../utils/env';
+import { CodexAppServerRuntime } from './codexRuntime';
 
 export type RuntimeEventListener = (event: RuntimeTurnEvent) => void;
 
@@ -12,6 +21,7 @@ export class RuntimeManager {
   // live adapter instead of only the most recent one.
   private readonly activeAdapters = new Set<AgentAdapter>();
   private readonly cooldownByProfile = new Map<string, number>();
+  private readonly codexRuntime = new CodexAppServerRuntime();
 
   constructor(
     private readonly providerStore: ProviderStore,
@@ -23,7 +33,33 @@ export class RuntimeManager {
     return new RuntimeDiscovery({
       configuredPaths: settings.configuredPaths,
       configSources: settings.configSources,
-    }).resolve(request.agentId);
+    }).resolve(request.agentId, { withVersion: request.agentId === 'codex' });
+  }
+
+  getCodexStatus(): CodexRuntimeStatus {
+    return this.codexRuntime.getStatus();
+  }
+
+  onCodexStatusChange(listener: (status: CodexRuntimeStatus) => void): () => void {
+    return this.codexRuntime.onStatusChange(listener);
+  }
+
+  async refreshCodexStatus(): Promise<CodexRuntimeStatus> {
+    const settings = this.getSettings();
+    const discovery = new RuntimeDiscovery({
+      configuredPaths: settings.configuredPaths,
+      configSources: settings.configSources,
+    }).resolve('codex', { withVersion: true });
+    if (!discovery.binaryPath) {
+      this.codexRuntime.markUnavailable(discovery.error ?? 'codex was not found.');
+      return this.codexRuntime.getStatus();
+    }
+    return this.codexRuntime.refreshStatus({
+      binaryPath: discovery.binaryPath,
+      binarySource: discovery.source,
+      version: discovery.version,
+      env: mergeEnvironment(process.env, settings.sharedEnvironmentVariables),
+    });
   }
 
   /**
@@ -59,13 +95,44 @@ export class RuntimeManager {
     const status = new RuntimeDiscovery({
       configuredPaths: settings.configuredPaths,
       configSources: settings.configSources,
-    }).resolve(request.agentId);
+    }).resolve(request.agentId, { withVersion: request.agentId === 'codex' });
     if (!status.binaryPath) {
       appendLocalLog('runtime_missing', { agentId: request.agentId, error: status.error });
       deliver({
         type: 'error',
         message: `${status.descriptor.displayName} is not installed.`,
         detail: status.error ?? undefined,
+      });
+      return;
+    }
+
+    if (request.agentId === 'codex') {
+      if (request.configSource !== 'localCli') {
+        deliver({
+          type: 'error',
+          message: 'Codex 仅支持本机 Codex App 配置。',
+          detail: '旧 Codex Provider Profile 已保留，但不会参与执行。',
+        });
+        deliver({ type: 'done' });
+        return;
+      }
+      const startedAt = Date.now();
+      appendLocalLog('runtime_turn_start', {
+        agentId: 'codex',
+        configSource: 'localCli',
+        binarySource: status.source,
+        model: this.codexRuntime.getStatus().currentModelId,
+      });
+      await this.codexRuntime.runTurn(request, {
+        binaryPath: status.binaryPath,
+        binarySource: status.source,
+        version: status.version,
+        env: mergeEnvironment(process.env, settings.sharedEnvironmentVariables),
+      }, deliver);
+      appendLocalLog('runtime_turn_finish', {
+        agentId: 'codex',
+        durationMs: Date.now() - startedAt,
+        cancelled: Boolean(request.signal?.aborted),
       });
       return;
     }
@@ -145,6 +212,12 @@ export class RuntimeManager {
     for (const adapter of this.activeAdapters) {
       adapter.cancel();
     }
+    void this.codexRuntime.cancelAll();
+  }
+
+  async shutdown(): Promise<void> {
+    this.cancel();
+    await this.codexRuntime.shutdown();
   }
 
   private resolveProviderProfile(request: ChatTurnRequest): ProviderProfile | null {

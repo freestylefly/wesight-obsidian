@@ -81,4 +81,5 @@ export interface WeChatPublishState {
   draftId: string;
   contentHash: string;
   updatedAt: string;
+  articleUrl: string;
 }

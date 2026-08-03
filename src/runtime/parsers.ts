@@ -112,6 +112,16 @@ export function parseCodexStreamLine(line: string): RuntimeTurnEvent[] {
     const text = firstText(parsed.delta, parsed.text, parsed.message);
     return text ? [{ type: 'text', content: text }] : [];
   }
+  if (type === 'item.completed' && isRecord(parsed.item)) {
+    const itemType = firstString(parsed.item.type);
+    if (itemType === 'agent_message' || itemType === 'message') {
+      const text = firstText(parsed.item.text, parsed.item.message) ?? contentArrayText(parsed.item.content);
+      return text ? [{ type: 'text', content: text }] : [];
+    }
+    if (itemType === 'command_execution' || itemType === 'tool_call') {
+      return [{ type: 'tool', toolCall: toolFromRecord(parsed.item) }];
+    }
+  }
   if (type === 'turn.failed' || type === 'error') {
     return [{ type: 'error', message: firstString(parsed.message, parsed.error) ?? stringify(parsed) }];
   }

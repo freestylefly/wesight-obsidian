@@ -42,6 +42,8 @@ Lark CLI and the operating system credential store retain Feishu tokens. WeSight
 
 Open the sharing panel and choose **公众号草稿**, or run **WeSight: 同步当前笔记到公众号草稿箱**. Configure an Official Account under **Settings → WeSight → 发布平台**, preview the rendered article, and then create or update a cloud-managed draft.
 
+After publishing the draft in WeChat, return to **分享 → 公众号** to save the published `mp.weixin.qq.com` article link. The panel then shows the note as published and can open the article in the system default browser.
+
 This workflow requires a WeSight account and a WeChat Official Account with access to the material, article-image, and draft APIs. The WeSight fixed-egress IP must be added to the account allowlist. AppSecret and WeChat access tokens are encrypted by WeSight Cloud and do not enter the vault or plugin data.
 
 Canghe Style is the default local template. The theme selector can also generate layouts with the bundled gzh-design Skill through the currently selected agent CLI, provider profile, and model. Six registered Skill themes are available, and **AI自定义主题** lets you name and describe a reusable style brief that is applied to the current article and retained for later articles. Skill generation sends the article Markdown and, for a custom theme, its style brief to that provider, preserves image references as local tokens, validates the generated inline HTML, and caches successful results locally. Image bytes are uploaded only when you explicitly create or update a WeChat draft.

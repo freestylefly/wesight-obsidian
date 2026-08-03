@@ -1,6 +1,9 @@
+import { promises as fs } from 'fs';
+import path from 'path';
+
 import type { DataAdapter } from 'obsidian';
 
-import type { ChatMessage, StoredConversation } from '../types';
+import type { ChatImageArtifact, ChatMessage, StoredConversation } from '../types';
 import { createId } from '../utils/id';
 import type { SlashCommand } from '../utils/slashCommands';
 
@@ -12,6 +15,8 @@ interface ConversationFile {
 const CONVERSATIONS_PATH = '.wesight/conversations.json';
 const COMMANDS_PATH = '.wesight/commands.json';
 const MENTION_CACHE_PATH = '.wesight/mention-cache.json';
+const GENERATED_IMAGES_PATH = '.wesight/generated-images';
+const MAX_GENERATED_IMAGE_BYTES = 25 * 1024 * 1024;
 
 export class VaultStore {
   constructor(private readonly adapter: DataAdapter) {}
@@ -94,6 +99,47 @@ export class VaultStore {
     await this.writeJsonFile(MENTION_CACHE_PATH, cache);
   }
 
+  async importGeneratedImage(
+    conversationId: string,
+    artifact: { itemId: string; sourcePath: string; mimeType?: string; revisedPrompt?: string },
+  ): Promise<ChatImageArtifact> {
+    if (!path.isAbsolute(artifact.sourcePath)) {
+      throw new Error('Codex returned a non-absolute image path.');
+    }
+    const stat = await fs.stat(artifact.sourcePath);
+    if (!stat.isFile()) throw new Error('Codex image path does not point to a file.');
+    if (stat.size <= 0 || stat.size > MAX_GENERATED_IMAGE_BYTES) {
+      throw new Error('Codex image size is invalid or exceeds 25 MB.');
+    }
+    const bytes = await fs.readFile(artifact.sourcePath);
+    if (bytes.length > MAX_GENERATED_IMAGE_BYTES) throw new Error('Codex image exceeds 25 MB.');
+    const detected = detectImageFormat(bytes);
+    if (!detected) throw new Error('Codex returned an unsupported image format.');
+    if (artifact.mimeType && artifact.mimeType !== detected.mimeType) {
+      throw new Error('Codex image MIME type does not match its file contents.');
+    }
+
+    const safeConversationId = conversationId.replace(/[^a-zA-Z0-9_-]/g, '_') || 'conversation';
+    const directory = `${GENERATED_IMAGES_PATH}/${safeConversationId}`;
+    await this.ensureDirectory(directory);
+    const filename = `${Date.now()}-${createId('image')}${detected.extension}`;
+    const vaultPath = `${directory}/${filename}`;
+    const arrayBuffer = Uint8Array.from(bytes).buffer;
+    await this.adapter.writeBinary(vaultPath, arrayBuffer);
+    return {
+      id: artifact.itemId || createId('artifact'),
+      type: 'image',
+      vaultPath,
+      mimeType: detected.mimeType,
+      createdAt: Date.now(),
+      revisedPrompt: artifact.revisedPrompt,
+    };
+  }
+
+  getResourcePath(vaultPath: string): string {
+    return this.adapter.getResourcePath(vaultPath);
+  }
+
   private async readConversationsFile(): Promise<ConversationFile> {
     try {
       if (!(await this.adapter.exists(CONVERSATIONS_PATH))) {
@@ -130,4 +176,42 @@ export class VaultStore {
     }
     await this.adapter.write(filePath, `${JSON.stringify(value, null, 2)}\n`);
   }
+
+  private async ensureDirectory(directory: string): Promise<void> {
+    const parts = directory.split('/');
+    let current = '';
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      if (!(await this.adapter.exists(current))) {
+        try {
+          await this.adapter.mkdir(current);
+        } catch (error) {
+          if (!(await this.adapter.exists(current))) throw error;
+        }
+      }
+    }
+  }
+}
+
+function detectImageFormat(bytes: Uint8Array): { mimeType: string; extension: string } | null {
+  if (
+    bytes.length >= 8
+    && bytes[0] === 0x89
+    && bytes[1] === 0x50
+    && bytes[2] === 0x4e
+    && bytes[3] === 0x47
+    && bytes[4] === 0x0d
+    && bytes[5] === 0x0a
+    && bytes[6] === 0x1a
+    && bytes[7] === 0x0a
+  ) return { mimeType: 'image/png', extension: '.png' };
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return { mimeType: 'image/jpeg', extension: '.jpg' };
+  }
+  if (
+    bytes.length >= 12
+    && String.fromCharCode(...bytes.slice(0, 4)) === 'RIFF'
+    && String.fromCharCode(...bytes.slice(8, 12)) === 'WEBP'
+  ) return { mimeType: 'image/webp', extension: '.webp' };
+  return null;
 }

@@ -2,9 +2,14 @@ import { App, Notice, setIcon, TFile } from 'obsidian';
 
 import { CloudAuthService } from '../share/cloudAuth';
 import { CloudApiError } from '../share/cloudApi';
-import { parseWeChatPublishState } from '../wechat/frontmatter';
+import {
+  WECHAT_ARTICLE_URL_FRONTMATTER_KEY,
+  normalizeWeChatArticleUrl,
+  parseWeChatPublishState,
+} from '../wechat/frontmatter';
 import { WeChatCloudApi } from '../wechat/cloudApi';
 import type { WeChatConnectionState, WeChatDraftState } from '../wechat/types';
+import { promptForText } from './textPromptModal';
 
 interface WeChatSharePanelOptions {
   app: App;
@@ -15,6 +20,7 @@ interface WeChatSharePanelOptions {
   requestPosition: () => void;
   openSettings: () => void;
   openPreview: (file: TFile) => Promise<void>;
+  openArticleStats: (file: TFile) => Promise<void>;
 }
 
 export class WeChatSharePanel {
@@ -23,6 +29,7 @@ export class WeChatSharePanel {
   private loginPending = false;
   private connection: WeChatConnectionState | null = null;
   private draft: WeChatDraftState | null = null;
+  private articleUrl = '';
   private error: string | null = null;
 
   constructor(private readonly options: WeChatSharePanelOptions) {}
@@ -69,6 +76,7 @@ export class WeChatSharePanel {
         this.options.app.metadataCache.getFileCache(this.options.file)?.frontmatter,
       );
       this.draft = null;
+      this.articleUrl = publishState?.articleUrl ?? '';
       if (publishState) {
         try {
           this.draft = await this.options.api.getDraft(publishState.draftId);
@@ -127,6 +135,17 @@ export class WeChatSharePanel {
       attr: { type: 'button' },
     });
     button.onclick = this.options.openSettings;
+    if (this.articleUrl) {
+      const stats = parent.createEl('button', {
+        cls: 'wesight-wechat-secondary-action',
+        text: '查看文章数据',
+        attr: { type: 'button' },
+      });
+      const statsIcon = stats.createSpan();
+      setIcon(statsIcon, 'bar-chart');
+      stats.prepend(statsIcon);
+      stats.onclick = () => void this.options.openArticleStats(this.options.file);
+    }
   }
 
   private renderConnected(parent: HTMLElement): void {
@@ -153,21 +172,85 @@ export class WeChatSharePanel {
       '当前笔记',
       this.draft ? `已同步 · ${this.formatTime(this.draft.updatedAt)}` : '尚未同步',
     );
+    if (this.draft) {
+      this.detail(details, '发布状态', this.articleUrl ? '已发布 · 链接已登记' : '待登记');
+    }
 
     const open = parent.createEl('button', {
       cls: 'wesight-share-primary-button is-wechat',
-      text: '打开公众号预览',
+      text: this.articleUrl ? '打开已发布文章' : '打开公众号预览',
       attr: { type: 'button' },
     });
     open.onclick = () => {
-      void this.options.openPreview(this.options.file);
+      if (this.articleUrl) {
+        window.open(this.articleUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        void this.options.openPreview(this.options.file);
+      }
     };
+    if (this.articleUrl) {
+      const stats = parent.createEl('button', {
+        cls: 'wesight-wechat-secondary-action',
+        text: '查看文章数据',
+        attr: { type: 'button' },
+      });
+      const statsIcon = stats.createSpan();
+      setIcon(statsIcon, 'bar-chart');
+      stats.prepend(statsIcon);
+      stats.onclick = () => void this.options.openArticleStats(this.options.file);
+    }
+    if (this.draft) {
+      if (this.articleUrl) {
+        const preview = parent.createEl('button', {
+          cls: 'wesight-wechat-secondary-action',
+          text: '打开公众号预览',
+          attr: { type: 'button' },
+        });
+        preview.onclick = () => void this.options.openPreview(this.options.file);
+      }
+      const articleLink = parent.createEl('button', {
+        cls: 'wesight-wechat-secondary-action',
+        text: this.articleUrl ? '修改文章链接' : '添加已发布文章链接',
+        attr: { type: 'button' },
+      });
+      articleLink.onclick = () => void this.editArticleUrl();
+    }
     const settings = parent.createEl('button', {
       cls: 'wesight-wechat-link-button',
       text: '管理公众号连接',
       attr: { type: 'button' },
     });
     settings.onclick = this.options.openSettings;
+  }
+
+  private async editArticleUrl(): Promise<void> {
+    const value = await promptForText(this.options.app, {
+      title: this.articleUrl ? '修改已发布文章链接' : '添加已发布文章链接',
+      placeholder: 'https://mp.weixin.qq.com/s/...',
+      initialValue: this.articleUrl,
+      submitLabel: '保存链接',
+      cancelLabel: '取消',
+    });
+    if (value === null) return;
+    const articleUrl = normalizeWeChatArticleUrl(value);
+    if (!articleUrl) {
+      new Notice('请输入有效的公众号文章链接（mp.weixin.qq.com/s/...）。');
+      return;
+    }
+    try {
+      await this.options.app.fileManager.processFrontMatter(
+        this.options.file,
+        (frontmatter: Record<string, unknown>) => {
+          frontmatter[WECHAT_ARTICLE_URL_FRONTMATTER_KEY] = articleUrl;
+        },
+      );
+      this.articleUrl = articleUrl;
+      this.options.requestRender();
+      this.options.requestPosition();
+      new Notice('已保存公众号文章链接。');
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : '公众号文章链接保存失败。');
+    }
   }
 
   private renderError(parent: HTMLElement): void {

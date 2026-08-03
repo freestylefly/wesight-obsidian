@@ -6,7 +6,6 @@ import { mergeEnvironment } from '../utils/env';
 import { prepareProviderProjection } from './providerProjection';
 import {
   parseClaudeStreamLine,
-  parseCodexStreamLine,
   parseOpenCodeStreamLine,
 } from './parsers';
 import {
@@ -37,6 +36,14 @@ export class AgentAdapter extends EventEmitter {
     this.terminalErrorEmitted = false;
     this.cancelled = false;
     this.clearPendingTerminalError();
+    if (this.options.agentId === 'codex') {
+      this.emitEvent({
+        type: 'error',
+        message: 'Codex 必须通过共享 App Server 运行时启动。',
+      });
+      this.emitEvent({ type: 'done' });
+      return Promise.resolve();
+    }
     const baseEnv = mergeEnvironment(process.env, this.options.sharedEnvironmentVariables);
     const projection = request.configSource === 'providerProfile'
       ? prepareProviderProjection(this.options.agentId, this.options.providerProfile, baseEnv)
@@ -198,32 +205,6 @@ export class AgentAdapter extends EventEmitter {
       return { args, stdinPayload: prompt };
     }
 
-    if (this.options.agentId === 'codex') {
-      const args = [
-        'exec',
-        '--json',
-        '--skip-git-repo-check',
-        '--cd',
-        request.cwd,
-        '--sandbox',
-        'workspace-write',
-        '-c',
-        'approval_policy="never"',
-      ];
-      args.push(...providerArgs);
-      if (request.configSource === 'localCli' && request.model?.trim()) {
-        args.push(...buildCodexModelArgs(request.model.trim()));
-      }
-      for (const attachment of request.attachments ?? []) {
-        if (attachment.mimeType?.startsWith('image/')) {
-          args.push('--image', attachment.absolutePath);
-        }
-      }
-      // `codex exec -` reads the prompt from stdin.
-      args.push('-');
-      return { args, stdinPayload: prompt };
-    }
-
     const args = [
       'run',
       '--format',
@@ -246,9 +227,7 @@ export class AgentAdapter extends EventEmitter {
   private emitParsed(line: string): void {
     const events = this.options.agentId === 'claude'
       ? parseClaudeStreamLine(line)
-      : this.options.agentId === 'codex'
-        ? parseCodexStreamLine(line)
-        : parseOpenCodeStreamLine(line);
+      : parseOpenCodeStreamLine(line);
     for (const event of events) {
       if (event.type === 'error') {
         if (this.terminalErrorEmitted) continue;
@@ -314,20 +293,6 @@ export class AgentAdapter extends EventEmitter {
   private emitEvent(event: RuntimeTurnEvent): void {
     this.emit('runtimeEvent', event);
   }
-}
-
-function buildCodexModelArgs(model: string): string[] {
-  const [provider, ...modelParts] = model.split('/');
-  const modelId = modelParts.join('/');
-  if (provider && modelId) {
-    return [
-      '-c',
-      `model_provider=${JSON.stringify(provider)}`,
-      '-c',
-      `model=${JSON.stringify(modelId)}`,
-    ];
-  }
-  return ['-c', `model=${JSON.stringify(model)}`];
 }
 
 function buildEffectivePrompt(request: ChatTurnRequest, agentId: AgentId): string {

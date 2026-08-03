@@ -25,7 +25,7 @@ export default [
       'no-console': 'off',
       'obsidianmd/ui/sentence-case': ['warn', {
         acronyms: ['AI', 'API', 'CLI', 'ID', 'IP', 'JSON', 'QR', 'URL'],
-        brands: ['AppID', 'AppSecret', 'Canghe Style', 'Claude Code', 'Feishu', 'Obsidian', 'OpenCode', 'WeSight'],
+        brands: ['AppID', 'AppSecret', 'Canghe Style', 'ChatGPT', 'Claude Code', 'Codex', 'Feishu', 'Obsidian', 'OpenCode', 'WeSight'],
       }],
       'obsidianmd/settings-tab/prefer-setting-definitions': 'off',
     },

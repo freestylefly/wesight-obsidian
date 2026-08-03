@@ -1,4 +1,4 @@
-import { Editor, ItemView, MarkdownView, Menu, Notice, setIcon, TFile, WorkspaceLeaf } from 'obsidian';
+import { Editor, ItemView, MarkdownRenderer, MarkdownView, Menu, Notice, setIcon, TFile, WorkspaceLeaf } from 'obsidian';
 
 import { AGENT_IDS, getAgentDescriptor } from '../agents';
 import wesightLogo from '../../assets/wesight-logo.png';
@@ -8,6 +8,7 @@ import { ProviderStore } from '../storage/providerStore';
 import { VaultStore } from '../storage/vaultStore';
 import type {
   AgentId,
+  ChatImageArtifact,
   ChatMessage,
   FileAttachment,
   ProviderProfile,
@@ -71,6 +72,7 @@ export class WeSightChatView extends ItemView {
   private submenuHideTimeout: number | null = null;
   private scrollScheduled = false;
   private authUnsubscribe: (() => void) | null = null;
+  private codexStatusUnsubscribe: (() => void) | null = null;
   private accountMenu: Menu | null = null;
 
   constructor(leaf: WorkspaceLeaf, private readonly deps: ChatViewDeps) {
@@ -111,11 +113,20 @@ export class WeSightChatView extends ItemView {
         this.renderAccountControl();
       });
     }
+    if (!this.codexStatusUnsubscribe) {
+      this.codexStatusUnsubscribe = this.deps.runtimeManager.onCodexStatusChange(() => {
+        if (this.agentId !== 'codex' || this.running) return;
+        this.render();
+        this.renderMessages();
+        this.refreshStatus();
+      });
+    }
     this.updateEditorContextFromWorkspace();
     this.render();
     this.ensureConversation();
     this.renderMessages();
     this.refreshStatus();
+    if (this.agentId === 'codex') void this.deps.runtimeManager.refreshCodexStatus();
     void this.restoreAuthSession();
   }
 
@@ -126,6 +137,8 @@ export class WeSightChatView extends ItemView {
     this.accountMenu = null;
     this.authUnsubscribe?.();
     this.authUnsubscribe = null;
+    this.codexStatusUnsubscribe?.();
+    this.codexStatusUnsubscribe = null;
   }
 
   private closeAllDropdowns(): void {
@@ -543,7 +556,7 @@ export class WeSightChatView extends ItemView {
     for (const agentId of AGENT_IDS) {
       const descriptor = getAgentDescriptor(agentId);
       const status = discovery.resolve(agentId);
-      const hasSubmenu = agentId === 'claude';
+      const hasSubmenu = agentId === 'claude' || agentId === 'codex';
       const option = dropdown.createDiv({ cls: `wesight-model-option${hasSubmenu ? ' has-submenu' : ''}` });
       option.toggleClass('selected', agentId === this.agentId);
       option.tabIndex = 0;
@@ -620,6 +633,7 @@ export class WeSightChatView extends ItemView {
       currentSource,
       icon: 'sparkles',
       label: 'WeSight 配置',
+      disabled: agentId === 'codex',
     });
 
     document.body.appendChild(submenu);
@@ -668,8 +682,10 @@ export class WeSightChatView extends ItemView {
     currentSource: RuntimeConfigSource;
     icon: string;
     label: string;
+    disabled?: boolean;
   }): void {
     const option = parent.createDiv({ cls: 'wesight-model-option wesight-config-source-option' });
+    option.toggleClass('disabled', Boolean(options.disabled));
     option.toggleClass('selected', options.currentSource === options.source);
     const optionIcon = option.createSpan({ cls: 'wesight-option-icon' });
     setIcon(optionIcon, options.icon);
@@ -684,18 +700,27 @@ export class WeSightChatView extends ItemView {
     }
     option.onclick = event => {
       event.stopPropagation();
+      if (options.disabled) return;
       void this.selectConfigSource(options.agentId, options.source);
     };
   }
 
   private getCurrentModelLabel(agentId: AgentId, source: RuntimeConfigSource): string {
     const settings = this.deps.getSettings();
+    if (agentId === 'codex' && source === 'providerProfile') return '不可用';
     if (source === 'localCli') {
       if (agentId === 'claude') {
         return getClaudeDetectedLocalModel()?.label ?? '跟随 Claude Code';
       }
+      if (agentId === 'codex') {
+        const status = this.deps.runtimeManager.getCodexStatus();
+        return status.currentModel?.displayName ?? status.currentModelId ?? '跟随 Codex App';
+      }
       const selectedModel = settings.localModelByAgent[agentId] ?? '';
-      if (!selectedModel) return '默认';
+      if (!selectedModel) {
+        const detected = listLocalModels(agentId).find(m => m.id);
+        return detected?.label ?? '默认';
+      }
       return listLocalModels(agentId).find(m => m.id === selectedModel)?.label ?? selectedModel;
     } else {
       const profileId = settings.providerProfileByAgent[agentId];
@@ -822,6 +847,7 @@ export class WeSightChatView extends ItemView {
   }
 
   private async selectConfigSource(agentId: AgentId, source: RuntimeConfigSource): Promise<void> {
+    if (agentId === 'codex' && source === 'providerProfile') return;
     const settings = this.deps.getSettings();
     settings.configSources[agentId] = source;
     if (agentId === 'claude' && source === 'localCli') {
@@ -862,6 +888,10 @@ export class WeSightChatView extends ItemView {
     const isLocal = settings.configSources[this.agentId] === 'localCli';
     if (this.agentId === 'claude') {
       this.renderClaudeModelDropdown(dropdown, settings, isLocal);
+      return;
+    }
+    if (this.agentId === 'codex') {
+      this.renderCodexModelDropdown(dropdown);
       return;
     }
 
@@ -946,6 +976,26 @@ export class WeSightChatView extends ItemView {
       event.stopPropagation();
       this.deps.openSettings();
     };
+  }
+
+  private renderCodexModelDropdown(dropdown: HTMLElement): void {
+    const status = this.deps.runtimeManager.getCodexStatus();
+    dropdown.createDiv({ cls: 'wesight-model-group', text: '本机 Codex App' });
+    const option = dropdown.createDiv({ cls: 'wesight-model-option disabled wesight-local-readonly-option selected' });
+    const icon = option.createSpan({ cls: 'wesight-option-icon' });
+    setIcon(icon, status.state === 'error' ? 'circle-alert' : 'hard-drive');
+    const label = status.currentModel?.displayName
+      ?? status.currentModelId
+      ?? (status.state === 'connecting' ? '正在读取模型…' : '跟随 Codex App');
+    option.createSpan({ text: label });
+    option.createSpan({
+      cls: 'wesight-option-note',
+      text: status.state === 'error'
+        ? '连接失败'
+        : status.imageGeneration === false
+          ? '聊天可用 · 图片生成不可用'
+          : '只读',
+    });
   }
 
   private renderClaudeModelDropdown(
@@ -1074,13 +1124,26 @@ export class WeSightChatView extends ItemView {
       configuredPaths: settings.configuredPaths,
       configSources: settings.configSources,
     }).resolve(this.agentId);
-    this.statusEl.toggleClass('is-ready', status.found);
+    const codexStatus = this.agentId === 'codex' ? this.deps.runtimeManager.getCodexStatus() : null;
+    const ready = status.found && (!codexStatus || codexStatus.state === 'ready');
+    const error = Boolean(codexStatus?.state === 'error' || codexStatus?.authenticated === false);
+    this.statusEl.toggleClass('is-ready', ready);
     this.statusEl.toggleClass('is-missing', !status.found);
-    this.statusEl.toggleClass('is-error', false);
-    this.statusEl.setAttribute('title', status.found ? status.binaryPath ?? '' : status.error ?? '');
-    this.statusEl.setText(status.found
-      ? `${status.descriptor.shortName} ready`
-      : `${status.descriptor.shortName} missing`);
+    this.statusEl.toggleClass('is-error', error);
+    this.statusEl.setAttribute('title', codexStatus?.error ?? (status.found ? status.binaryPath ?? '' : status.error ?? ''));
+    this.statusEl.setText(codexStatus?.authenticated === false
+      ? 'Codex sign-in required'
+      : codexStatus
+      ? codexStatus.state === 'ready'
+        ? 'Codex connected'
+        : codexStatus.state === 'connecting'
+          ? 'Codex connecting'
+          : codexStatus.state === 'error'
+            ? 'Codex error'
+            : 'Codex idle'
+      : status.found
+        ? `${status.descriptor.shortName} ready`
+        : `${status.descriptor.shortName} missing`);
     this.setupButtonEl?.toggleClass('needs-setup', !status.found);
     this.setupButtonEl?.setAttribute('title', status.found
       ? `${status.descriptor.displayName} is available`
@@ -1117,7 +1180,39 @@ export class WeSightChatView extends ItemView {
         ? getAgentDescriptor(message.agentId ?? this.agentId).displayName
         : message.role;
     item.createDiv({ cls: 'wesight-message-role', text: role });
-    item.createEl('pre', { cls: 'wesight-message-content', text: message.content });
+    if (message.role === 'assistant' || message.role === 'error') {
+      void this.renderMessageMarkdown(item, message);
+    } else {
+      item.createEl('pre', { cls: 'wesight-message-content', text: message.content });
+    }
+    for (const artifact of message.metadata?.artifacts ?? []) {
+      if (artifact.type === 'image') this.renderImageArtifact(item, artifact);
+    }
+  }
+
+
+  private async renderMessageMarkdown(parent: HTMLElement, message: ChatMessage): Promise<void> {
+    parent.querySelector('.wesight-message-content')?.remove();
+    if (!message.content.trim()) return;
+    const container = parent.createDiv({ cls: 'wesight-message-content markdown-rendered' });
+    await MarkdownRenderer.render(this.app, message.content, container, '', this);
+  }
+
+  private renderImageArtifact(parent: HTMLElement, artifact: ChatImageArtifact): void {
+    const resourcePath = this.deps.vaultStore.getResourcePath(artifact.vaultPath);
+    const link = parent.createEl('a', {
+      cls: 'wesight-image-artifact',
+      attr: { href: resourcePath, target: '_blank', rel: 'noopener' },
+    });
+    link.createEl('img', {
+      attr: {
+        src: resourcePath,
+        alt: artifact.revisedPrompt ?? 'Codex generated image',
+      },
+    });
+    if (artifact.revisedPrompt) {
+      link.createDiv({ cls: 'wesight-image-artifact-caption', text: artifact.revisedPrompt });
+    }
   }
 
   private renderEmptyState(): void {
@@ -1177,6 +1272,7 @@ export class WeSightChatView extends ItemView {
     // Deltas are appended as text nodes instead of re-setting the whole message,
     // which keeps long streams O(n) instead of O(n²).
     let streamStarted = false;
+    const artifactTasks: Promise<void>[] = [];
     const appendDelta = (delta: string): void => {
       if (!streamStarted) {
         contentEl.setText('');
@@ -1201,6 +1297,24 @@ export class WeSightChatView extends ItemView {
         assistantMessage.content += line;
         appendDelta(line);
         this.scheduleScrollToBottom();
+      } else if (event.type === 'artifact') {
+        const task = this.deps.vaultStore.importGeneratedImage(conversation.id, event.artifact).then(artifact => {
+          assistantMessage.metadata = {
+            ...(assistantMessage.metadata ?? {}),
+            artifacts: [...(assistantMessage.metadata?.artifacts ?? []), artifact],
+          };
+          this.renderImageArtifact(assistantEl, artifact);
+          assistantEl.removeClass('is-streaming');
+          this.scheduleScrollToBottom();
+        }).catch(error => {
+          const detail = error instanceof Error ? error.message : String(error);
+          const line = `\n图片保存失败：${detail}`;
+          assistantMessage.role = 'error';
+          assistantMessage.content += line;
+          appendDelta(line);
+          assistantEl.addClass('is-error');
+        });
+        artifactTasks.push(task);
       } else if (event.type === 'error') {
         assistantMessage.role = 'error';
         assistantMessage.content += `\n${event.message}${event.detail ? `\n${event.detail}` : ''}`;
@@ -1230,7 +1344,8 @@ export class WeSightChatView extends ItemView {
         planMode: this.planMode,
         attachments,
       }, onEvent);
-      if (!assistantMessage.content.trim()) {
+      await Promise.allSettled(artifactTasks);
+      if (!assistantMessage.content.trim() && !(assistantMessage.metadata?.artifacts?.length)) {
         assistantMessage.content = 'Done.';
         contentEl.setText(assistantMessage.content);
       }
@@ -1241,6 +1356,9 @@ export class WeSightChatView extends ItemView {
       this.running = false;
       this.updateRunControls();
       this.refreshStatus();
+      if (assistantEl.isConnected) {
+        await this.renderMessageMarkdown(assistantEl, assistantMessage);
+      }
     }
   }
 
@@ -1266,6 +1384,7 @@ export class WeSightChatView extends ItemView {
     this.render();
     this.renderMessages();
     this.refreshStatus();
+    if (agentId === 'codex') void this.deps.runtimeManager.refreshCodexStatus();
     if (promptInstallIfMissing) {
       this.openRuntimeSetup();
     }
@@ -1273,7 +1392,7 @@ export class WeSightChatView extends ItemView {
 
   private async selectLocalCli(modelId = ''): Promise<void> {
     this.deps.getSettings().configSources[this.agentId] = 'localCli';
-    this.deps.getSettings().localModelByAgent[this.agentId] = this.agentId === 'claude' ? '' : modelId;
+    this.deps.getSettings().localModelByAgent[this.agentId] = this.agentId === 'claude' || this.agentId === 'codex' ? '' : modelId;
     this.closeAllDropdowns();
     // saveSettings() triggers refreshViews() -> onOpen(), which re-renders this view.
     await this.deps.saveSettings();
@@ -1287,6 +1406,7 @@ export class WeSightChatView extends ItemView {
   }
 
   private async selectProfile(profileId: string, model?: string): Promise<void> {
+    if (this.agentId === 'codex') return;
     this.deps.getSettings().configSources[this.agentId] = 'providerProfile';
     this.deps.getSettings().providerProfileByAgent[this.agentId] = profileId;
     if (model !== undefined) {
@@ -1314,10 +1434,17 @@ export class WeSightChatView extends ItemView {
         const detected = getClaudeDetectedLocalModel();
         return detected?.label ?? '跟随 Claude Code';
       }
+      if (this.agentId === 'codex') {
+        const status = this.deps.runtimeManager.getCodexStatus();
+        return status.currentModel?.displayName
+          ?? status.currentModelId
+          ?? (status.state === 'connecting' ? '读取 Codex 模型…' : '跟随 Codex App');
+      }
       const selectedModel = settings.localModelByAgent[this.agentId] ?? '';
+      const localModels = listLocalModels(this.agentId);
       const label = selectedModel
-        ? listLocalModels(this.agentId).find(model => model.id === selectedModel)?.label ?? selectedModel
-        : 'CLI 默认';
+        ? localModels.find(model => model.id === selectedModel)?.label ?? selectedModel
+        : localModels.find(model => model.id)?.label ?? 'CLI 默认';
       return label;
     }
     const selectedProfileId = settings.providerProfileByAgent[this.agentId];

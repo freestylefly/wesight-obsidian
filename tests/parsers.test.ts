@@ -77,6 +77,17 @@ describe('stream parsers', () => {
     }))).toContainEqual({ type: 'error', message: 'bad model' });
   });
 
+  test('parses Codex item.completed agent messages', () => {
+    expect(parseCodexStreamLine(JSON.stringify({
+      type: 'item.completed',
+      item: { id: 'item_0', type: 'agent_message', text: 'OK' },
+    }))).toContainEqual({ type: 'text', content: 'OK' });
+    expect(parseCodexStreamLine(JSON.stringify({
+      type: 'item.completed',
+      item: { id: 'item_1', type: 'message', content: [{ type: 'output_text', text: 'hi there' }] },
+    }))).toContainEqual({ type: 'text', content: 'hi there' });
+  });
+
   test('parses OpenCode text payloads', () => {
     expect(parseOpenCodeStreamLine(JSON.stringify({
       type: 'message',

@@ -4,7 +4,7 @@ export type AgentId = 'claude' | 'codex' | 'opencode';
 
 export type RuntimeConfigSource = 'localCli' | 'providerProfile';
 
-export type RuntimeBinarySource = 'configured' | 'managed' | 'path';
+export type RuntimeBinarySource = 'configured' | 'desktopApp' | 'managed' | 'path';
 
 export type AgentStatusState = 'ready' | 'missing' | 'unsupported';
 
@@ -74,7 +74,22 @@ export interface ChatMessage {
   content: string;
   createdAt: number;
   agentId?: AgentId;
-  metadata?: Record<string, unknown>;
+  metadata?: ChatMessageMetadata;
+}
+
+export interface ChatImageArtifact {
+  id: string;
+  type: 'image';
+  vaultPath: string;
+  mimeType: string;
+  createdAt: number;
+  revisedPrompt?: string;
+}
+
+export type ChatArtifact = ChatImageArtifact;
+
+export interface ChatMessageMetadata extends Record<string, unknown> {
+  artifacts?: ChatArtifact[];
 }
 
 export interface ToolCallEvent {
@@ -117,6 +132,16 @@ export type RuntimeTurnEvent =
   | { type: 'text'; content: string }
   | { type: 'tool'; toolCall: ToolCallEvent }
   | {
+    type: 'artifact';
+    artifact: {
+      itemId: string;
+      kind: 'image';
+      sourcePath: string;
+      mimeType?: string;
+      revisedPrompt?: string;
+    };
+  }
+  | {
     type: 'error';
     message: string;
     detail?: string;
@@ -128,6 +153,33 @@ export type RuntimeTurnEvent =
     diagnostic?: string;
   }
   | { type: 'done'; sessionId?: string | null };
+
+export interface CodexModelDescriptor {
+  id: string;
+  model: string;
+  displayName: string;
+  description: string;
+  hidden: boolean;
+  isDefault: boolean;
+  defaultReasoningEffort: string | null;
+  inputModalities: string[];
+}
+
+export interface CodexRuntimeStatus {
+  state: 'idle' | 'connecting' | 'ready' | 'error';
+  binaryPath: string | null;
+  binarySource: RuntimeBinarySource | null;
+  version: string | null;
+  connected: boolean;
+  authenticated: boolean | null;
+  authMode: string | null;
+  currentModelId: string | null;
+  currentModel: CodexModelDescriptor | null;
+  models: CodexModelDescriptor[];
+  imageGeneration: boolean | null;
+  webSearch: boolean | null;
+  error: string | null;
+}
 
 export interface StoredConversation {
   id: string;
@@ -159,11 +211,15 @@ export interface WeSightObsidianSettings {
   /** Shared Feishu folder created in the current user's Drive root. */
   feishuFolderToken: string;
   /** Theme used by the WeChat preview and draft publisher. */
-  wechatThemeId: WeChatThemeId;
-  /** User-facing name of the reusable AI-generated WeChat theme. */
-  wechatCustomThemeName: string;
-  /** Style brief used to regenerate the reusable AI-generated WeChat theme. */
-  wechatCustomThemeDescription: string;
+ wechatThemeId: WeChatThemeId;
+ /** User-facing name of the reusable AI-generated WeChat theme. */
+ wechatCustomThemeName: string;
+ /** Style brief used to regenerate the reusable AI-generated WeChat theme. */
+ wechatCustomThemeDescription: string;
+  /** API key for the dajiala WeChat article stats endpoint. */
+  wechatArticleStatsKey: string;
+  /** Optional verify code for the dajiala WeChat article stats endpoint. */
+  wechatArticleStatsVerifyCode: string;
 }
 
 export const DEFAULT_CONFIG_SOURCES: ConfigSourcesByAgent = {
@@ -200,8 +256,10 @@ export const DEFAULT_SETTINGS: WeSightObsidianSettings = {
   systemPrompt: '',
   planModeDefault: false,
   maxContextFileChars: 40_000,
-  feishuFolderToken: '',
-  wechatThemeId: 'canghe-style',
-  wechatCustomThemeName: '',
-  wechatCustomThemeDescription: '',
+ feishuFolderToken: '',
+ wechatThemeId: 'canghe-style',
+ wechatCustomThemeName: '',
+ wechatCustomThemeDescription: '',
+  wechatArticleStatsKey: '',
+  wechatArticleStatsVerifyCode: '',
 };

@@ -22,7 +22,7 @@ export const AGENT_DESCRIPTORS: Record<AgentId, AgentDescriptor> = {
     bestFor: 'Structured coding-agent turns with JSON event streaming.',
     supportsImages: true,
     supportsInlineEdit: true,
-    supportsProviderProfiles: true,
+    supportsProviderProfiles: false,
     docsUrl: 'https://github.com/openai/codex',
   },
   opencode: {

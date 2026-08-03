@@ -7,6 +7,7 @@ import { managedBinaryPath, runtimeManagedDir } from '../paths';
 import type { AgentId, AgentStatus, RuntimeConfigSource } from '../types';
 import { resolveCommand, readCommandVersion } from '../utils/command';
 import { executableFileExists } from '../utils/fs';
+import { resolveCodexDesktopBinary } from './codexDesktop';
 
 export interface RuntimeDiscoveryOptions {
   env?: NodeJS.ProcessEnv;
@@ -48,7 +49,13 @@ export class RuntimeDiscovery {
   resolve(agentId: AgentId, options: { withVersion?: boolean } = {}): AgentStatus {
     const configuredPath = this.options.configuredPaths?.[agentId]?.trim() ?? '';
     const configSource = this.options.configSources?.[agentId] ?? 'localCli';
-    const cacheKey = [agentId, configuredPath, this.env.PATH ?? '', this.env.WESIGHT_HOME ?? ''].join('|');
+    const cacheKey = [
+      agentId,
+      configuredPath,
+      this.env.PATH ?? '',
+      this.env.WESIGHT_HOME ?? '',
+      this.env.WESIGHT_CODEX_DESKTOP_ROOTS ?? '',
+    ].join('|');
     let entry = STATUS_CACHE.get(cacheKey);
     if (!entry || entry.expiresAt <= Date.now()) {
       entry = {
@@ -88,6 +95,28 @@ export class RuntimeDiscovery {
         localConfigFound,
         error: null,
       };
+    }
+
+    // Codex local mode reuses the CLI bundled with the official ChatGPT / Codex
+    // desktop app, which the app keeps auto-updated, before any managed copy.
+    if (agentId === 'codex') {
+      const desktopBinary = resolveCodexDesktopBinary(this.env);
+      if (desktopBinary) {
+        return {
+          agentId,
+          descriptor,
+          state: 'ready',
+          found: true,
+          binaryPath: desktopBinary,
+          source: 'desktopApp',
+          version: null,
+          configuredPath,
+          managedDir,
+          configSource,
+          localConfigFound,
+          error: null,
+        };
+      }
     }
 
     const managed = managedBinaryPath(agentId, descriptor.binaryName, this.env);

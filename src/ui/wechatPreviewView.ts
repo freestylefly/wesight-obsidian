@@ -17,10 +17,9 @@ import {
   WeChatThemeService,
 } from '../wechat/themeService';
 import {
-  WECHAT_CONTENT_HASH_FRONTMATTER_KEY,
   WECHAT_DRAFT_ID_FRONTMATTER_KEY,
-  WECHAT_PUBLISHED_AT_FRONTMATTER_KEY,
   parseWeChatPublishState,
+  writeWeChatDraftFrontmatter,
 } from '../wechat/frontmatter';
 import {
   renderWeChatArticle,
@@ -1353,9 +1352,11 @@ export class WeChatPreviewView extends ItemView {
   private async writePublishState(draft: WeChatDraftState): Promise<void> {
     if (!this.file) return;
     await this.app.fileManager.processFrontMatter(this.file, (frontmatter: Record<string, unknown>) => {
-      frontmatter[WECHAT_DRAFT_ID_FRONTMATTER_KEY] = draft.id;
-      frontmatter[WECHAT_CONTENT_HASH_FRONTMATTER_KEY] = draft.contentHash;
-      frontmatter[WECHAT_PUBLISHED_AT_FRONTMATTER_KEY] = draft.updatedAt;
+      writeWeChatDraftFrontmatter(frontmatter, {
+        draftId: draft.id,
+        contentHash: draft.contentHash,
+        updatedAt: draft.updatedAt,
+      });
     });
   }
 

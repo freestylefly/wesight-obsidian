@@ -19,6 +19,11 @@ import {
   WESIGHT_WECHAT_PREVIEW_VIEW_TYPE,
 } from './ui/wechatPreviewView';
 
+import {
+  WeChatArticleStatsView,
+  WESIGHT_WECHAT_ARTICLE_STATS_VIEW_TYPE,
+} from './ui/wechatArticleStatsView';
+
 interface AppWithSettings extends App {
   setting?: {
     open(): void;
@@ -65,6 +70,7 @@ export default class WeSightPlugin extends Plugin {
       () => this.saveSettings(),
       () => this.openSettings('general'),
       (file) => this.activateWeChatPreview(file),
+      (file) => this.activateWeChatArticleStats(file),
     );
 
     this.registerObsidianProtocolHandler('wesight-auth', params => {
@@ -91,6 +97,13 @@ export default class WeSightPlugin extends Plugin {
         themeService: this.wechatThemeService,
         getSettings: () => this.settings,
         saveSettings: () => this.saveSettings(),
+        openSettings: () => this.openSettings('general'),
+      }),
+    );
+    this.registerView(
+      WESIGHT_WECHAT_ARTICLE_STATS_VIEW_TYPE,
+      (leaf: WorkspaceLeaf) => new WeChatArticleStatsView(leaf, {
+        getSettings: () => this.settings,
         openSettings: () => this.openSettings('general'),
       }),
     );
@@ -174,6 +187,7 @@ export default class WeSightPlugin extends Plugin {
       getSettings: () => this.settings,
       saveSettings: () => this.saveSettings(),
       providerStore: this.providerStore,
+      runtimeManager: this.runtimeManager,
       refreshViews: () => this.refreshViews(),
       cloudAuth: this.cloudAuth,
       wechatApi: this.wechatCloudApi,
@@ -183,7 +197,7 @@ export default class WeSightPlugin extends Plugin {
 
   override onunload(): void {
     this.sharePopover?.close();
-    this.runtimeManager?.cancel();
+    void this.runtimeManager?.shutdown();
     this.larkCli?.cancelActiveOperation();
     for (const element of this.shareActionElements) element.remove();
     this.shareActionElements.clear();
@@ -221,6 +235,27 @@ export default class WeSightPlugin extends Plugin {
       return;
     }
     if (leaf.view instanceof WeChatPreviewView) {
+      await leaf.view.setFile(file);
+    }
+    await this.app.workspace.revealLeaf(leaf);
+  }
+
+  async activateWeChatArticleStats(file: TFile): Promise<void> {
+    let leaf: WorkspaceLeaf | null =
+      this.app.workspace.getLeavesOfType(WESIGHT_WECHAT_ARTICLE_STATS_VIEW_TYPE)[0] ?? null;
+    if (!leaf) {
+      leaf = this.app.workspace.getRightLeaf(false);
+      await leaf?.setViewState({
+        type: WESIGHT_WECHAT_ARTICLE_STATS_VIEW_TYPE,
+        active: true,
+        state: { filePath: file.path },
+      });
+    }
+    if (!leaf) {
+      new Notice('无法打开公众号文章数据。');
+      return;
+    }
+    if (leaf.view instanceof WeChatArticleStatsView) {
       await leaf.view.setFile(file);
     }
     await this.app.workspace.revealLeaf(leaf);
@@ -290,6 +325,8 @@ function normalizeSettings(value: Partial<WeSightObsidianSettings> | null | unde
     configSources: {
       ...DEFAULT_SETTINGS.configSources,
       ...(value?.configSources ?? {}),
+      // Codex 仅支持本机配置，旧供应商设置继续保留在存储中。
+      codex: 'localCli',
     },
     configuredPaths: {
       ...DEFAULT_SETTINGS.configuredPaths,
@@ -302,6 +339,7 @@ function normalizeSettings(value: Partial<WeSightObsidianSettings> | null | unde
     localModelByAgent: {
       ...DEFAULT_SETTINGS.localModelByAgent,
       ...(value?.localModelByAgent ?? {}),
+      codex: '',
     },
     wechatThemeId: isWeChatThemeId(value?.wechatThemeId)
       ? value.wechatThemeId
@@ -309,8 +347,14 @@ function normalizeSettings(value: Partial<WeSightObsidianSettings> | null | unde
     wechatCustomThemeName: typeof value?.wechatCustomThemeName === 'string'
       ? value.wechatCustomThemeName
       : '',
-    wechatCustomThemeDescription: typeof value?.wechatCustomThemeDescription === 'string'
-      ? value.wechatCustomThemeDescription
+   wechatCustomThemeDescription: typeof value?.wechatCustomThemeDescription === 'string'
+     ? value.wechatCustomThemeDescription
+     : '',
+    wechatArticleStatsKey: typeof value?.wechatArticleStatsKey === 'string'
+      ? value.wechatArticleStatsKey
       : '',
-  };
+    wechatArticleStatsVerifyCode: typeof value?.wechatArticleStatsVerifyCode === 'string'
+      ? value.wechatArticleStatsVerifyCode
+      : '',
+ };
 }

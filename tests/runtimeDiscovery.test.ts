@@ -39,11 +39,55 @@ describe('RuntimeDiscovery', () => {
     makeExecutable(managed);
     makeExecutable(pathBin);
     const discovery = new RuntimeDiscovery({
-      env: { WESIGHT_HOME: tempDir, PATH: path.dirname(pathBin) },
+      // Disable desktop-app discovery so the managed fallback is exercised.
+      env: { WESIGHT_HOME: tempDir, PATH: path.dirname(pathBin), WESIGHT_CODEX_DESKTOP_ROOTS: '' },
     });
     const status = discovery.resolve('codex');
     expect(status.source).toBe('managed');
     expect(status.binaryPath).toBe(managed);
+  });
+
+  test('reuses the desktop-app Codex CLI before managed and PATH', () => {
+    const appRoot = path.join(tempDir, 'ChatGPT.app');
+    const bundled = process.platform === 'darwin'
+      ? path.join(appRoot, 'Contents/Resources/codex')
+      : process.platform === 'win32'
+        ? path.join(appRoot, 'resources/codex.exe')
+        : path.join(appRoot, 'resources/codex');
+    const managed = path.join(tempDir, 'runtimes/codex/node_modules/.bin/codex');
+    const pathBin = path.join(tempDir, 'bin/codex');
+    makeExecutable(bundled);
+    makeExecutable(managed);
+    makeExecutable(pathBin);
+    const discovery = new RuntimeDiscovery({
+      env: {
+        WESIGHT_HOME: tempDir,
+        PATH: path.dirname(pathBin),
+        WESIGHT_CODEX_DESKTOP_ROOTS: appRoot,
+      },
+    });
+    const status = discovery.resolve('codex');
+    expect(status.source).toBe('desktopApp');
+    expect(status.binaryPath).toBe(bundled);
+  });
+
+  test('configured path still overrides the desktop-app Codex CLI', () => {
+    const appRoot = path.join(tempDir, 'ChatGPT.app');
+    const bundled = process.platform === 'darwin'
+      ? path.join(appRoot, 'Contents/Resources/codex')
+      : process.platform === 'win32'
+        ? path.join(appRoot, 'resources/codex.exe')
+        : path.join(appRoot, 'resources/codex');
+    const configured = path.join(tempDir, 'custom-codex');
+    makeExecutable(bundled);
+    makeExecutable(configured);
+    const discovery = new RuntimeDiscovery({
+      env: { WESIGHT_HOME: tempDir, PATH: '', WESIGHT_CODEX_DESKTOP_ROOTS: appRoot },
+      configuredPaths: { codex: configured },
+    });
+    const status = discovery.resolve('codex');
+    expect(status.source).toBe('configured');
+    expect(status.binaryPath).toBe(configured);
   });
 
   test('reports missing without installing', () => {
