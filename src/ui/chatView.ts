@@ -976,6 +976,7 @@ export class WeSightChatView extends ItemView {
     if (agentId === 'codex' && source === 'providerProfile') return;
     const settings = this.deps.getSettings();
     settings.configSources[agentId] = source;
+    settings.defaultAgentId = agentId;
     if (agentId === 'claude' && source === 'localCli') {
       settings.localModelByAgent.claude = '';
     }

@@ -3375,6 +3375,20 @@ button.wesight-share-primary-button.is-wechat:hover {
   white-space: nowrap;
 }
 
+.wesight-wechat-cover-generate-btn {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.wesight-wechat-cover-generate-btn:hover:not(:disabled) {
+  color: var(--text-accent);
+}
+
+.wesight-wechat-cover-generate-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .wesight-wechat-preview-banner {
   margin: 10px 18px 0;
   padding: 10px 12px;
@@ -3890,4 +3904,157 @@ body.theme-dark .wesight-wechat-publish-button {
   .wesight-wechat-article-stats-metrics {
     grid-template-columns: repeat(4, 1fr);
   }
+}
+.wesight-title-generator-modal .setting-item {
+  align-items: flex-start;
+}
+
+.wesight-title-generator-modal input,
+.wesight-title-generator-modal textarea {
+  width: 100%;
+}
+
+.wesight-title-generator-intro {
+  margin: -4px 0 14px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.55;
+}
+
+.wesight-title-generator-actions {
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.wesight-title-generator-actions .setting-item-info {
+  display: none;
+}
+
+.wesight-title-generator-error {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(var(--background-modifier-error-rgb), 0.12);
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+}
+
+.wesight-title-generator-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.wesight-title-generator-suggestions-heading {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.wesight-title-generator-suggestion-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.wesight-title-generator-suggestion-row:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--text-accent);
+}
+
+.wesight-title-generator-suggestion-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.wesight-title-generator-suggestion-select {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.wesight-title-generator-suggestion-row:hover .wesight-title-generator-suggestion-select {
+  color: var(--text-accent);
+}
+
+.wesight-cover-generator-modal .setting-item {
+  align-items: flex-start;
+}
+
+.wesight-cover-generator-modal input,
+.wesight-cover-generator-modal textarea {
+  width: 100%;
+}
+
+.wesight-cover-generator-intro {
+  margin: -4px 0 14px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.55;
+}
+
+.wesight-cover-generator-actions {
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.wesight-cover-generator-actions .setting-item-info {
+  display: none;
+}
+
+.wesight-cover-generator-error {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(var(--background-modifier-error-rgb), 0.12);
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+}
+
+.wesight-cover-generator-status {
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.wesight-wechat-metadata-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wesight-wechat-metadata-label-row > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wesight-wechat-ai-generate-btn {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.wesight-wechat-ai-generate-btn:hover:not(:disabled) {
+  color: var(--text-accent);
+}
+
+.wesight-wechat-ai-generate-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }

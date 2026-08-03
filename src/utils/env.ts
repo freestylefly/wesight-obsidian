@@ -1,3 +1,6 @@
+import os from 'os';
+import path from 'path';
+
 export function parseEnvironmentText(text: string): Record<string, string> {
   const result: Record<string, string> = {};
   for (const rawLine of text.split(/\r?\n/)) {
@@ -14,10 +17,43 @@ export function parseEnvironmentText(text: string): Record<string, string> {
 }
 
 export function mergeEnvironment(base: NodeJS.ProcessEnv, text: string): NodeJS.ProcessEnv {
-  return {
+  const merged = {
     ...base,
     ...parseEnvironmentText(text),
   };
+  return {
+    ...merged,
+    PATH: executableSearchPath(merged.PATH),
+  };
+}
+
+/**
+ * GUI apps on macOS inherit a minimal PATH and cannot launch npm CLI shims
+ * whose shebang uses `env node`. Keep the inherited/user-configured entries
+ * first, then add the common per-user and package-manager executable folders.
+ */
+export function executableSearchPath(currentPath = ''): string {
+  const home = os.homedir();
+  const candidates = process.platform === 'win32'
+    ? [
+      currentPath,
+      path.join(process.env.APPDATA ?? path.join(home, 'AppData', 'Roaming'), 'npm'),
+    ]
+    : [
+      currentPath,
+      path.join(home, '.local', 'bin'),
+      path.join(home, '.npm-global', 'bin'),
+      path.join(home, '.volta', 'bin'),
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      '/usr/bin',
+      '/bin',
+      '/usr/sbin',
+      '/sbin',
+    ];
+  return [...new Set(
+    candidates.flatMap(value => value.split(path.delimiter)).filter(Boolean),
+  )].join(path.delimiter);
 }
 
 export function redactSecret(value: string): string {

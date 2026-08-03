@@ -95,6 +95,7 @@ export default class WeSightPlugin extends Plugin {
         auth: this.cloudAuth,
         api: this.wechatCloudApi,
         themeService: this.wechatThemeService,
+        runtimeManager: this.runtimeManager,
         getSettings: () => this.settings,
         saveSettings: () => this.saveSettings(),
         openSettings: () => this.openSettings('general'),

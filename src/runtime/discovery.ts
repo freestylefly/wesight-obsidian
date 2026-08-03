@@ -97,28 +97,6 @@ export class RuntimeDiscovery {
       };
     }
 
-    // Codex local mode reuses the CLI bundled with the official ChatGPT / Codex
-    // desktop app, which the app keeps auto-updated, before any managed copy.
-    if (agentId === 'codex') {
-      const desktopBinary = resolveCodexDesktopBinary(this.env);
-      if (desktopBinary) {
-        return {
-          agentId,
-          descriptor,
-          state: 'ready',
-          found: true,
-          binaryPath: desktopBinary,
-          source: 'desktopApp',
-          version: null,
-          configuredPath,
-          managedDir,
-          configSource,
-          localConfigFound,
-          error: null,
-        };
-      }
-    }
-
     const managed = managedBinaryPath(agentId, descriptor.binaryName, this.env);
     if (executableFileExists(managed)) {
       return {
@@ -153,6 +131,30 @@ export class RuntimeDiscovery {
         localConfigFound,
         error: null,
       };
+    }
+
+    // Use the CLI bundled with the official ChatGPT / Codex desktop app only
+    // when no local or managed CLI is available. This keeps local mode on the
+    // user's explicitly installed CLI, which may have a different provider
+    // integration than the desktop app's experimental build.
+    if (agentId === 'codex') {
+      const desktopBinary = resolveCodexDesktopBinary(this.env);
+      if (desktopBinary) {
+        return {
+          agentId,
+          descriptor,
+          state: 'ready',
+          found: true,
+          binaryPath: desktopBinary,
+          source: 'desktopApp',
+          version: null,
+          configuredPath,
+          managedDir,
+          configSource,
+          localConfigFound,
+          error: null,
+        };
+      }
     }
 
     return {

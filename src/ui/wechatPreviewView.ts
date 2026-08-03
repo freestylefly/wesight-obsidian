@@ -12,10 +12,13 @@ import {
 import { CloudAuthService } from '../share/cloudAuth';
 import { CloudApiError } from '../share/cloudApi';
 import { WeChatCloudApi } from '../wechat/cloudApi';
+import path from 'path';
+import type { RuntimeManager } from '../runtime/runtimeManager';
 import {
   ThemeGenerationCancelledError,
   WeChatThemeService,
 } from '../wechat/themeService';
+import { mergeRuntimeText } from '../wechat/themeService';
 import {
   WECHAT_DRAFT_ID_FRONTMATTER_KEY,
   parseWeChatPublishState,
@@ -51,6 +54,11 @@ import {
 import { recordValue } from '../utils/records';
 import { confirmShareAction } from './shareConfirm';
 import { promptForCustomWeChatTheme } from './wechatCustomThemeModal';
+import { promptForWeChatTitles } from './generateWeChatTitlesModal';
+import { promptForWeChatCover } from './generateWeChatCoverModal';
+import { createId } from '../utils/id';
+import { ensureDir, safeRemoveDir } from '../utils/fs';
+import { tmpDir } from '../paths';
 import { StreamingPreviewAutoFollow } from './streamingPreviewAutoFollow';
 
 export const WESIGHT_WECHAT_PREVIEW_VIEW_TYPE = 'wesight-wechat-preview';
@@ -61,6 +69,7 @@ interface WeChatPreviewViewOptions {
   auth: CloudAuthService;
   api: WeChatCloudApi;
   themeService: WeChatThemeService;
+  runtimeManager: RuntimeManager;
   getSettings: () => WeSightObsidianSettings;
   saveSettings: () => Promise<void>;
   openSettings: () => void;
@@ -767,8 +776,27 @@ export class WeChatPreviewView extends ItemView {
 
   private renderMetadataFields(parent: HTMLElement): void {
     const fields = parent.createDiv({ cls: 'wesight-wechat-metadata-fields' });
-    const title = fields.createEl('label');
-    title.createSpan({ text: '标题' });
+    const title = fields.createEl('label', { cls: 'is-wide' });
+    const titleLabelRow = title.createDiv({ cls: 'wesight-wechat-metadata-label-row' });
+    titleLabelRow.createSpan({ text: '标题' });
+    const generateTitleBtn = titleLabelRow.createEl('button', {
+      cls: 'clickable-icon wesight-wechat-ai-generate-btn',
+      attr: { type: 'button', 'aria-label': 'AI 生成爆款标题' },
+    });
+    setIcon(generateTitleBtn, 'sparkles');
+    generateTitleBtn.disabled = Boolean(this.operation) || !this.snapshot;
+    generateTitleBtn.onclick = async () => {
+      if (!this.snapshot) return;
+      const selected = await promptForWeChatTitles(this.app, {
+        runtimeManager: this.options.runtimeManager,
+        getSettings: this.options.getSettings,
+        snapshot: this.preparedSnapshot(),
+      });
+      if (selected !== null) {
+        this.titleValue = selected;
+        this.render();
+      }
+    };
     const titleInput = title.createEl('input', { type: 'text' });
     titleInput.value = this.titleValue;
     titleInput.maxLength = 128;
@@ -776,7 +804,7 @@ export class WeChatPreviewView extends ItemView {
       this.titleValue = titleInput.value;
     };
     titleInput.onblur = () => this.render();
-    const author = fields.createEl('label');
+    const author = fields.createEl('label', { cls: 'is-wide' });
     author.createSpan({ text: '作者' });
     const authorInput = author.createEl('input', { type: 'text' });
     authorInput.value = this.authorValue;
@@ -786,7 +814,15 @@ export class WeChatPreviewView extends ItemView {
     };
     authorInput.onblur = () => this.render();
     const digest = fields.createEl('label', { cls: 'is-wide' });
-    digest.createSpan({ text: '摘要' });
+    const digestLabelRow = digest.createDiv({ cls: 'wesight-wechat-metadata-label-row' });
+    digestLabelRow.createSpan({ text: '摘要' });
+    const generateDigestBtn = digestLabelRow.createEl('button', {
+      cls: 'clickable-icon wesight-wechat-ai-generate-btn',
+      attr: { type: 'button', 'aria-label': 'AI 生成摘要' },
+    });
+    setIcon(generateDigestBtn, 'sparkles');
+    generateDigestBtn.disabled = Boolean(this.operation) || !this.snapshot;
+    generateDigestBtn.onclick = () => void this.generateDigest();
     const digestInput = digest.createEl('textarea');
     digestInput.value = this.digestValue;
     digestInput.maxLength = 600;
@@ -795,6 +831,91 @@ export class WeChatPreviewView extends ItemView {
       this.digestValue = digestInput.value;
     };
     digestInput.onblur = () => this.render();
+  }
+
+  private async generateDigest(): Promise<void> {
+    if (!this.snapshot || this.operation) return;
+    const runDir = path.join(tmpDir(process.env), 'wechat-digest-runs', createId('run'));
+    ensureDir(runDir);
+    this.operation = '正在生成摘要…';
+    this.error = null;
+    this.render();
+    let controller: AbortController | null = null;
+    try {
+      const settings = this.options.getSettings();
+      const agentId = settings.defaultAgentId;
+      let outputText = '';
+      let runtimeError: string | null = null;
+      controller = new AbortController();
+
+      await this.options.runtimeManager.runTurn({
+       conversationId: createId('wechat-digest'),
+       agentId,
+        prompt: this.buildDigestGenerationPrompt(this.preparedSnapshot()),
+       cwd: runDir,
+        configSource: settings.configSources[agentId],
+        providerProfileId: settings.providerProfileByAgent[agentId] || undefined,
+        model: settings.localModelByAgent[agentId] || undefined,
+        planMode: false,
+        textOnly: true,
+        signal: controller.signal,
+      }, event => {
+        if (event.type === 'text') {
+          outputText = mergeRuntimeText(outputText, event.content);
+        } else if (event.type === 'error') {
+          runtimeError = [event.message, event.detail].filter(Boolean).join('：');
+        }
+      });
+
+      if (controller.signal.aborted) return;
+      if (runtimeError) throw new Error(runtimeError);
+      const digest = this.extractGeneratedDigest(outputText);
+      if (!digest) throw new Error('模型没有返回可用摘要。');
+      this.digestValue = digest.slice(0, 600);
+      new Notice('摘要已生成。');
+    } catch (error) {
+      if (controller && controller.signal.aborted) return;
+      new Notice(error instanceof Error ? error.message : '摘要生成失败');
+    } finally {
+     safeRemoveDir(runDir);
+     this.operation = null;
+     if (this.contentEl.isConnected) this.render();
+   }
+ }
+
+  private buildDigestGenerationPrompt(snapshot: WeChatPreviewSnapshot): string {
+    const title = snapshot.title.trim();
+    let article = snapshot.markdown.trim();
+    const truncated = article.length > 6000;
+    if (truncated) {
+      article = article.slice(0, 6000);
+    }
+    const sections: string[] = [
+      '你是微信公众号编辑助手。请根据下面文章内容，撰写一段简洁的公众号摘要，用于文章卡片/转发预览。',
+      '要求：',
+      '- 控制在 120 字以内，语言自然、有吸引力。',
+      '- 不要输出标题、不要解释、不要代码围栏。',
+      '- 只输出摘要正文。',
+    ];
+    if (title) {
+      sections.push(`当前标题：${title}`);
+    }
+    sections.push('===== 文章内容 START =====');
+    sections.push(article);
+    if (truncated) {
+      sections.push('（后文已省略）');
+    }
+    sections.push('===== 文章内容 END =====');
+    return sections.join('\n');
+  }
+
+  private extractGeneratedDigest(output: string): string | null {
+    const cleaned = output
+      .replace(/```(?:\w+)?\s*([\s\S]*?)\s*```/g, '$1')
+      .trim()
+      .replace(/^["']|["']$/g, '')
+      .trim();
+    return cleaned || null;
   }
 
   private renderCover(parent: HTMLElement, snapshot: WeChatPreviewSnapshot): void {
@@ -812,6 +933,26 @@ export class WeChatPreviewView extends ItemView {
     copy.createSpan({ text: '推荐尺寸 2.35:1' });
     const choose = row.createEl('button', { text: '更换封面' });
     choose.onclick = () => this.chooseTemporaryCover();
+
+    const generateCover = row.createEl('button', {
+      cls: 'clickable-icon wesight-wechat-cover-generate-btn',
+      attr: { type: 'button', 'aria-label': 'AI 生成封面' },
+    });
+    setIcon(generateCover, 'sparkles');
+    generateCover.disabled = Boolean(this.operation) || !this.snapshot;
+    generateCover.onclick = async () => {
+      if (!this.snapshot) return;
+      const asset = await promptForWeChatCover(this.app, {
+        runtimeManager: this.options.runtimeManager,
+        getSettings: this.options.getSettings,
+        snapshot: this.preparedSnapshot(),
+      });
+      if (asset) {
+        this.clearTemporaryCover();
+        this.temporaryCover = asset;
+        this.render();
+      }
+    };
   }
 
   private renderWarnings(parent: HTMLElement, snapshot: WeChatPreviewSnapshot): void {

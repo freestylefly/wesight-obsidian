@@ -47,17 +47,15 @@ describe('RuntimeDiscovery', () => {
     expect(status.binaryPath).toBe(managed);
   });
 
-  test('reuses the desktop-app Codex CLI before managed and PATH', () => {
+  test('prefers the local PATH Codex CLI before the desktop-app CLI', () => {
     const appRoot = path.join(tempDir, 'ChatGPT.app');
     const bundled = process.platform === 'darwin'
       ? path.join(appRoot, 'Contents/Resources/codex')
       : process.platform === 'win32'
         ? path.join(appRoot, 'resources/codex.exe')
         : path.join(appRoot, 'resources/codex');
-    const managed = path.join(tempDir, 'runtimes/codex/node_modules/.bin/codex');
     const pathBin = path.join(tempDir, 'bin/codex');
     makeExecutable(bundled);
-    makeExecutable(managed);
     makeExecutable(pathBin);
     const discovery = new RuntimeDiscovery({
       env: {
@@ -67,8 +65,8 @@ describe('RuntimeDiscovery', () => {
       },
     });
     const status = discovery.resolve('codex');
-    expect(status.source).toBe('desktopApp');
-    expect(status.binaryPath).toBe(bundled);
+    expect(status.source).toBe('path');
+    expect(status.binaryPath).toBe(pathBin);
   });
 
   test('configured path still overrides the desktop-app Codex CLI', () => {
