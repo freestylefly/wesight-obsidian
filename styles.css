@@ -4123,3 +4123,103 @@ body.theme-dark .wesight-wechat-publish-button {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+.wesight-billing-modal {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.wesight-billing-modal .modal-content {
+  padding: 8px 4px 4px;
+  text-align: center;
+}
+
+.wesight-billing-modal-icon {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  margin: 0 auto 12px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+  color: var(--interactive-accent);
+}
+
+.wesight-billing-modal-icon svg {
+  width: 26px;
+  height: 26px;
+}
+
+.wesight-billing-modal h2 {
+  margin: 0;
+}
+
+.wesight-billing-modal-lead {
+  margin: 10px auto 18px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.wesight-billing-balance-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.wesight-billing-balance-grid > div {
+  padding: 12px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+}
+
+.wesight-billing-balance-grid span,
+.wesight-billing-balance-grid strong {
+  display: block;
+}
+
+.wesight-billing-balance-grid span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.wesight-billing-balance-grid strong {
+  margin-top: 4px;
+  font-size: 20px;
+}
+
+.wesight-billing-membership-state {
+  margin-top: 10px;
+  color: var(--interactive-accent);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.wesight-billing-hints {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 16px;
+}
+
+.wesight-billing-hints > div {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.wesight-billing-refresh-state {
+  min-height: 18px;
+  margin-top: 14px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.wesight-billing-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}

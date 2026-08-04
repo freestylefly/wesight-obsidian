@@ -17,6 +17,7 @@ interface ApiEnvelope<T> {
   code: number;
   data?: T;
   message?: string;
+  error?: string;
 }
 
 interface WeChatUploadTicket {
@@ -161,21 +162,27 @@ export class WeChatCloudApi {
     });
   }
 
-  createDraft(payload: WeChatDraftPayload): Promise<WeChatDraftState> {
+  createDraft(payload: WeChatDraftPayload, idempotencyKey?: string): Promise<WeChatDraftState> {
     return this.request({
       url: `${API_BASE_URL}/api/wechat/drafts`,
       method: 'POST',
       contentType: 'application/json',
       body: JSON.stringify(payload),
+      ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
     });
   }
 
-  updateDraft(draftId: string, payload: WeChatDraftPayload): Promise<WeChatDraftState> {
+  updateDraft(
+    draftId: string,
+    payload: WeChatDraftPayload,
+    idempotencyKey?: string,
+  ): Promise<WeChatDraftState> {
     return this.request({
       url: `${API_BASE_URL}/api/wechat/drafts/${encodeURIComponent(draftId)}`,
       method: 'PUT',
       contentType: 'application/json',
       body: JSON.stringify(payload),
+      ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
     });
   }
 
@@ -199,7 +206,12 @@ export class WeChatCloudApi {
         this.auth.clearSession();
         throw new CloudAuthRequiredError();
       }
-      throw new CloudApiError(payload.message || '公众号服务请求失败', response.status);
+      throw new CloudApiError(
+        payload.message || '公众号服务请求失败',
+        response.status,
+        payload.error,
+        payload.data,
+      );
     }
     return payload.data;
   }

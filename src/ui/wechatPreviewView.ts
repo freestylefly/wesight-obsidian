@@ -13,9 +13,10 @@ import {
 import wesightLogo from '../../assets/wesight-logo.png';
 
 import { CloudAuthService } from '../share/cloudAuth';
-import type { CloudUser } from '../share/types';
 import { CloudApiError } from '../share/cloudApi';
+import type { CloudUser } from '../share/types';
 import { WeChatCloudApi } from '../wechat/cloudApi';
+import { openBillingModal } from './billingModal';
 import path from 'path';
 import type { RuntimeManager } from '../runtime/runtimeManager';
 import {
@@ -119,6 +120,7 @@ export class WeChatPreviewView extends ItemView {
   private streamingPreviewScrollbarDragging = false;
   private pendingPreviewScrollRestore: { top: number; followBottom: boolean } | null = null;
   private themeGenerationError: string | null = null;
+  private publishAttempt: { signature: string; idempotencyKey: string } | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -405,7 +407,22 @@ export class WeChatPreviewView extends ItemView {
     menu.addItem(item => item
       .setTitle(profile)
       .setIsLabel(true));
+    const billing = this.options.auth.getBillingSummary();
+    menu.addItem(item => item
+      .setTitle(billing
+        ? `${billing.membership.active ? '创作者会员' : '免费用户'} · ${billing.totalCreditsRemaining} 积分`
+        : '正在加载积分…')
+      .setIcon('gem')
+      .setIsLabel(true));
     menu.addSeparator();
+    menu.addItem(item => item
+      .setTitle('账户详情')
+      .setIcon('circle-user-round')
+      .onClick(() => this.options.auth.openAccount()));
+    menu.addItem(item => item
+      .setTitle('会员与积分')
+      .setIcon('wallet-cards')
+      .onClick(() => this.options.auth.openBilling()));
     menu.addItem(item => item
       .setTitle('退出登录')
       .setIcon('log-out')
@@ -417,7 +434,7 @@ export class WeChatPreviewView extends ItemView {
       if (this.accountMenu === menu) this.accountMenu = null;
     });
     const bounds = anchor.getBoundingClientRect();
-    const accountMenuWidth = 96;
+    const accountMenuWidth = 190;
     menu.showAtPosition({
       x: Math.max(8, bounds.right - accountMenuWidth),
       y: bounds.bottom + 4,
@@ -1493,6 +1510,17 @@ export class WeChatPreviewView extends ItemView {
       return;
     }
     const existing = !asNew && !this.duplicatePath && !this.staleDraft ? this.draft : null;
+    let billing;
+    try {
+      billing = await this.options.auth.refreshBillingSummary(false);
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : '无法加载积分余额，请稍后重试');
+      return;
+    }
+    if (billing.totalCreditsRemaining < billing.publishCost) {
+      openBillingModal(this.app, this.options.auth, billing);
+      return;
+    }
     const confirmed = await confirmShareAction(this.app, {
       title: existing ? '更新公众号草稿？' : '发文章到公众号草稿箱？',
       message: existing
@@ -1501,6 +1529,19 @@ export class WeChatPreviewView extends ItemView {
       confirmText: existing ? '确认更新' : '确认发文章',
     });
     if (!confirmed) return;
+    const publishSignature = [
+      existing?.id || 'new',
+      snapshot.contentHash,
+      themeDocument?.contentHash || '',
+      snapshot.title,
+    ].join(':');
+    if (this.publishAttempt?.signature !== publishSignature) {
+      this.publishAttempt = {
+        signature: publishSignature,
+        idempotencyKey: crypto.randomUUID(),
+      };
+    }
+    const publishIdempotencyKey = this.publishAttempt.idempotencyKey;
 
     this.operation = '正在上传正文图片…';
     this.error = null;
@@ -1545,14 +1586,20 @@ export class WeChatPreviewView extends ItemView {
       this.operation = existing ? '正在更新公众号草稿…' : '正在创建公众号草稿…';
       this.render();
       const draft = existing
-        ? await this.options.api.updateDraft(existing.id, payload)
-        : await this.options.api.createDraft(payload);
+        ? await this.options.api.updateDraft(existing.id, payload, publishIdempotencyKey)
+        : await this.options.api.createDraft(payload, publishIdempotencyKey);
       await this.writePublishState(draft);
       this.draft = draft;
       this.staleDraft = false;
       this.duplicatePath = null;
+      this.publishAttempt = null;
+      void this.options.auth.refreshBillingSummary().catch(() => undefined);
       new Notice(existing ? '公众号草稿已更新。' : '笔记已同步到公众号草稿箱。');
     } catch (error) {
+      if (error instanceof CloudApiError && error.status === 402) {
+        const latest = await this.options.auth.refreshBillingSummary(false).catch(() => null);
+        if (latest) openBillingModal(this.app, this.options.auth, latest);
+      }
       this.error = error instanceof Error ? error.message : '公众号草稿同步失败';
       new Notice(this.error);
     } finally {

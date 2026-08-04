@@ -43,3 +43,32 @@ export interface CloudUser {
   nickname: string;
   avatarUrl: string | null;
 }
+
+export interface CloudBillingSummary {
+  planName: string;
+  subscriptionStatus: 'free' | 'active';
+  creditsLimit: number;
+  creditsUsed: number;
+  creditsRemaining: number;
+  totalCreditsRemaining: number;
+  balances: {
+    free: number;
+    membership: number;
+    purchased: number;
+  };
+  membership: {
+    active: boolean;
+    planCode: string | null;
+    planName: string | null;
+    expiresAt: string | null;
+  };
+  creditItems: Array<{
+    type: 'subscription' | 'boost' | 'free';
+    label: string;
+    labelEn: string;
+    creditsRemaining: number;
+    expiresAt: string | null;
+  }>;
+  publishCost: number;
+  checkoutUrl: string;
+}

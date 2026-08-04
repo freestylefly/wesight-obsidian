@@ -42,6 +42,11 @@ Lark CLI and the operating system credential store retain Feishu tokens. WeSight
 
 Open the sharing panel and choose **公众号草稿**, or run **WeSight: 同步当前笔记到公众号草稿箱**. Configure an Official Account under **Settings → WeSight → 发布平台**, preview the rendered article, and then create or update a cloud-managed draft.
 
+Creating or updating an Official Account draft consumes one WeSight credit after
+the sync succeeds. When the balance is empty, the plugin opens the membership and
+credit prompt before uploading article assets. The external WeSight checkout uses
+WeChat Native QR payment and the plugin refreshes the balance after payment.
+
 After publishing the draft in WeChat, return to **分享 → 公众号** to save the published `mp.weixin.qq.com` article link. The panel then shows the note as published and can open the article in the system default browser.
 
 This workflow requires a WeSight account and a WeChat Official Account with access to the material, article-image, and draft APIs. The WeSight fixed-egress IP must be added to the account allowlist. AppSecret and WeChat access tokens are encrypted by WeSight Cloud and do not enter the vault or plugin data.

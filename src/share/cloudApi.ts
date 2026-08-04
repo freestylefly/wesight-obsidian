@@ -16,7 +16,12 @@ interface ApiEnvelope<T> {
 }
 
 export class CloudApiError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly data?: unknown,
+  ) {
     super(message);
   }
 }

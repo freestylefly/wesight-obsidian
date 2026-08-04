@@ -5,6 +5,7 @@ vi.mock('obsidian', () => ({
 import { requestUrl } from 'obsidian';
 
 import { WeChatCloudApi } from '../src/wechat/cloudApi';
+import { CloudApiError } from '../src/share/cloudApi';
 import type { WeChatAssetDraft } from '../src/wechat/types';
 
 const auth = {
@@ -104,6 +105,64 @@ describe('WeChat direct asset uploads', () => {
       method: 'POST',
       body: JSON.stringify({ mediaId: 'wechat-cover-id' }),
       headers: { Authorization: 'Bearer cloud-access-token' },
+    });
+  });
+});
+
+describe('WeChat billable draft requests', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  test('sends the stable idempotency key with a draft create', async () => {
+    vi.mocked(requestUrl).mockResolvedValueOnce({
+      status: 200,
+      json: {
+        code: 0,
+        data: {
+          id: 'draft-1',
+          title: 'Article',
+          contentHash: 'hash',
+          status: 'active',
+          syncedAt: '2026-08-04T00:00:00.000Z',
+          updatedAt: '2026-08-04T00:00:00.000Z',
+        },
+      },
+    } as never);
+    const api = new WeChatCloudApi(auth as never);
+    await api.createDraft({ title: 'Article' } as never, 'publish-request-123');
+    expect(vi.mocked(requestUrl).mock.calls[0]?.[0]).toMatchObject({
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer cloud-access-token',
+        'Idempotency-Key': 'publish-request-123',
+      },
+    });
+  });
+
+  test('preserves the structured insufficient-credit response', async () => {
+    const summary = { totalCreditsRemaining: 0, publishCost: 1 };
+    vi.mocked(requestUrl).mockResolvedValueOnce({
+      status: 402,
+      json: {
+        code: 1,
+        error: 'INSUFFICIENT_CREDITS',
+        message: '积分不足',
+        data: summary,
+      },
+    } as never);
+    const api = new WeChatCloudApi(auth as never);
+    let error: unknown;
+    try {
+      await api.createDraft({ title: 'Article' } as never, 'publish-request-123');
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(CloudApiError);
+    expect(error).toMatchObject({
+      status: 402,
+      code: 'INSUFFICIENT_CREDITS',
+      data: summary,
     });
   });
 });

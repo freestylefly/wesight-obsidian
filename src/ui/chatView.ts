@@ -520,7 +520,22 @@ export class WeSightChatView extends ItemView {
     menu.addItem(item => item
       .setTitle(profile)
       .setIsLabel(true));
+    const billing = this.deps.auth.getBillingSummary();
+    menu.addItem(item => item
+      .setTitle(billing
+        ? `${billing.membership.active ? '创作者会员' : '免费用户'} · ${billing.totalCreditsRemaining} 积分`
+        : '正在加载积分…')
+      .setIcon('gem')
+      .setIsLabel(true));
     menu.addSeparator();
+    menu.addItem(item => item
+      .setTitle('账户详情')
+      .setIcon('circle-user-round')
+      .onClick(() => this.deps.auth.openAccount()));
+    menu.addItem(item => item
+      .setTitle('会员与积分')
+      .setIcon('wallet-cards')
+      .onClick(() => this.deps.auth.openBilling()));
     menu.addItem(item => item
       .setTitle('退出登录')
       .setIcon('log-out')
@@ -532,7 +547,7 @@ export class WeSightChatView extends ItemView {
       if (this.accountMenu === menu) this.accountMenu = null;
     });
     const bounds = anchor.getBoundingClientRect();
-    const accountMenuWidth = 96;
+    const accountMenuWidth = 190;
     menu.showAtPosition({
       x: Math.max(8, bounds.right - accountMenuWidth),
       y: bounds.bottom + 4,
