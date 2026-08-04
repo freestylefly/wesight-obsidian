@@ -1,7 +1,7 @@
 {
  "id": "wesight",
  "name": "WeSight",
-  "version": "0.2.0",
+  "version": "0.2.1",
  "minAppVersion": "1.11.4",
   "description": "Run Claude Code, Codex, and OpenCode as local AI collaborators inside your vault.",
   "author": "WeSight",

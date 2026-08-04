@@ -3,6 +3,7 @@ import {
   MarkdownView,
   Menu,
   Notice,
+  Platform,
   setIcon,
   TFile,
   type ViewStateResult,
@@ -481,9 +482,10 @@ export class WeChatPreviewView extends ItemView {
     const unchanged = Boolean(this.draft && publicationHash === this.draft.contentHash);
     const updateExisting = Boolean(this.draft && !this.duplicatePath && !this.staleDraft);
     const hasBlockingWarnings = snapshot.warnings.some((warning) => warning.blocking);
-    const primary = toolbar.createEl('button', {
+    const actions = toolbar.createDiv({ cls: 'wesight-wechat-publish-actions' });
+    const primary = actions.createEl('button', {
       cls: 'mod-cta wesight-wechat-publish-button',
-      text: updateExisting ? '更新公众号草稿' : '同步到草稿箱',
+      text: updateExisting ? '更新文章' : '发文章',
       attr: { type: 'button' },
     });
     primary.disabled = Boolean(this.operation)
@@ -491,6 +493,14 @@ export class WeChatPreviewView extends ItemView {
       || themeNeedsGeneration
       || (hasBlockingWarnings && !this.acknowledgedWarnings);
     primary.onclick = () => void this.publish(false);
+
+    const copy = actions.createEl('button', {
+      cls: 'wesight-wechat-copy-button',
+      text: '复制',
+      attr: { type: 'button', 'aria-label': '复制公众号文章格式到剪贴板' },
+    });
+    copy.disabled = Boolean(this.operation) || themeNeedsGeneration;
+    copy.onclick = () => void this.copyToClipboard();
 
     const themeTrigger = toolbar.createEl('button', {
       cls: 'wesight-wechat-theme-trigger',
@@ -528,7 +538,7 @@ export class WeChatPreviewView extends ItemView {
       state.createSpan({ text: '草稿有更新待同步' });
     } else {
       setIcon(stateIcon, 'cloud-upload');
-      state.createSpan({ text: '准备同步到草稿箱' });
+      state.createSpan({ text: '准备发布' });
     }
 
     const more = toolbar.createEl('button', {
@@ -1387,11 +1397,11 @@ export class WeChatPreviewView extends ItemView {
     }
     const existing = !asNew && !this.duplicatePath && !this.staleDraft ? this.draft : null;
     const confirmed = await confirmShareAction(this.app, {
-      title: existing ? '更新公众号草稿？' : '同步到公众号草稿箱？',
+      title: existing ? '更新公众号草稿？' : '发文章到公众号草稿箱？',
       message: existing
         ? '当前排版、正文图片和封面将覆盖已关联的公众号草稿。'
-        : '当前笔记、正文图片和封面将上传到微信公众号后台草稿箱。',
-      confirmText: existing ? '确认更新' : '确认同步',
+        : '当前笔记、正文图片和封面将作为公众号草稿发布。',
+      confirmText: existing ? '确认更新' : '确认发文章',
     });
     if (!confirmed) return;
 
@@ -1401,23 +1411,7 @@ export class WeChatPreviewView extends ItemView {
     this.render();
     const hidden = document.body.createDiv({ cls: 'wesight-wechat-publish-render-host' });
     try {
-      const uploadedUrls = new Map<string, string>();
-      const contentAssets = snapshot.assets.filter((asset) => snapshot.markdown.includes(asset.token));
-      for (let index = 0; index < contentAssets.length; index += 1) {
-        const asset = contentAssets[index];
-        this.operation = `正在上传正文图片 ${index + 1}/${contentAssets.length}…`;
-        this.render();
-        try {
-          const result = await this.options.api.uploadAsset('content', asset);
-          if (!result.url) throw new Error('上传后没有返回地址');
-          uploadedUrls.set(asset.token, result.url);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : '上传失败';
-          throw new Error(
-            `正文图片 ${index + 1}/${contentAssets.length}“${asset.fileName}”上传失败：${message}`,
-          );
-        }
-      }
+      const uploadedUrls = await this.uploadContentImages(snapshot);
 
       this.operation = `正在生成 ${this.currentThemeLabel()} 正文…`;
       this.render();
@@ -1499,6 +1493,85 @@ export class WeChatPreviewView extends ItemView {
         updatedAt: draft.updatedAt,
       });
     });
+  }
+
+
+  private async uploadContentImages(
+    snapshot: WeChatPreviewSnapshot,
+  ): Promise<Map<string, string>> {
+    const uploadedUrls = new Map<string, string>();
+    const contentAssets = snapshot.assets.filter((asset) => snapshot.markdown.includes(asset.token));
+    for (let index = 0; index < contentAssets.length; index += 1) {
+      const asset = contentAssets[index];
+      this.operation = `正在上传正文图片 ${index + 1}/${contentAssets.length}…`;
+      this.render();
+      try {
+        const result = await this.options.api.uploadAsset('content', asset);
+        if (!result.url) throw new Error('上传后没有返回地址');
+        uploadedUrls.set(asset.token, result.url);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '上传失败';
+        throw new Error(
+          `正文图片 ${index + 1}/${contentAssets.length}“${asset.fileName}”上传失败：${message}`,
+        );
+      }
+    }
+    return uploadedUrls;
+  }
+
+  private async copyToClipboard(): Promise<void> {
+    if (!this.file || !this.snapshot || !this.connection) return;
+    if (Platform.isMobile) {
+      new Notice('移动端暂不支持复制公众号文章格式。');
+      return;
+    }
+    const snapshot = this.preparedSnapshot();
+    const themeDocument = this.validThemeDocument(snapshot);
+    const theme = getWeChatTheme(this.currentThemeId());
+    if (theme.kind !== 'template' && !themeDocument) {
+      new Notice(`请先重新生成 ${this.currentThemeLabel()} 主题预览。`);
+      return;
+    }
+    if (!snapshot.title.trim()) {
+      new Notice('请填写文章标题。');
+      return;
+    }
+
+    this.operation = '正在准备复制…';
+    this.error = null;
+    this.errorTitle = '复制失败';
+    this.render();
+    const hidden = document.body.createDiv({ cls: 'wesight-wechat-publish-render-host' });
+    try {
+      const uploadedUrls = await this.uploadContentImages(snapshot);
+
+       this.operation = `正在生成 ${this.currentThemeLabel()} 正文…`;
+      this.render();
+      const article = hidden.createDiv();
+      await renderWeChatArticle(this.app, this, snapshot, article, {
+        uploadedUrls,
+        themeDocument,
+      });
+      await replaceFormulaSvgs(article, async (asset) => {
+        this.operation = '正在上传公式图片…';
+        this.render();
+        const result = await this.options.api.uploadAsset('content', asset);
+        if (!result.url) throw new Error('公式图片上传失败');
+        return result.url;
+      }, theme.kind === 'template');
+      const content = serializeWeChatArticle(article);
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html': new Blob([content], { type: 'text/html' }),
+      })]);
+      new Notice('已复制公众号文章格式，请前往后台粘贴。');
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : '复制公众号文章格式失败';
+      new Notice(this.error);
+    } finally {
+      hidden.remove();
+      this.operation = null;
+      this.render();
+    }
   }
 
   private findDuplicatePath(draftId: string): string | null {

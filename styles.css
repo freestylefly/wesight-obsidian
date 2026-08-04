@@ -2966,6 +2966,13 @@ button.wesight-share-primary-button.is-wechat:hover {
   background: var(--background-primary);
 }
 
+.wesight-wechat-publish-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
 .wesight-wechat-publish-button {
   min-height: 38px;
   margin: 0;
@@ -2975,6 +2982,28 @@ button.wesight-share-primary-button.is-wechat:hover {
   color: #fff !important;
   font-size: 13px;
   font-weight: 600;
+}
+
+.wesight-wechat-copy-button {
+  min-height: 38px;
+  margin: 0;
+  padding: 7px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  box-shadow: none;
+  color: var(--text-normal);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.wesight-wechat-copy-button:hover:not(:disabled) {
+  border-color: rgba(7, 193, 96, 0.45);
+  background: rgba(7, 193, 96, 0.06);
+}
+
+.wesight-wechat-copy-button:disabled {
+  opacity: 0.5;
 }
 
 .wesight-wechat-publish-button:hover:not(:disabled) {
@@ -3625,6 +3654,10 @@ body.theme-dark .wesight-wechat-publish-button {
 
   .wesight-wechat-publish-toolbar {
     grid-template-columns: minmax(125px, 1fr) minmax(112px, 0.86fr) 28px;
+  }
+
+  .wesight-wechat-publish-actions {
+    flex-wrap: wrap;
   }
 
   .wesight-wechat-publish-state {
