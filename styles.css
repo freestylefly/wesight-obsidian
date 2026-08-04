@@ -2835,6 +2835,31 @@ button.wesight-share-primary-button.is-wechat:hover {
   overflow: hidden;
 }
 
+.wesight-wechat-preview-brand {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.wesight-wechat-preview-logo {
+  display: block;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+}
+
+.wesight-wechat-preview-brand-text {
+  margin: 0;
+  color: var(--text-normal);
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+}
+
 .wesight-wechat-preview-header {
   display: flex;
   min-height: 52px;
@@ -2851,6 +2876,9 @@ button.wesight-share-primary-button.is-wechat:hover {
 .wesight-wechat-preview-header-actions {
   display: flex;
   align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  margin-inline-start: auto;
 }
 
 .wesight-wechat-preview-header-actions .clickable-icon.is-stop {

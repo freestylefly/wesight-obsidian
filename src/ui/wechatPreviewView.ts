@@ -10,7 +10,10 @@ import {
   WorkspaceLeaf,
 } from 'obsidian';
 
+import wesightLogo from '../../assets/wesight-logo.png';
+
 import { CloudAuthService } from '../share/cloudAuth';
+import type { CloudUser } from '../share/types';
 import { CloudApiError } from '../share/cloudApi';
 import { WeChatCloudApi } from '../wechat/cloudApi';
 import path from 'path';
@@ -104,6 +107,7 @@ export class WeChatPreviewView extends ItemView {
   private pendingThemeId: WeChatThemeId | null = null;
   private pendingCustomTheme: WeChatCustomThemePreferences | null = null;
   private streamingThemeHtml: string | null = null;
+  private accountMenu: Menu | null = null;
   private streamingPreviewIframe: HTMLIFrameElement | null = null;
   private streamingPreviewTimer: number | null = null;
   private lastStreamingPreviewAt = 0;
@@ -294,30 +298,25 @@ export class WeChatPreviewView extends ItemView {
 
   private renderHeader(parent: HTMLElement): void {
     const header = parent.createDiv({ cls: 'wesight-wechat-preview-header' });
-    const identity = header.createDiv({ cls: 'wesight-wechat-preview-identity' });
-    identity.createEl('strong', { text: '公众号预览' });
-    if (this.connection) {
-      const account = identity.createDiv({ cls: 'wesight-wechat-preview-account-chip' });
-      account.createSpan({
-        cls: 'wesight-wechat-preview-avatar',
-        text: (this.connection.displayName || '微').slice(-1),
-      });
-      account.createSpan({ text: this.connection.displayName || '微信公众号' });
-    } else {
-      identity.createSpan({
-        cls: 'wesight-wechat-preview-note-name',
-        text: this.file?.basename ?? '当前笔记',
-      });
-    }
+    const brand = header.createDiv({ cls: 'wesight-wechat-preview-brand' });
+    brand.createEl('img', {
+      cls: 'wesight-wechat-preview-logo',
+      attr: {
+        src: wesightLogo,
+        alt: '',
+        'aria-hidden': 'true',
+      },
+    });
+    brand.createEl('h4', { text: 'WeSight', cls: 'wesight-wechat-preview-brand-text' });
+
     const actions = header.createDiv({ cls: 'wesight-wechat-preview-header-actions' });
-    const refresh = header.createEl('button', {
-      cls: 'clickable-icon',
+    const refresh = actions.createEl('button', {
+      cls: 'clickable-icon wesight-header-btn',
       attr: {
         type: 'button',
         'aria-label': this.themeGenerationController ? '停止公众号主题生成' : '刷新公众号排版',
       },
     });
-    actions.appendChild(refresh);
     setIcon(refresh, this.themeGenerationController ? 'square' : 'refresh-cw');
     refresh.toggleClass('is-stop', Boolean(this.themeGenerationController));
     refresh.disabled = this.loading
@@ -327,6 +326,104 @@ export class WeChatPreviewView extends ItemView {
       if (this.themeGenerationController) this.stopThemeGeneration();
       else void this.refreshPreview();
     };
+
+    this.renderAccountControl(actions);
+  }
+
+  private renderAccountControl(parent: HTMLElement): void {
+    parent.empty();
+    const user = this.options.auth.getCurrentUser();
+
+    if (!user) {
+      const login = parent.createEl('button', {
+        cls: 'wesight-login-button',
+        text: '登录',
+        attr: {
+          type: 'button',
+          'aria-label': '登录 WeSight',
+        },
+      });
+      login.onclick = () => this.options.auth.startLogin();
+      return;
+    }
+
+    const account = parent.createEl('button', {
+      cls: 'clickable-icon wesight-account-button',
+      attr: {
+        type: 'button',
+        'aria-label': `${user.nickname}，打开账户菜单`,
+        title: user.nickname,
+        'aria-haspopup': 'menu',
+      },
+    });
+    const avatar = account.createSpan({ cls: 'wesight-account-avatar' });
+    this.renderUserAvatar(avatar, user);
+    account.onclick = (event) => {
+      event.stopPropagation();
+      this.openAccountMenu(account, user);
+    };
+    parent.appendChild(account);
+  }
+
+  private renderUserAvatar(parent: HTMLElement, user: CloudUser): void {
+    parent.empty();
+    const renderFallback = () => {
+      parent.empty();
+      const icon = parent.createSpan({ cls: 'wesight-account-avatar-fallback' });
+      setIcon(icon, 'user-round');
+    };
+    if (!user.avatarUrl) {
+      renderFallback();
+      return;
+    }
+    const image = parent.createEl('img', {
+      cls: 'wesight-account-avatar-image',
+      attr: {
+        src: user.avatarUrl,
+        alt: '',
+      },
+    });
+    image.decoding = 'async';
+    image.referrerPolicy = 'no-referrer';
+    image.onerror = renderFallback;
+  }
+
+  private openAccountMenu(anchor: HTMLElement, user: CloudUser): void {
+    this.accountMenu?.hide();
+    const menu = new Menu();
+    const profile = createFragment();
+    const profileRow = createDiv();
+    profileRow.className = 'wesight-account-menu-profile';
+    const avatar = createSpan();
+    avatar.className = 'wesight-account-avatar wesight-account-menu-avatar';
+    this.renderUserAvatar(avatar, user);
+    const nickname = createSpan();
+    nickname.className = 'wesight-account-menu-nickname';
+    nickname.textContent = user.nickname;
+    profileRow.append(avatar, nickname);
+    profile.append(profileRow);
+    menu.addItem(item => item
+      .setTitle(profile)
+      .setIsLabel(true));
+    menu.addSeparator();
+    menu.addItem(item => item
+      .setTitle('退出登录')
+      .setIcon('log-out')
+      .onClick(() => {
+        this.options.auth.clearSession();
+        new Notice('已退出 WeSight。');
+      }));
+    menu.onHide(() => {
+      if (this.accountMenu === menu) this.accountMenu = null;
+    });
+    const bounds = anchor.getBoundingClientRect();
+    const accountMenuWidth = 96;
+    menu.showAtPosition({
+      x: Math.max(8, bounds.right - accountMenuWidth),
+      y: bounds.bottom + 4,
+      width: accountMenuWidth,
+    });
+    this.accountMenu = menu;
   }
 
   private renderLogin(parent: HTMLElement): void {
