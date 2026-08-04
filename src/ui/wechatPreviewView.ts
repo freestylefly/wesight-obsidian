@@ -538,7 +538,7 @@ export class WeChatPreviewView extends ItemView {
     });
     const preview = tabs.createEl('button', {
       cls: this.activeTab === 'preview' ? 'is-active' : '',
-      text: '预览',
+      text: `公众号预览（${this.connection?.displayName || '公众号'}）`,
       attr: {
         type: 'button',
         role: 'tab',

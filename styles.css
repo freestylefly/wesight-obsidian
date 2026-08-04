@@ -2939,6 +2939,7 @@ button.wesight-share-primary-button.is-wechat:hover {
 .wesight-wechat-preview-tabs > button {
   position: relative;
   display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -2949,6 +2950,9 @@ button.wesight-share-primary-button.is-wechat:hover {
   box-shadow: none;
   color: var(--text-muted);
   font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wesight-wechat-preview-tabs > button:hover {
