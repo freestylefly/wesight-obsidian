@@ -23,6 +23,7 @@ export async function chargeWeChatTitleGeneration(
       contentType: 'application/json',
       body: JSON.stringify({ cangheStyle: options.cangheStyle }),
       headers,
+      throw: false,
     });
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : '网络错误，请重试');
