@@ -4,6 +4,12 @@ import path from 'path';
 import type { RuntimeManager } from '../runtime/runtimeManager';
 import type { WeSightObsidianSettings } from '../types';
 import type { WeChatPreviewSnapshot } from '../wechat/types';
+import type { CloudAuthService } from '../share/cloudAuth';
+import { openBillingModal } from './billingModal';
+import { CloudApiError } from '../share/cloudApi';
+import type { CloudBillingSummary } from '../share/types';
+import { chargeWeChatTitleGeneration } from '../wechat/titleGeneration';
+import { CANGHE_TITLE_SKILL_PROMPT } from '../wechat/bundledCangheTitle';
 import { createId } from '../utils/id';
 import { ensureDir, safeRemoveDir } from '../utils/fs';
 import { tmpDir } from '../paths';
@@ -13,6 +19,7 @@ export interface WeChatTitleGeneratorOptions {
   runtimeManager: RuntimeManager;
   getSettings: () => WeSightObsidianSettings;
   snapshot: WeChatPreviewSnapshot;
+  auth: CloudAuthService;
 }
 
 export function promptForWeChatTitles(
@@ -33,6 +40,7 @@ class GenerateWeChatTitlesModal extends Modal {
   private suggestions: string[] = [];
   private controller: AbortController | null = null;
   private selected: string | null = null;
+  private useCangheSkill = false;
 
   constructor(
     app: App,
@@ -59,7 +67,7 @@ class GenerateWeChatTitlesModal extends Modal {
     contentEl.createEl('h2', { text: 'AI 生成爆款标题' });
     contentEl.createEl('p', {
       cls: 'wesight-title-generator-intro',
-      text: '将基于当前文章内容和当前配置的模型生成 5 个标题，可重复生成。',
+      text: '将基于当前文章内容和当前配置的模型生成 5 个标题，可重复生成。勾选“苍何同款”将按苍何爆款标题风格生成并消耗 1 积分。',
     });
 
     new Setting(contentEl)
@@ -72,6 +80,16 @@ class GenerateWeChatTitlesModal extends Modal {
           this.requirement = value;
         });
         text.inputEl.rows = 3;
+      });
+
+    new Setting(contentEl)
+      .setName('使用苍何同款爆款标题')
+      .setDesc('按苍何本人爆款标题风格生成（消耗 1 积分）')
+      .addToggle(toggle => {
+        toggle.setValue(this.useCangheSkill);
+        toggle.onChange(value => {
+          this.useCangheSkill = value;
+        });
       });
 
     const actions = new Setting(contentEl);
@@ -148,6 +166,26 @@ class GenerateWeChatTitlesModal extends Modal {
     this.suggestions = [];
     this.render();
 
+    if (this.useCangheSkill) {
+      try {
+        await chargeWeChatTitleGeneration(this.options.auth, {
+          cangheStyle: true,
+          idempotencyKey: crypto.randomUUID(),
+        });
+      } catch (error) {
+        this.generating = false;
+        if (error instanceof CloudApiError && error.status === 402) {
+          openBillingModal(this.app, this.options.auth, error.data as CloudBillingSummary);
+          if (this.contentEl.isConnected) this.render();
+          return;
+        }
+        this.error = error instanceof Error ? error.message : '扣费失败';
+        this.suggestions = [];
+        if (this.contentEl.isConnected) this.render();
+        return;
+      }
+    }
+
     const runDir = path.join(tmpDir(process.env), 'wechat-title-runs', createId('run'));
     ensureDir(runDir);
     try {
@@ -167,6 +205,7 @@ class GenerateWeChatTitlesModal extends Modal {
         model: settings.localModelByAgent[agentId] || undefined,
         planMode: false,
         textOnly: true,
+        systemPrompt: this.useCangheSkill ? CANGHE_TITLE_SKILL_PROMPT : undefined,
         signal: controller.signal,
       }, event => {
         if (event.type === 'text') {

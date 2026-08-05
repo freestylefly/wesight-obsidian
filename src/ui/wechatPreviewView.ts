@@ -915,6 +915,7 @@ export class WeChatPreviewView extends ItemView {
         runtimeManager: this.options.runtimeManager,
         getSettings: this.options.getSettings,
         snapshot: this.preparedSnapshot(),
+        auth: this.options.auth,
       });
       if (selected !== null) {
         this.titleValue = selected;
