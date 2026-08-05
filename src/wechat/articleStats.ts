@@ -75,8 +75,37 @@ export async function fetchWeChatArticleStats(
   return {
     code: json.code ?? 0,
     message: json.message ?? '成功',
-    data: (json.data ?? null) as Record<string, unknown> | null,
+    data: normalizeArticleStatsData(json.data),
   };
+}
+
+function normalizeArticleStatsData(data: unknown): Record<string, unknown> | null {
+  if (data === null || data === undefined) return null;
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof data !== 'object') return null;
+  // 解包 dajiala 可能嵌套的 { code, message, data } 信封
+  for (let depth = 0; depth < 3; depth += 1) {
+    const envelope = data as Record<string, unknown>;
+    if (typeof envelope.code === 'number' && 'data' in envelope) {
+      data = envelope.data;
+      if (typeof data === 'string') {
+        try {
+          data = JSON.parse(data);
+        } catch {
+          return null;
+        }
+      }
+    } else {
+      break;
+    }
+  }
+  return data as Record<string, unknown> | null;
 }
 
 export function resolveErrorMessage(error: unknown): string {
