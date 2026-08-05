@@ -14,6 +14,7 @@ import { recordValue } from '../utils/records';
 import type { WeChatCloudApi } from '../wechat/cloudApi';
 import { FeishuSharePanel } from './feishuSharePanel';
 import { confirmShareAction } from './shareConfirm';
+import { openBillingModal } from './billingModal';
 import { WeChatSharePanel } from './wechatSharePanel';
 
 export type SharePopoverTab = 'internet' | 'feishu' | 'wechat';
@@ -87,6 +88,7 @@ class SharePopover {
   private error: string | null = null;
   private staleShareId = false;
   private duplicatePath: string | null = null;
+  private publishAttempt: { signature: string; idempotencyKey: string } | null = null;
   private loadVersion = 0;
   private authUnsubscribe: (() => void) | null = null;
   private readonly feishuPanel: FeishuSharePanel;
@@ -331,7 +333,7 @@ class SharePopover {
     notice.createSpan({ text: '登录凭据由 Obsidian 安全存储保存。' });
     const login = parent.createEl('button', {
       cls: 'wesight-share-primary-button',
-      text: this.loginPending ? '等待登录完成' : '登录 WeSight',
+      text: this.loginPending ? '等待登录完成' : '请先登录WeSight',
       attr: { type: 'button' },
     });
     login.disabled = this.loginPending;
@@ -581,16 +583,35 @@ class SharePopover {
         await this.setShareId(null);
         this.shareId = null;
       }
-      const state = await this.api.createShare(this.snapshot!);
+      const publishSignature = `new:${this.snapshot!.contentHash}:${this.snapshot!.title}`;
+      if (this.publishAttempt?.signature !== publishSignature) {
+        this.publishAttempt = {
+          signature: publishSignature,
+          idempotencyKey: crypto.randomUUID(),
+        };
+      }
+      const publishIdempotencyKey = this.publishAttempt.idempotencyKey;
       try {
-        await this.setShareId(state.id);
+        const state = await this.api.createShare(this.snapshot!, publishIdempotencyKey);
+        try {
+          await this.setShareId(state.id);
+        } catch (error) {
+          await this.api.revokeShare(state.id).catch(() => undefined);
+          throw error;
+        }
+        this.shareId = state.id;
+        this.shareState = state;
+        this.publishAttempt = null;
+        void this.auth.refreshBillingSummary().catch(() => undefined);
+        new Notice('文章已发布到互联网。');
       } catch (error) {
-        await this.api.revokeShare(state.id).catch(() => undefined);
+        if (error instanceof CloudApiError && error.status === 402) {
+          const latest = await this.auth.refreshBillingSummary(false).catch(() => null);
+          if (latest) openBillingModal(this.app, this.auth, latest);
+          return;
+        }
         throw error;
       }
-      this.shareId = state.id;
-      this.shareState = state;
-      new Notice('文章已发布到互联网。');
     });
   }
 

@@ -13,6 +13,7 @@ interface ApiEnvelope<T> {
   code: number;
   data?: T;
   message?: string;
+  error?: string;
 }
 
 export class CloudApiError extends Error {
@@ -35,13 +36,17 @@ export class ShareCloudApi {
     });
   }
 
-  async createShare(snapshot: ShareSnapshot): Promise<ShareState> {
+  async createShare(
+    snapshot: ShareSnapshot,
+    idempotencyKey?: string,
+  ): Promise<ShareState> {
     const prepared = await this.prepareSnapshot(snapshot, []);
     return this.request<ShareState>({
       url: `${API_BASE_URL}/api/shares`,
       method: 'POST',
       contentType: 'application/json',
       body: JSON.stringify(prepared),
+      ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
     });
   }
 
@@ -138,7 +143,12 @@ export class ShareCloudApi {
         this.auth.clearSession();
         throw new CloudAuthRequiredError();
       }
-      throw new CloudApiError(payload.message || 'WeSight Cloud request failed', response.status);
+      throw new CloudApiError(
+        payload.message || 'WeSight Cloud request failed',
+        response.status,
+        payload.error,
+        payload.data,
+      );
     }
     return payload.data;
   }
