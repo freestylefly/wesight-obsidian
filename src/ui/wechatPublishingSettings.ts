@@ -69,8 +69,7 @@ export class WeChatPublishingSettings {
     }
     this.renderEgress(section);
     this.renderConnectionForm(section);
-    if (this.connection) this.renderConnectedTools(section);
-    this.renderArticleStatsSettings(section);
+   if (this.connection) this.renderConnectedTools(section);
   }
 
   private async load(): Promise<void> {
@@ -215,35 +214,6 @@ export class WeChatPublishingSettings {
     });
   }
 
-  private renderArticleStatsSettings(section: HTMLElement): void {
-    const settings = this.options.getSettings();
-    new Setting(section)
-      .setName('公众号数据监控 key')
-      .setDesc('获取公众号文章数据监控 key，可关注微信公众号「苍何」。')
-      .addText(text => {
-        text.inputEl.type = 'password';
-        text
-          .setPlaceholder('例如 jzl...')
-          .setValue(settings.wechatArticleStatsKey)
-          .onChange(async value => {
-            settings.wechatArticleStatsKey = value.trim();
-            await this.options.saveSettings();
-          });
-      });
-    new Setting(section)
-      .setName('公众号数据监控附加码')
-      .setDesc('若已获取附加码，请填写此项。')
-      .addText(text => {
-        text.inputEl.type = 'password';
-        text
-          .setPlaceholder('可选')
-          .setValue(settings.wechatArticleStatsVerifyCode)
-          .onChange(async value => {
-            settings.wechatArticleStatsVerifyCode = value.trim();
-            await this.options.saveSettings();
-          });
-      });
-  }
 
   private async disconnect(): Promise<void> {
     const confirmed = await confirmShareAction(this.options.app, {

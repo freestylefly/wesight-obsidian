@@ -1,6 +1,7 @@
 import { requestUrl } from 'obsidian';
 
-export const DAJIALA_READ_ZAN_PRO_URL = 'https://www.dajiala.com/fbmain/monitor/v3/read_zan_pro';
+import { CloudApiError } from '../share/cloudApi';
+import { CloudAuthService } from '../share/cloudAuth';
 
 export interface ArticleStatsResult {
   code: number;
@@ -8,8 +9,6 @@ export interface ArticleStatsResult {
   data: Record<string, unknown> | null;
 }
 
-const ARTICLE_STATS_KEY_MISSING_MESSAGE = '尚未配置公众号数据监控 key，请在 WeSight 设置的微信公众号区域填写。';
-export { ARTICLE_STATS_KEY_MISSING_MESSAGE };
 export class ArticleStatsError extends Error {
   constructor(message: string, readonly code: number) {
     super(message);
@@ -28,66 +27,63 @@ const ERROR_MESSAGES: Record<number | string, string> = {
   '50000': '内部服务器错误',
 };
 
-function encodeFormBody(params: Record<string, string>): string {
-  return Object.entries(params)
-    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
-    .join('&');
-}
-
 export async function fetchWeChatArticleStats(
   url: string,
-  key: string,
-  verifyCode?: string,
+  auth: CloudAuthService,
 ): Promise<ArticleStatsResult> {
-  if (!key.trim()) {
-    throw new ArticleStatsError(ARTICLE_STATS_KEY_MISSING_MESSAGE, -2);
-  }
-
-  const bodyParams: Record<string, string> = {
-    url,
-    key: key.trim(),
-  };
-  if (verifyCode?.trim()) {
-    bodyParams.verifycode = verifyCode.trim();
-  }
-
+  const token = await auth.getAccessToken();
   let response: Awaited<ReturnType<typeof requestUrl>>;
   try {
     response = await requestUrl({
-      url: DAJIALA_READ_ZAN_PRO_URL,
+      url: 'https://api.wesight.ai/api/wechat/article-stats',
       method: 'POST',
-      contentType: 'application/x-www-form-urlencoded',
-      body: encodeFormBody(bodyParams),
+      contentType: 'application/json',
+      body: JSON.stringify({ url }),
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     });
   } catch (error) {
     throw new ArticleStatsError(error instanceof Error ? error.message : '网络错误，请重试1~3次', -3);
   }
 
-  const json = response.json as { code?: number; msg?: string; data?: unknown; message?: string } | null;
+  const json = response.json as {
+    code?: number;
+    message?: string;
+    error?: string;
+    data?: unknown;
+  } | null;
+
+  if (response.status === 402 && json?.data) {
+    throw new CloudApiError(
+      json.message || '积分不足，请充值积分或开通创作者会员',
+      response.status,
+      json.error,
+      json.data,
+    );
+  }
+
   if (!json || typeof json !== 'object') {
     throw new ArticleStatsError('接口返回格式异常', -3);
   }
 
-  if (json.message === 'Internal Server Error') {
-    throw new ArticleStatsError('网络错误，请重试1~3次', -3);
-  }
-
-  const code = typeof json.code === 'number' ? json.code : -3;
-  const message = json.msg ?? ERROR_MESSAGES[code] ?? ERROR_MESSAGES[String(code)] ?? '接口返回异常';
-
-  if (code !== 0) {
-    throw new ArticleStatsError(message, code);
+  if (response.status >= 400 || json.code !== 0) {
+    const message = json.message ?? ERROR_MESSAGES[json.code ?? -3] ?? '接口返回异常';
+    throw new ArticleStatsError(message, json.code ?? -3);
   }
 
   return {
-    code,
-    message,
+    code: json.code ?? 0,
+    message: json.message ?? '成功',
     data: (json.data ?? null) as Record<string, unknown> | null,
   };
 }
 
 export function resolveErrorMessage(error: unknown): string {
   if (error instanceof ArticleStatsError) {
+    return error.message;
+  }
+  if (error instanceof CloudApiError) {
     return error.message;
   }
   return error instanceof Error ? error.message : '加载文章数据失败';

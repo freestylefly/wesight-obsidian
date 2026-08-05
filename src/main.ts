@@ -101,13 +101,14 @@ export default class WeSightPlugin extends Plugin {
         openSettings: () => this.openSettings('general'),
       }),
     );
-    this.registerView(
-      WESIGHT_WECHAT_ARTICLE_STATS_VIEW_TYPE,
-      (leaf: WorkspaceLeaf) => new WeChatArticleStatsView(leaf, {
+   this.registerView(
+     WESIGHT_WECHAT_ARTICLE_STATS_VIEW_TYPE,
+     (leaf: WorkspaceLeaf) => new WeChatArticleStatsView(leaf, {
+        auth: this.cloudAuth,
         getSettings: () => this.settings,
-        openSettings: () => this.openSettings('general'),
-      }),
-    );
+       openSettings: () => this.openSettings('general'),
+     }),
+   );
 
     this.addRibbonIcon('sparkles', 'Open WeSight', () => {
       void this.activateView();
@@ -348,14 +349,8 @@ function normalizeSettings(value: Partial<WeSightObsidianSettings> | null | unde
     wechatCustomThemeName: typeof value?.wechatCustomThemeName === 'string'
       ? value.wechatCustomThemeName
       : '',
-   wechatCustomThemeDescription: typeof value?.wechatCustomThemeDescription === 'string'
-     ? value.wechatCustomThemeDescription
-     : '',
-    wechatArticleStatsKey: typeof value?.wechatArticleStatsKey === 'string'
-      ? value.wechatArticleStatsKey
+    wechatCustomThemeDescription: typeof value?.wechatCustomThemeDescription === 'string'
+      ? value.wechatCustomThemeDescription
       : '',
-    wechatArticleStatsVerifyCode: typeof value?.wechatArticleStatsVerifyCode === 'string'
-      ? value.wechatArticleStatsVerifyCode
-      : '',
- };
+  };
 }

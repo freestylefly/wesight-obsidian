@@ -8,17 +8,20 @@ import {
 } from 'obsidian';
 
 import {
-  ARTICLE_STATS_KEY_MISSING_MESSAGE,
   fetchWeChatArticleStats,
   resolveErrorMessage,
   type ArticleStatsResult,
 } from '../wechat/articleStats';
+import { CloudApiError } from '../share/cloudApi';
+import type { CloudAuthService } from '../share/cloudAuth';
+import { openBillingModal } from './billingModal';
 import { WECHAT_ARTICLE_URL_FRONTMATTER_KEY, normalizeWeChatArticleUrl } from '../wechat/frontmatter';
 import type { WeSightObsidianSettings } from '../types';
 
 export const WESIGHT_WECHAT_ARTICLE_STATS_VIEW_TYPE = 'wesight-wechat-article-stats';
 
 export interface WeChatArticleStatsViewDeps {
+  auth: CloudAuthService;
   getSettings: () => WeSightObsidianSettings;
   openSettings: () => void;
 }
@@ -109,21 +112,21 @@ export class WeChatArticleStatsView extends ItemView {
 
   private async refresh(): Promise<void> {
     
-    this.readArticleUrl();
-    this.render();
-    if (!this.articleUrl) return;
-    const settings = this.deps.getSettings();
-    this.loading = true;
-    this.error = null;
-    this.render();
+   this.readArticleUrl();
+   this.render();
+   if (!this.articleUrl) return;
+   this.loading = true;
+   this.error = null;
+   this.render();
     try {
-      this.data = await fetchWeChatArticleStats(
-        this.articleUrl,
-        settings.wechatArticleStatsKey,
-        settings.wechatArticleStatsVerifyCode,
-      );
+      this.data = await fetchWeChatArticleStats(this.articleUrl, this.deps.auth);
     } catch (error) {
-      this.error = resolveErrorMessage(error);
+      if (error instanceof CloudApiError && error.status === 402 && error.data) {
+        openBillingModal(this.app, this.deps.auth, error.data as import('../share/types').CloudBillingSummary);
+        this.error = error.message;
+      } else {
+        this.error = resolveErrorMessage(error);
+      }
       this.data = null;
     } finally {
       this.loading = false;
@@ -207,15 +210,6 @@ export class WeChatArticleStatsView extends ItemView {
     const copy = error.createDiv();
     copy.createEl('strong', { text: '加载失败' });
     copy.createSpan({ text: message });
-    if (message === ARTICLE_STATS_KEY_MISSING_MESSAGE) {
-      const openSettings = this.contentEl.createEl('button', {
-        cls: 'wesight-wechat-article-stats-retry',
-        text: '前往设置',
-        attr: { type: 'button' },
-      });
-      openSettings.onclick = () => this.deps.openSettings();
-      return;
-    }
     const retry = this.contentEl.createEl('button', {
       cls: 'wesight-wechat-article-stats-retry',
       text: '重试',

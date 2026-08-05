@@ -215,13 +215,9 @@ export interface WeSightObsidianSettings {
   /** Theme used by the WeChat preview and draft publisher. */
  wechatThemeId: WeChatThemeId;
  /** User-facing name of the reusable AI-generated WeChat theme. */
- wechatCustomThemeName: string;
- /** Style brief used to regenerate the reusable AI-generated WeChat theme. */
- wechatCustomThemeDescription: string;
-  /** API key for the dajiala WeChat article stats endpoint. */
-  wechatArticleStatsKey: string;
-  /** Optional verify code for the dajiala WeChat article stats endpoint. */
-  wechatArticleStatsVerifyCode: string;
+wechatCustomThemeName: string;
+/** Style brief used to regenerate the reusable AI-generated WeChat theme. */
+wechatCustomThemeDescription: string;
 }
 
 export const DEFAULT_CONFIG_SOURCES: ConfigSourcesByAgent = {
@@ -259,9 +255,7 @@ export const DEFAULT_SETTINGS: WeSightObsidianSettings = {
   planModeDefault: false,
   maxContextFileChars: 40_000,
  feishuFolderToken: '',
- wechatThemeId: 'canghe-style',
- wechatCustomThemeName: '',
- wechatCustomThemeDescription: '',
-  wechatArticleStatsKey: '',
-  wechatArticleStatsVerifyCode: '',
+wechatThemeId: 'canghe-style',
+wechatCustomThemeName: '',
+wechatCustomThemeDescription: '',
 };
