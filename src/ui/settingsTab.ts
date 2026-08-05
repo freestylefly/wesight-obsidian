@@ -246,12 +246,10 @@ export class WeSightSettingTab extends PluginSettingTab {
       this.publishingSettings.activate();
       this.renderEnvironment(panel);
       this.renderPrivacy(panel);
-      this.renderDiagnostics(panel);
       return;
     }
     this.renderAgentSettings(panel, this.activeTab);
     if (this.activeTab !== 'codex') this.renderProfiles(panel, this.activeTab);
-    this.renderDiagnostics(panel, this.activeTab);
   }
 
   private renderTabs(containerEl: HTMLElement): void {
@@ -1217,36 +1215,7 @@ export class WeSightSettingTab extends PluginSettingTab {
     section.createEl('p', { text: `Logs: ${logsDir()}` });
   }
 
-  private renderDiagnostics(containerEl: HTMLElement, agentFilter?: AgentId): void {
-    const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
-    new Setting(section).setName('Diagnostics').setHeading();
-    const settings = this.deps.getSettings();
-    for (const agentId of agentFilter ? [agentFilter] : AGENT_IDS) {
-      const status = new RuntimeDiscovery({
-        configuredPaths: settings.configuredPaths,
-        configSources: settings.configSources,
-      }).resolve(agentId, { withVersion: true });
-      section.createEl('pre', {
-        text: JSON.stringify({
-          agent: agentId,
-          found: status.found,
-          source: status.source,
-          binaryPath: status.binaryPath,
-          version: status.version,
-          localConfigFound: status.localConfigFound,
-          configSource: status.configSource,
-          localModel: settings.localModelByAgent[agentId],
-        }, null, 2),
-      });
-    }
-    new Setting(section)
-      .addButton(button => button.setButtonText('Refresh').onClick(() => {
-        invalidateRuntimeDiscoveryCache();
-        this.display();
-      }));
-  }
 }
-
 function parseModelList(value: string): string[] {
   return [...new Set(value
     .split(/[\n,]/)
