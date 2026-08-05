@@ -1058,6 +1058,45 @@ button.wesight-send-btn svg {
   padding: 12px 0;
   border-top: 1px solid var(--background-modifier-border);
 }
+.wesight-skills-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+.wesight-skills-table th,
+.wesight-skills-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.wesight-skills-table th {
+  font-weight: 600;
+  color: var(--text-muted);
+  background-color: var(--background-secondary);
+}
+
+.wesight-skills-table td {
+  vertical-align: top;
+}
+
+.wesight-skills-table .wesight-skill-name {
+  font-weight: 600;
+  white-space: nowrap;
+  width: 1%;
+}
+
+.wesight-skills-table .wesight-skill-description {
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.wesight-skills-footer {
+  margin-top: 12px;
+  text-align: right;
+}
 
 .wesight-settings-tabs-wrap {
   width: min(100%, 680px);
