@@ -105,7 +105,7 @@ export class WeChatSharePanel {
     this.renderHero(parent, '微信公众号', '登录 WeSight 后即可配置公众号并同步草稿。');
     const button = parent.createEl('button', {
       cls: 'wesight-share-primary-button is-wechat',
-      text: this.loginPending ? '等待登录完成' : '登录 WeSight',
+      text: this.loginPending ? '等待登录完成' : '请先登录WeSight',
       attr: { type: 'button' },
     });
     button.disabled = this.loginPending;

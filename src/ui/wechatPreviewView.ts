@@ -449,7 +449,7 @@ export class WeChatPreviewView extends ItemView {
     empty.createEl('p', { text: '登录后即可连接公众号并同步后台草稿箱。' });
     const button = empty.createEl('button', {
       cls: 'mod-cta',
-      text: '登录 WeSight',
+      text: '请先登录WeSight',
     });
     button.onclick = () => this.options.auth.startLogin();
   }

@@ -1647,7 +1647,7 @@ export class WeSightChatView extends ItemView {
       this.showSuggestions(commands.map(command => ({
         label: command.label,
         description: command.description,
-        apply: () => this.replaceCurrentToken(`/${slashQuery}`, command.insertText),
+        apply: () => this.selectSkill(command, slashQuery),
       })));
       return;
     }
