@@ -368,6 +368,51 @@ body.theme-dark .wesight-message.is-user {
   color: var(--text-error);
 }
 
+.wesight-skill-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 12px 0;
+  padding: 6px 10px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-normal);
+  max-width: calc(100% - 24px);
+}
+
+.wesight-skill-pill-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-accent);
+  flex-shrink: 0;
+}
+
+.wesight-skill-pill-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wesight-skill-pill-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  margin-left: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.wesight-skill-pill-remove:hover {
+  color: var(--text-normal);
+}
+
 .wesight-input-container {
   position: relative;
   padding: 12px;

@@ -19,7 +19,7 @@ import type {
 } from '../types';
 import { createId } from '../utils/id';
 import { resolveMentions, findMentionQuery, findSlashQuery } from '../utils/context';
-import { filterSlashCommands, loadChatSkills } from '../utils/slashCommands';
+import { filterSlashCommands, loadChatSkills, type SlashCommand } from '../utils/slashCommands';
 import { getVaultBasePath, resolveVaultAbsolutePath, guessMimeType } from '../utils/vault';
 import { RuntimeDiscovery } from '../runtime/discovery';
 import { RuntimeManager } from '../runtime/runtimeManager';
@@ -52,6 +52,8 @@ export class WeSightChatView extends ItemView {
   private conversation: StoredConversation | null = null;
   private agentId: AgentId = 'claude';
   private planMode = false;
+  private selectedSkill: SlashCommand | null = null;
+  private skillPillEl: HTMLElement | null = null;
   private messagesEl!: HTMLElement;
   private inputEl!: HTMLTextAreaElement;
   private statusEl!: HTMLElement;
@@ -384,6 +386,7 @@ export class WeSightChatView extends ItemView {
       },
     });
     this.inputEl.value = pendingInput;
+    this.renderSkillPill();
     this.inputEl.oninput = () => void this.updateSuggestions();
     this.inputEl.onkeydown = event => {
       if (event.key === 'Enter' && !event.shiftKey) {
@@ -1370,7 +1373,8 @@ export class WeSightChatView extends ItemView {
     if (this.running) return;
     this.cancelledByUser = false;
     const rawPrompt = this.inputEl.value.trim();
-    if (!rawPrompt) return;
+    if (!rawPrompt && !this.selectedSkill) return;
+    const skillPrompt = this.selectedSkill?.insertText ?? '';
     this.ensureConversation();
     const conversation = this.conversation;
     if (!conversation) return;
@@ -1382,9 +1386,12 @@ export class WeSightChatView extends ItemView {
     const settings = this.deps.getSettings();
     const resolved = await resolveMentions(this.app, rawPrompt, settings.maxContextFileChars);
     const activeContext = await this.resolveActiveEditorContext(settings.maxContextFileChars);
-    const runtimePrompt = activeContext.prompt
+    const userPrompt = activeContext.prompt
       ? `${resolved.prompt}\n\n${activeContext.prompt}`
       : resolved.prompt;
+    const runtimePrompt = skillPrompt
+      ? `${skillPrompt}\n\n${userPrompt}`
+      : userPrompt;
     const attachments = mergeAttachments([...resolved.attachments, ...activeContext.attachments]);
     const userMessage: ChatMessage = {
       id: createId('msg'),
@@ -1403,6 +1410,7 @@ export class WeSightChatView extends ItemView {
     this.renderMessage(userMessage);
     this.inputEl.value = '';
     this.clearSuggestions();
+    this.removeSkill();
 
     const assistantMessage: ChatMessage = {
       id: createId('msg'),
@@ -1679,6 +1687,39 @@ export class WeSightChatView extends ItemView {
   private clearSuggestions(): void {
     this.suggestEl?.remove();
     this.suggestEl = null;
+  }
+
+  private selectSkill(command: SlashCommand, slashQuery: string): void {
+    this.selectedSkill = command;
+    this.replaceCurrentToken(`${slashQuery}`, '');
+    this.renderSkillPill();
+    this.inputEl.focus();
+  }
+
+  private renderSkillPill(): void {
+    this.skillPillEl?.remove();
+    this.skillPillEl = null;
+    if (!this.selectedSkill) return;
+    const wrapper = this.inputEl.parentElement;
+    if (!wrapper) return;
+    const pill = wrapper.createDiv({ cls: 'wesight-skill-pill' });
+    const icon = pill.createSpan({ cls: 'wesight-skill-pill-icon' });
+    setIcon(icon, 'box');
+    pill.createSpan({ cls: 'wesight-skill-pill-name', text: this.selectedSkill.label });
+    const remove = pill.createEl('button', {
+      cls: 'wesight-skill-pill-remove',
+      attr: { type: 'button', 'aria-label': '移除 skill' },
+    });
+    setIcon(remove, 'x');
+    remove.onclick = () => this.removeSkill();
+    wrapper.insertBefore(pill, this.inputEl);
+    this.skillPillEl = pill;
+  }
+
+  private removeSkill(): void {
+    this.selectedSkill = null;
+    this.skillPillEl?.remove();
+    this.skillPillEl = null;
   }
 
   private replaceCurrentToken(token: string, replacement: string): void {
