@@ -13,6 +13,7 @@ import type {
   WeSightObsidianSettings,
 } from '../types';
 import { RuntimeDiscovery, invalidateRuntimeDiscoveryCache } from '../runtime/discovery';
+import { loadLocalSkills, invalidateSkillCache, type LocalSkill } from '../skill/skillDiscovery';
 import type { RuntimeManager } from '../runtime/runtimeManager';
 import type { CloudAuthService } from '../share/cloudAuth';
 import { inferAnthropicAuthMode, requiresProviderApiKey } from '../utils/providerAuth';
@@ -363,6 +364,8 @@ export class WeSightSettingTab extends PluginSettingTab {
           });
       });
 
+    this.renderSkills(section, agentId);
+
     if (agentId === 'codex') {
       const codexStatus = this.deps.runtimeManager.getCodexStatus();
       const modelLabel = codexStatus.currentModel?.displayName ?? codexStatus.currentModelId ?? '等待 Codex App 返回';
@@ -419,6 +422,8 @@ export class WeSightSettingTab extends PluginSettingTab {
             await this.deps.saveSettings();
           });
       });
+
+    this.renderSkills(section, agentId);
   }
 
   private renderProfiles(containerEl: HTMLElement, agentFilter?: AgentId): void {
@@ -1204,6 +1209,50 @@ export class WeSightSettingTab extends PluginSettingTab {
       });
   }
 
+  private renderSkills(containerEl: HTMLElement, agentId: AgentId): void {
+    if (agentId !== 'claude' && agentId !== 'codex') return;
+    void this.loadAndRenderSkills(containerEl, agentId);
+  }
+
+  private async loadAndRenderSkills(containerEl: HTMLElement, agentId: AgentId): Promise<void> {
+    const skills = await loadLocalSkills(agentId);
+    const existing = containerEl.querySelector('.wesight-skills-section');
+    if (existing) existing.remove();
+    if (skills.length === 0) return;
+    const section = containerEl.createDiv({ cls: 'wesight-settings-section wesight-skills-section' });
+    new Setting(section).setName('Skills').setHeading();
+    for (const skill of skills) {
+      const row = section.createDiv({ cls: 'wesight-skill-row' });
+      const info = row.createDiv({ cls: 'wesight-skill-info' });
+      info.createEl('strong', { text: skill.name });
+      info.createEl('small', { text: truncate(skill.description, 120) });
+      const useButton = row.createEl('button', {
+        cls: 'wesight-skill-use-button',
+        text: '使用',
+        attr: { type: 'button' },
+      });
+      useButton.onclick = () => void this.useSkill(skill);
+    }
+    const refresh = section.createEl('button', {
+      cls: 'wesight-skill-refresh-button',
+      text: '刷新',
+      attr: { type: 'button' },
+    });
+    refresh.onclick = () => {
+      invalidateSkillCache(agentId);
+      void this.loadAndRenderSkills(containerEl, agentId);
+    };
+  }
+
+  private async useSkill(skill: LocalSkill): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(skill.description);
+      new Notice(`已复制 ${skill.name} 的 prompt，可在 Chat 输入框粘贴使用。`);
+    } catch {
+      new Notice('复制失败，请手动复制 skill 描述。');
+    }
+  }
+
   private renderPrivacy(containerEl: HTMLElement): void {
     const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
     new Setting(section).setName('Privacy & storage').setHeading();
@@ -1216,6 +1265,11 @@ export class WeSightSettingTab extends PluginSettingTab {
   }
 
 }
+function truncate(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength).trim()}…`;
+}
+
 function parseModelList(value: string): string[] {
   return [...new Set(value
     .split(/[\n,]/)

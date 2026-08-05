@@ -19,7 +19,7 @@ import type {
 } from '../types';
 import { createId } from '../utils/id';
 import { resolveMentions, findMentionQuery, findSlashQuery } from '../utils/context';
-import { filterSlashCommands } from '../utils/slashCommands';
+import { filterSlashCommands, loadChatSkills } from '../utils/slashCommands';
 import { getVaultBasePath, resolveVaultAbsolutePath, guessMimeType } from '../utils/vault';
 import { RuntimeDiscovery } from '../runtime/discovery';
 import { RuntimeManager } from '../runtime/runtimeManager';
@@ -384,7 +384,7 @@ export class WeSightChatView extends ItemView {
       },
     });
     this.inputEl.value = pendingInput;
-    this.inputEl.oninput = () => this.updateSuggestions();
+    this.inputEl.oninput = () => void this.updateSuggestions();
     this.inputEl.onkeydown = event => {
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
@@ -1627,11 +1627,15 @@ export class WeSightChatView extends ItemView {
     return model || selectedProfile.name;
   }
 
-  private updateSuggestions(): void {
+  private async updateSuggestions(): Promise<void> {
     const cursor = this.inputEl.selectionStart ?? this.inputEl.value.length;
     const slashQuery = findSlashQuery(this.inputEl.value, cursor);
     if (slashQuery !== null) {
-      const commands = filterSlashCommands(slashQuery);
+      if (this.agentId !== 'claude' && this.agentId !== 'codex') {
+        this.clearSuggestions();
+        return;
+      }
+      const commands = filterSlashCommands(await loadChatSkills(this.agentId), slashQuery);
       this.showSuggestions(commands.map(command => ({
         label: command.label,
         description: command.description,

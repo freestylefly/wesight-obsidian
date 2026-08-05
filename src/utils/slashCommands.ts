@@ -1,3 +1,6 @@
+import type { AgentId } from '../types';
+import { loadLocalSkills } from '../skill/skillDiscovery';
+
 export interface SlashCommand {
   id: string;
   label: string;
@@ -5,37 +8,25 @@ export interface SlashCommand {
   description: string;
 }
 
-export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
-  {
-    id: 'summarize',
-    label: '/summarize',
-    insertText: 'Summarize the current note and suggest follow-up links.',
-    description: 'Summarize a note',
-  },
-  {
-    id: 'rewrite',
-    label: '/rewrite',
-    insertText: 'Rewrite the selected or referenced text with clearer structure.',
-    description: 'Improve writing',
-  },
-  {
-    id: 'plan',
-    label: '/plan',
-    insertText: 'Create a concise implementation plan for this vault task.',
-    description: 'Plan first',
-  },
-  {
-    id: 'extract',
-    label: '/extract',
-    insertText: 'Extract action items, decisions, and open questions.',
-    description: 'Extract structured notes',
-  },
-];
+export async function loadChatSkills(agentId: AgentId): Promise<SlashCommand[]> {
+  const skills = await loadLocalSkills(agentId);
+  return skills.map(skill => ({
+    id: skill.name,
+    label: `/${skill.name}`,
+    insertText: skill.description,
+    description: truncate(skill.description, 120),
+  }));
+}
 
-export function filterSlashCommands(query: string): SlashCommand[] {
+export function filterSlashCommands(commands: SlashCommand[], query: string): SlashCommand[] {
   const normalized = query.toLowerCase();
-  return BUILTIN_SLASH_COMMANDS.filter(command => (
+  return commands.filter(command => (
     command.label.toLowerCase().includes(normalized)
     || command.description.toLowerCase().includes(normalized)
   ));
+}
+
+function truncate(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength).trim()}…`;
 }
