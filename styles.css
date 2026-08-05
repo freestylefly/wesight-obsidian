@@ -317,6 +317,13 @@ button.wesight-account-button:hover {
   font-size: 14px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.wesight-message.is-assistant ::selection {
+  background: rgba(59, 130, 246, 0.2);
+  color: inherit;
 }
 
 .wesight-message.is-user {
