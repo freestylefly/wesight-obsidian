@@ -87,6 +87,13 @@ export default class WeSightPlugin extends Plugin {
         runtimeManager: this.runtimeManager,
         auth: this.cloudAuth,
         openSettings: () => this.openSettings(),
+        openWeChatPreview: (file?: TFile) => {
+          if (!file) {
+            new Notice('没有打开的笔记，无法预览公众号。');
+            return Promise.resolve();
+          }
+          return this.activateWeChatPreview(file);
+        },
       }),
     );
     this.registerView(

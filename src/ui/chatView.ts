@@ -37,6 +37,7 @@ export interface ChatViewDeps {
   runtimeManager: RuntimeManager;
   auth: CloudAuthService;
   openSettings: () => void;
+  openWeChatPreview: (file?: TFile) => Promise<void>;
 }
 
 interface ActiveEditorContext {
@@ -56,7 +57,6 @@ export class WeSightChatView extends ItemView {
   private skillPillEl: HTMLElement | null = null;
   private messagesEl!: HTMLElement;
   private inputEl!: HTMLTextAreaElement;
-  private statusEl!: HTMLElement;
   private accountSlotEl!: HTMLElement;
   private historyButtonEl!: HTMLButtonElement;
   private historyPopoverEl: HTMLElement | null = null;
@@ -343,7 +343,13 @@ export class WeSightChatView extends ItemView {
     brand.createEl('h4', { text: 'WeSight', cls: 'wesight-title-text' });
 
     const headerActions = header.createDiv({ cls: 'wesight-header-actions' });
-    this.statusEl = headerActions.createSpan({ cls: 'wesight-runtime-status', text: 'Checking...' });
+
+    const wechatPublishButton = headerActions.createEl('button', { cls: 'wesight-wechat-publish-btn' });
+    const wechatIcon = wechatPublishButton.createSpan({ cls: 'wesight-wechat-publish-icon' });
+    setIcon(wechatIcon, 'message-circle');
+    wechatPublishButton.createSpan({ cls: 'wesight-wechat-publish-label', text: '发公众号' });
+    wechatPublishButton.ariaLabel = '打开公众号预览';
+    wechatPublishButton.onclick = () => void this.openWeChatPreview();
 
     const newChatButton = headerActions.createEl('button', { cls: 'clickable-icon wesight-header-btn' });
     setIcon(newChatButton, 'plus');
@@ -1264,31 +1270,6 @@ export class WeSightChatView extends ItemView {
   }
 
   private refreshStatus(): void {
-    const settings = this.deps.getSettings();
-    const status = new RuntimeDiscovery({
-      configuredPaths: settings.configuredPaths,
-      configSources: settings.configSources,
-    }).resolve(this.agentId);
-    const codexStatus = this.agentId === 'codex' ? this.deps.runtimeManager.getCodexStatus() : null;
-    const ready = status.found && (!codexStatus || codexStatus.state === 'ready');
-    const error = Boolean(codexStatus?.state === 'error' || codexStatus?.authenticated === false);
-    this.statusEl.toggleClass('is-ready', ready);
-    this.statusEl.toggleClass('is-missing', !status.found);
-    this.statusEl.toggleClass('is-error', error);
-    this.statusEl.setAttribute('title', codexStatus?.error ?? (status.found ? status.binaryPath ?? '' : status.error ?? ''));
-    this.statusEl.setText(codexStatus?.authenticated === false
-      ? 'Codex sign-in required'
-      : codexStatus
-      ? codexStatus.state === 'ready'
-        ? 'Codex connected'
-        : codexStatus.state === 'connecting'
-          ? 'Codex connecting'
-          : codexStatus.state === 'error'
-            ? 'Codex error'
-            : 'Codex idle'
-      : status.found
-        ? `${status.descriptor.shortName} ready`
-        : `${status.descriptor.shortName} missing`);
     this.updateRunControls();
   }
 
@@ -1759,6 +1740,15 @@ export class WeSightChatView extends ItemView {
     } else {
       new Notice('Note attachment added.');
     }
+  }
+
+  private async openWeChatPreview(): Promise<void> {
+    const file = this.activeEditorContext?.file ?? this.app.workspace.getActiveFile();
+    if (!(file instanceof TFile)) {
+      new Notice('请先打开一篇笔记，再发送公众号预览。');
+      return;
+    }
+    await this.deps.openWeChatPreview(file);
   }
 
   private async resolveActiveEditorContext(maxChars: number): Promise<{ prompt: string; attachments: FileAttachment[] }> {

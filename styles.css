@@ -129,6 +129,44 @@ button.wesight-header-btn.needs-setup {
   color: var(--wesight-brand);
 }
 
+button.wesight-wechat-publish-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--background-modifier-hover);
+  box-shadow: none;
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+button.wesight-wechat-publish-btn:hover {
+  background: var(--background-modifier-active);
+  color: var(--text-normal);
+}
+
+button.wesight-wechat-publish-btn .wesight-wechat-publish-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+button.wesight-wechat-publish-btn .wesight-wechat-publish-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.75px;
+}
+
 .wesight-account-slot {
   display: flex;
   min-width: 26px;
