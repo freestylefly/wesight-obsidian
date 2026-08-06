@@ -255,7 +255,7 @@ export const DEFAULT_SETTINGS: WeSightObsidianSettings = {
   planModeDefault: false,
   maxContextFileChars: 40_000,
  feishuFolderToken: '',
-wechatThemeId: 'canghe-style',
+  wechatThemeId: 'canghe-style-tes',
 wechatCustomThemeName: '',
 wechatCustomThemeDescription: '',
 };

@@ -1,0 +1,103 @@
+{
+  "packId": "canghe-demos",
+  "version": "1.0.0",
+  "source": "https://github.com/freestylefly/wesight-obsidian",
+  "themes": [
+    {
+      "id": "canghe-style-tes",
+      "label": "苍绿",
+      "color": "#2ea765",
+      "cssFile": "themes/canghe-style-tes.css",
+      "features": {
+        "decorateHeading": true,
+        "wrapTables": true,
+        "decorateCode": true,
+        "replaceTaskCheckbox": true
+      }
+    },
+    {
+      "id": "canghe-violet",
+      "label": "暮紫",
+      "color": "#7c3aed",
+      "cssFile": "themes/canghe-violet.css",
+     "features": {
+       "decorateHeading": true,
+       "wrapTables": true,
+       "decorateCode": true,
+       "replaceTaskCheckbox": true
+     }
+    },
+    {
+      "id": "canghe-orange",
+      "label": "暖橙",
+      "color": "#f97316",
+      "cssFile": "themes/canghe-orange.css",
+      "features": {
+        "decorateHeading": true,
+        "wrapTables": true,
+        "decorateCode": true,
+        "replaceTaskCheckbox": true
+      }
+    },
+    {
+      "id": "canghe-cyan",
+      "label": "天青",
+      "color": "#06b6d4",
+      "cssFile": "themes/canghe-cyan.css",
+      "features": {
+        "decorateHeading": true,
+        "wrapTables": true,
+        "decorateCode": true,
+        "replaceTaskCheckbox": true
+      }
+    },
+    {
+      "id": "canghe-red",
+      "label": "绯红",
+      "color": "#ef4444",
+      "cssFile": "themes/canghe-red.css",
+      "features": {
+        "decorateHeading": true,
+        "wrapTables": true,
+        "decorateCode": true,
+        "replaceTaskCheckbox": true
+      }
+    },
+    {
+      "id": "canghe-blue",
+      "label": "海蓝",
+      "color": "#3b82f6",
+      "cssFile": "themes/canghe-blue.css",
+      "features": {
+        "decorateHeading": true,
+        "wrapTables": true,
+        "decorateCode": true,
+        "replaceTaskCheckbox": true
+      }
+    },
+    {
+      "id": "canghe-geek-black",
+      "label": "极客黑",
+      "color": "#1f2937",
+      "cssFile": "themes/canghe-geek-black.css",
+      "features": {
+        "decorateHeading": true,
+        "wrapTables": true,
+        "decorateCode": true,
+        "replaceTaskCheckbox": true
+      }
+    },
+    {
+      "id": "canghe-pink",
+      "label": "樱粉",
+      "color": "#ec4899",
+      "cssFile": "themes/canghe-pink.css",
+      "features": {
+        "decorateHeading": true,
+        "wrapTables": true,
+        "decorateCode": true,
+        "replaceTaskCheckbox": true
+      }
+    }
+  ]
+}

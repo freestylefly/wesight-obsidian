@@ -23,6 +23,7 @@ export class WeChatPublishingSettings {
   private connection: WeChatConnectionState | null | undefined;
   private serviceInfo: WeChatServiceInfo | null = null;
   private loading = false;
+  private loaded = false;
   private operation: string | null = null;
   private error: string | null = null;
   private displayName = '';
@@ -32,7 +33,7 @@ export class WeChatPublishingSettings {
   constructor(private readonly options: WeChatPublishingSettingsOptions) {}
 
   activate(force = false): void {
-    if (this.loading || (this.connection !== undefined && !force)) return;
+    if (this.loading || (this.loaded && !force)) return;
     void this.load();
   }
 
@@ -93,6 +94,7 @@ export class WeChatPublishingSettings {
       this.error = error instanceof Error ? error.message : '无法读取公众号连接';
     } finally {
       this.loading = false;
+      this.loaded = true;
       this.options.requestRender();
     }
   }

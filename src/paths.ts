@@ -45,6 +45,14 @@ export function vaultWesightDir(vaultBasePath: string): string {
   return path.join(vaultBasePath, '.wesight');
 }
 
+ export function vaultPluginDir(configDir: string, pluginId: string): string {
+   return path.join(configDir, 'plugins', pluginId);
+ }
+
+export function vaultTemplateThemePacksDir(pluginDir: string): string {
+  return path.join(pluginDir, 'assets', 'theme');
+}
+
 export function expandHome(value: string): string {
   if (value === '~') return os.homedir();
   if (value.startsWith('~/') || value.startsWith('~\\')) {

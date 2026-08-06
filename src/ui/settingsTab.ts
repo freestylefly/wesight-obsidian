@@ -226,7 +226,9 @@ export class WeSightSettingTab extends PluginSettingTab {
       saveSettings: () => deps.saveSettings(),
     });
     plugin.register(deps.cloudAuth.onChange(() => {
-      if (this.activeTab === 'general') this.display();
+      if (this.activeTab !== 'general') return;
+      this.publishingSettings.activate(true);
+      this.display();
     }));
   }
 

@@ -1,4 +1,11 @@
-import { type App, MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf } from 'obsidian';
+import {
+  type App,
+  MarkdownView,
+  Notice,
+  Plugin,
+  TFile,
+  WorkspaceLeaf,
+} from 'obsidian';
 
 import { DEFAULT_SETTINGS, type WeSightObsidianSettings } from './types';
 import { ProviderStore } from './storage/providerStore';
@@ -14,6 +21,9 @@ import { SharePopoverController } from './ui/sharePopover';
 import { WeChatCloudApi } from './wechat/cloudApi';
 import { WeChatThemeService } from './wechat/themeService';
 import { DEFAULT_WECHAT_THEME_ID, isWeChatThemeId } from './wechat/themes';
+ import { TemplateThemeService } from './wechat/templateThemeService';
+import { obsidianTemplateThemeAdapter } from './wechat/templateThemeAdapter';
+import { setTemplateThemeDefinitions } from './wechat/themes';
 import {
   WeChatPreviewView,
   WESIGHT_WECHAT_PREVIEW_VIEW_TYPE,
@@ -40,6 +50,7 @@ export default class WeSightPlugin extends Plugin {
   shareCloudApi!: ShareCloudApi;
   wechatCloudApi!: WeChatCloudApi;
   wechatThemeService!: WeChatThemeService;
+  wechatTemplateThemeService!: TemplateThemeService;
   larkCli!: LarkCliService;
   sharePopover!: SharePopoverController;
   settingTab!: WeSightSettingTab;
@@ -47,6 +58,12 @@ export default class WeSightPlugin extends Plugin {
   private shareActionElements = new Set<HTMLElement>();
 
   override async onload(): Promise<void> {
+    const pluginDir = this.manifest.dir ?? vaultPluginDir(this.app.vault.configDir, this.manifest.id);
+    this.wechatTemplateThemeService = new TemplateThemeService(
+      obsidianTemplateThemeAdapter(this.app.vault.adapter),
+      pluginDir,
+    );
+    await this.loadTemplateThemeDefinitions();
     await this.loadSettings();
     this.providerStore = new ProviderStore(this.app.secretStorage);
     this.vaultStore = new VaultStore(this.app.vault.adapter);
@@ -102,6 +119,7 @@ export default class WeSightPlugin extends Plugin {
         auth: this.cloudAuth,
         api: this.wechatCloudApi,
         themeService: this.wechatThemeService,
+        templateThemeService: this.wechatTemplateThemeService,
         runtimeManager: this.runtimeManager,
         getSettings: () => this.settings,
         saveSettings: () => this.saveSettings(),
@@ -317,6 +335,16 @@ export default class WeSightPlugin extends Plugin {
     }
   }
 
+  private async loadTemplateThemeDefinitions(): Promise<void> {
+    try {
+      const themes = await this.wechatTemplateThemeService.loadTemplateThemes();
+      setTemplateThemeDefinitions(themes.map(theme => theme.definition));
+    } catch (error) {
+      // 资源包加载失败不应阻塞插件启动；主题菜单会回退到内置主题。
+      void error;
+    }
+  }
+
   private async handleCloudAuthCallback(code: string): Promise<void> {
     try {
       await this.cloudAuth.handleAuthCallback(code);
@@ -361,3 +389,4 @@ function normalizeSettings(value: Partial<WeSightObsidianSettings> | null | unde
       : '',
   };
 }
+ import { vaultPluginDir } from './paths';

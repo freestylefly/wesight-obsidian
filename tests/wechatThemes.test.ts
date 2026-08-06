@@ -6,6 +6,7 @@ import {
   hashSkillThemeDocument,
   isWeChatThemeId,
   listWeChatThemes,
+  setTemplateThemeDefinitions,
 } from '../src/wechat/themes';
 import { WECHAT_RENDERER_VERSION, type WeChatPreviewSnapshot } from '../src/wechat/types';
 
@@ -27,10 +28,15 @@ function snapshot(contentHash = 'source-hash'): WeChatPreviewSnapshot {
 }
 
 describe('WeChat themes', () => {
-  test('keeps Canghe Style as the default followed by the six Skill themes and AI custom theme', () => {
-    expect(DEFAULT_WECHAT_THEME_ID).toBe('canghe-style');
+  beforeEach(() => {
+    setTemplateThemeDefinitions([
+      { id: 'canghe-style-tes', label: '苍绿', kind: 'template', color: '#2ea765' },
+    ]);
+  });
+
+  test('keeps resource-pack Canghe Style as the default and exposes only Skill and AI custom built-ins', () => {
+    expect(DEFAULT_WECHAT_THEME_ID).toBe('canghe-style-tes');
     expect(WECHAT_THEME_DEFINITIONS.map(theme => theme.id)).toEqual([
-      'canghe-style',
       'moyu-green',
       'red-white',
       'graphite-minimal',
@@ -39,7 +45,7 @@ describe('WeChat themes', () => {
       'olive-journal',
       'ai-custom',
     ]);
-    expect(listWeChatThemes('template').map(theme => theme.label)).toEqual(['Canghe Style']);
+    expect(listWeChatThemes('template').map(theme => theme.label)).toEqual(['苍绿']);
     expect(listWeChatThemes('skill').map(theme => theme.label)).toEqual([
       '摸鱼绿',
       '红白色系',
@@ -51,16 +57,16 @@ describe('WeChat themes', () => {
     expect(listWeChatThemes('custom').map(theme => theme.label)).toEqual(['AI自定义主题']);
   });
 
-  test('recognizes registered ids and falls back to Canghe Style', () => {
+  test('recognizes registered ids and falls back to the default theme', () => {
     expect(isWeChatThemeId('moyu-green')).toBe(true);
     expect(isWeChatThemeId('ai-custom')).toBe(true);
     expect(isWeChatThemeId('unknown')).toBe(false);
-    expect(getWeChatTheme('unknown' as never).id).toBe(DEFAULT_WECHAT_THEME_ID);
+    expect(getWeChatTheme('unknown').id).toBe(DEFAULT_WECHAT_THEME_ID);
   });
 
   test('uses the source hash for templates and all generation inputs for Skill hashes', () => {
     expect(createTemplateThemeDocument(snapshot())).toMatchObject({
-      themeId: 'canghe-style',
+      themeId: 'canghe-style-tes',
       sourceHash: 'source-hash',
       contentHash: 'source-hash',
       html: null,

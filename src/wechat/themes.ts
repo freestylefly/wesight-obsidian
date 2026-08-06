@@ -2,8 +2,9 @@ import { createHash } from 'crypto';
 
 import type { WeChatPreviewSnapshot } from './types';
 
-export type WeChatThemeId =
-  | 'canghe-style'
+// 主题 id 不再使用联合类型：模板主题可以通过资源包动态注册。
+export type WeChatThemeId = string;
+export type BuiltInWeChatThemeId =
   | 'moyu-green'
   | 'red-white'
   | 'graphite-minimal'
@@ -14,17 +15,17 @@ export type WeChatThemeId =
 
 export type WeChatThemeKind = 'template' | 'skill' | 'custom';
 
-export interface WeChatCustomThemePreferences {
-  name: string;
-  description: string;
-}
-
 export interface WeChatThemeDefinition {
   id: WeChatThemeId;
   label: string;
   kind: WeChatThemeKind;
   color: string;
   skillReference?: string;
+}
+
+export interface WeChatCustomThemePreferences {
+  name: string;
+  description: string;
 }
 
 export interface WeChatThemeDocument {
@@ -36,15 +37,9 @@ export interface WeChatThemeDocument {
   generatorSignature: string;
 }
 
-export const DEFAULT_WECHAT_THEME_ID: WeChatThemeId = 'canghe-style';
+export const DEFAULT_WECHAT_THEME_ID: WeChatThemeId = 'canghe-style-tes';
 
 export const WECHAT_THEME_DEFINITIONS: readonly WeChatThemeDefinition[] = [
-  {
-    id: 'canghe-style',
-    label: 'Canghe Style',
-    kind: 'template',
-    color: '#2ea765',
-  },
   {
     id: 'moyu-green',
     label: '摸鱼绿',
@@ -95,25 +90,46 @@ export const WECHAT_THEME_DEFINITIONS: readonly WeChatThemeDefinition[] = [
   },
 ] as const;
 
-const THEME_BY_ID = new Map(WECHAT_THEME_DEFINITIONS.map(theme => [theme.id, theme]));
+let templateThemeDefinitions: readonly WeChatThemeDefinition[] = [];
+
+export function setTemplateThemeDefinitions(
+  definitions: readonly WeChatThemeDefinition[],
+): void {
+  templateThemeDefinitions = [...definitions];
+}
+
+export function getAllWeChatThemeDefinitions(): readonly WeChatThemeDefinition[] {
+  return [...WECHAT_THEME_DEFINITIONS, ...templateThemeDefinitions];
+}
+
+function themeById(): Map<WeChatThemeId, WeChatThemeDefinition> {
+  return new Map(getAllWeChatThemeDefinitions().map(theme => [theme.id, theme]));
+}
 
 export function isWeChatThemeId(value: unknown): value is WeChatThemeId {
-  return typeof value === 'string' && THEME_BY_ID.has(value as WeChatThemeId);
+  return typeof value === 'string' && themeById().has(value);
 }
 
 export function getWeChatTheme(themeId: WeChatThemeId): WeChatThemeDefinition {
-  return THEME_BY_ID.get(themeId) ?? THEME_BY_ID.get(DEFAULT_WECHAT_THEME_ID)!;
+  const map = themeById();
+  return (
+    map.get(themeId) ??
+    map.get(DEFAULT_WECHAT_THEME_ID) ??
+    WECHAT_THEME_DEFINITIONS.find(theme => theme.kind === 'template') ??
+    WECHAT_THEME_DEFINITIONS[0]
+  );
 }
 
 export function listWeChatThemes(kind: WeChatThemeKind): WeChatThemeDefinition[] {
-  return WECHAT_THEME_DEFINITIONS.filter(theme => theme.kind === kind);
+  return getAllWeChatThemeDefinitions().filter(theme => theme.kind === kind);
 }
 
 export function createTemplateThemeDocument(
   snapshot: WeChatPreviewSnapshot,
+  themeId: WeChatThemeId = DEFAULT_WECHAT_THEME_ID,
 ): WeChatThemeDocument {
   return {
-    themeId: DEFAULT_WECHAT_THEME_ID,
+    themeId,
     sourceHash: snapshot.contentHash,
     contentHash: snapshot.contentHash,
     html: null,
@@ -124,7 +140,7 @@ export function createTemplateThemeDocument(
 
 export function hashSkillThemeDocument(values: {
   sourceHash: string;
-  themeId: WeChatThemeId;
+  themeId: string;
   html: string;
   generatorSignature: string;
 }): string {

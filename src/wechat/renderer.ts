@@ -2,7 +2,10 @@ import { createHash } from 'crypto';
 import { App, Component, MarkdownRenderer, sanitizeHTMLToDom } from 'obsidian';
 
 import type { WeChatAssetDraft, WeChatPreviewSnapshot } from './types';
+import { assetMap, replaceAssetTokens } from './assetTokens';
 import { getWeChatTheme, type WeChatThemeDocument } from './themes';
+import type { LoadedTemplateTheme } from './templateThemeTypes';
+import { renderTemplateThemeArticle } from './templateThemeRenderer';
 import {
   buildStreamingThemePreviewDocument,
   sanitizeStreamingThemeHtml,
@@ -410,22 +413,6 @@ export function applyCangheWechatStyles(root: HTMLElement): void {
   }
 }
 
-function assetMap(snapshot: WeChatPreviewSnapshot, urls?: Map<string, string>): Map<string, string> {
-  return new Map(snapshot.assets.map((asset) => [
-    asset.token,
-    urls?.get(asset.token) || asset.previewUrl,
-  ]));
-}
-
-function replaceAssetTokens(
-  markdown: string,
-  replacements: Map<string, string>,
-): string {
-  let result = markdown;
-  for (const [token, url] of replacements) result = result.split(token).join(url);
-  return result;
-}
-
 function canMorphStreamingNode(current: Node, next: Node): boolean {
   if (current.nodeType !== next.nodeType) return false;
   if (current.nodeType === Node.ELEMENT_NODE) {
@@ -565,18 +552,33 @@ export async function renderWeChatArticle(
   options: {
     uploadedUrls?: Map<string, string>;
     themeDocument?: WeChatThemeDocument | null;
+    templateTheme?: LoadedTemplateTheme | null;
   } = {},
 ): Promise<void> {
   container.empty();
   container.classList.remove('wesight-wechat-canghe-article', 'wesight-wechat-skill-article');
   const themeDocument = options.themeDocument;
-  if (themeDocument && getWeChatTheme(themeDocument.themeId).kind !== 'template' && themeDocument.html) {
+  const theme = themeDocument ? getWeChatTheme(themeDocument.themeId) : null;
+  if (theme && theme.kind !== 'template' && themeDocument?.html) {
     container.classList.add('wesight-wechat-skill-article');
     const html = replaceAssetTokens(
       themeDocument.html,
       assetMap(snapshot, options.uploadedUrls),
     );
     container.appendChild(sanitizeHTMLToDom(html));
+    return;
+  }
+  if (options.templateTheme) {
+    await renderTemplateThemeArticle(
+      app,
+      component,
+      snapshot,
+      container,
+      options.templateTheme,
+      {
+        uploadedUrls: options.uploadedUrls,
+      },
+    );
     return;
   }
   container.classList.add('wesight-wechat-canghe-article');

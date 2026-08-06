@@ -19,7 +19,14 @@ import {
   resolveGzhSkillRoot,
   validateGeneratedThemeHtml,
 } from '../src/wechat/themeService';
+ import { setTemplateThemeDefinitions } from '../src/wechat/themes';
 import { WECHAT_RENDERER_VERSION, type WeChatPreviewSnapshot } from '../src/wechat/types';
+
+ beforeEach(() => {
+   setTemplateThemeDefinitions([
+    { id: 'canghe-style-tes', label: '苍绿', kind: 'template', color: '#2ea765' },
+   ]);
+ });
 
 const ASSET_TOKEN = `wesight-wechat-asset://${'a'.repeat(64)}`;
 
@@ -190,7 +197,7 @@ describe('WeChat theme Skill discovery and generation', () => {
     const standardRoot = createSkillRoot(path.join(standardHome, '.codex', 'skills'));
     expect(resolveGzhSkillRoot('moyu-green', { HOME: standardHome })).toBe(standardRoot);
     expect(resolveGzhSkillRoot('ai-custom', env)).toBe(skillRoot);
-    expect(resolveGzhSkillRoot('canghe-style', env)).toBeNull();
+    expect(resolveGzhSkillRoot('canghe-style-tes', env)).toBeNull();
   });
 
   test('falls back to the bundled Skill when a local installation is incomplete', () => {
@@ -444,7 +451,7 @@ describe('WeChat theme Skill discovery and generation', () => {
     })).rejects.toBeInstanceOf(ThemeGenerationCancelledError);
     expect(onPreview).toHaveBeenCalledOnce();
     expect(service.getCached(makeSnapshot(), 'moyu-green')).toBeNull();
-    expect(settings.wechatThemeId).toBe('canghe-style');
+    expect(settings.wechatThemeId).toBe('canghe-style-tes');
   });
 
   test('generates and caches a reusable AI custom theme from the saved style brief', async () => {

@@ -56,6 +56,8 @@ import {
   type WeChatThemeId,
   type WeChatThemeKind,
 } from '../wechat/themes';
+import { TemplateThemeService } from '../wechat/templateThemeService';
+import type { LoadedTemplateTheme } from '../wechat/templateThemeTypes';
 import { recordValue } from '../utils/records';
 import { confirmShareAction } from './shareConfirm';
 import { promptForCustomWeChatTheme } from './wechatCustomThemeModal';
@@ -74,6 +76,7 @@ interface WeChatPreviewViewOptions {
   auth: CloudAuthService;
   api: WeChatCloudApi;
   themeService: WeChatThemeService;
+  templateThemeService: TemplateThemeService;
   runtimeManager: RuntimeManager;
   getSettings: () => WeSightObsidianSettings;
   saveSettings: () => Promise<void>;
@@ -540,6 +543,7 @@ export class WeChatPreviewView extends ItemView {
     const article = canvas.createDiv({ cls: 'wesight-wechat-preview-article' });
     void renderWeChatArticle(this.app, this, prepared, article, {
       themeDocument: this.validThemeDocument(prepared),
+      templateTheme: this.currentTemplateTheme(),
     })
       .then(() => this.restorePreviewScroll(canvasWrap))
       .catch((error) => {
@@ -768,9 +772,6 @@ export class WeChatPreviewView extends ItemView {
       const swatch = item.createSpan({ cls: 'wesight-wechat-theme-swatch' });
       swatch.style.backgroundColor = theme.color;
       item.createSpan({ cls: 'wesight-wechat-theme-option-label', text: theme.label });
-      if (theme.id === 'canghe-style') {
-        item.createSpan({ cls: 'wesight-wechat-theme-option-note', text: '默认' });
-      }
       if (theme.id === currentThemeId) {
         const check = item.createSpan({ cls: 'wesight-wechat-theme-option-check' });
         setIcon(check, 'check');
@@ -1133,6 +1134,12 @@ export class WeChatPreviewView extends ItemView {
     return this.pendingThemeId ?? this.options.getSettings().wechatThemeId;
   }
 
+  private currentTemplateTheme(): LoadedTemplateTheme | null {
+    return this.options.templateThemeService
+      .getLoadedTemplateThemes()
+      .find(theme => theme.manifest.id === this.currentThemeId()) ?? null;
+  }
+
   private currentThemeLabel(): string {
     const theme = getWeChatTheme(this.currentThemeId());
     if (theme.kind !== 'custom') return theme.label;
@@ -1144,14 +1151,14 @@ export class WeChatPreviewView extends ItemView {
   private loadCachedThemeDocument(snapshot: WeChatPreviewSnapshot): void {
     const themeId = this.currentThemeId();
     this.themeDocument = getWeChatTheme(themeId).kind === 'template'
-      ? createTemplateThemeDocument(snapshot)
+      ? createTemplateThemeDocument(snapshot, themeId)
       : this.options.themeService.getCached(snapshot, themeId);
   }
 
   private validThemeDocument(snapshot: WeChatPreviewSnapshot): WeChatThemeDocument | null {
     const themeId = this.currentThemeId();
     if (getWeChatTheme(themeId).kind === 'template') {
-      return createTemplateThemeDocument(snapshot);
+      return createTemplateThemeDocument(snapshot, themeId);
     }
     return this.themeDocument?.themeId === themeId
       && this.themeDocument.sourceHash === snapshot.contentHash
@@ -1189,7 +1196,7 @@ export class WeChatPreviewView extends ItemView {
     this.pendingThemeId = null;
     this.pendingCustomTheme = null;
     settings.wechatThemeId = themeId;
-    this.themeDocument = createTemplateThemeDocument(this.preparedSnapshot());
+    this.themeDocument = createTemplateThemeDocument(this.preparedSnapshot(), themeId);
     await this.options.saveSettings();
     this.render();
   }
@@ -1558,6 +1565,7 @@ export class WeChatPreviewView extends ItemView {
       await renderWeChatArticle(this.app, this, snapshot, article, {
         uploadedUrls,
         themeDocument,
+        templateTheme: this.currentTemplateTheme(),
       });
       await replaceFormulaSvgs(article, async (asset) => {
         this.operation = '正在上传公式图片…';
@@ -1696,6 +1704,7 @@ export class WeChatPreviewView extends ItemView {
       await renderWeChatArticle(this.app, this, snapshot, article, {
         uploadedUrls,
         themeDocument,
+        templateTheme: this.currentTemplateTheme(),
       });
       await replaceFormulaSvgs(article, async (asset) => {
         this.operation = '正在上传公式图片…';
