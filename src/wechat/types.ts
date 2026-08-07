@@ -42,6 +42,7 @@ export interface WeChatPreviewSnapshot {
   onlyFansCanComment?: boolean;
   markdown: string;
   contentHash: string;
+  themeSourceHash: string;
   assets: WeChatAssetDraft[];
   warnings: WeChatWarning[];
   thumbMediaId: string;

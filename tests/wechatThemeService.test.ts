@@ -49,6 +49,7 @@ function makeSnapshot(contentHash = 'snapshot-v1'): WeChatPreviewSnapshot {
     contentSourceUrl: '',
     markdown: `正文\n\n![](${ASSET_TOKEN})`,
     contentHash,
+    themeSourceHash: contentHash,
     assets: [{
       token: ASSET_TOKEN,
       source: '图片.png',

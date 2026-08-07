@@ -19,6 +19,7 @@ function snapshot(contentHash = 'source-hash'): WeChatPreviewSnapshot {
     contentSourceUrl: '',
     markdown: '正文',
     contentHash,
+    themeSourceHash: contentHash,
     assets: [],
     warnings: [],
     thumbMediaId: '',

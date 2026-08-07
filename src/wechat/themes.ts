@@ -130,7 +130,7 @@ export function createTemplateThemeDocument(
 ): WeChatThemeDocument {
   return {
     themeId,
-    sourceHash: snapshot.contentHash,
+    sourceHash: snapshot.themeSourceHash,
     contentHash: snapshot.contentHash,
     html: null,
     generatedAt: null,

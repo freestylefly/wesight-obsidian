@@ -3690,6 +3690,13 @@ button.wesight-share-primary-button.is-wechat:hover {
   color-scheme: light;
 }
 
+.wesight-wechat-preview-article-pending {
+  position: absolute;
+  left: -9999px;
+  visibility: hidden;
+  width: 100%;
+}
+
 .wesight-wechat-streaming-preview {
   display: block;
   width: 100%;

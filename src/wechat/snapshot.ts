@@ -209,7 +209,7 @@ async function replaceRemoteImages(
   return result;
 }
 
-function hashSnapshot(snapshot: Omit<WeChatPreviewSnapshot, 'contentHash'>): string {
+function hashSnapshot(snapshot: Omit<WeChatPreviewSnapshot, 'contentHash' | 'themeSourceHash'>): string {
   return hashBytes(JSON.stringify({
     title: snapshot.title,
     author: snapshot.author,
@@ -217,6 +217,14 @@ function hashSnapshot(snapshot: Omit<WeChatPreviewSnapshot, 'contentHash'>): str
     contentSourceUrl: snapshot.contentSourceUrl,
     needOpenComment: snapshot.needOpenComment,
     onlyFansCanComment: snapshot.onlyFansCanComment,
+    markdown: snapshot.markdown,
+    assets: snapshot.assets.map((asset) => asset.contentHash).sort(),
+    rendererVersion: snapshot.rendererVersion,
+  }));
+}
+
+function hashThemeSource(snapshot: Omit<WeChatPreviewSnapshot, 'contentHash' | 'themeSourceHash'>): string {
+  return hashBytes(JSON.stringify({
     markdown: snapshot.markdown,
     assets: snapshot.assets.map((asset) => asset.contentHash).sort(),
     rendererVersion: snapshot.rendererVersion,
@@ -264,7 +272,7 @@ export async function buildWeChatSnapshot(app: App, file: TFile): Promise<WeChat
     }
   }
 
-  const prepared: Omit<WeChatPreviewSnapshot, 'contentHash'> = {
+  const prepared: Omit<WeChatPreviewSnapshot, 'contentHash' | 'themeSourceHash'> = {
     sourcePath: file.path,
     title: stringMetadata(frontmatter, 'title', '标题') || share.title,
     author: stringMetadata(frontmatter, 'author', '作者'),
@@ -279,18 +287,35 @@ export async function buildWeChatSnapshot(app: App, file: TFile): Promise<WeChat
     coverAssetToken,
     rendererVersion: WECHAT_RENDERER_VERSION,
   };
-  return { ...prepared, contentHash: hashSnapshot(prepared) };
+  return {
+    ...prepared,
+    contentHash: hashSnapshot(prepared),
+    themeSourceHash: hashThemeSource(prepared),
+  };
 }
 
 export function withWeChatSnapshotMetadata(
   snapshot: WeChatPreviewSnapshot,
   values: Pick<WeChatPreviewSnapshot, 'title' | 'author' | 'digest'>,
 ): WeChatPreviewSnapshot {
-  const prepared = {
-    ...snapshot,
+  const prepared: Omit<WeChatPreviewSnapshot, 'contentHash' | 'themeSourceHash'> = {
+    sourcePath: snapshot.sourcePath,
     title: values.title.trim() || snapshot.title,
     author: values.author.trim(),
     digest: values.digest.trim(),
+    contentSourceUrl: snapshot.contentSourceUrl,
+    needOpenComment: snapshot.needOpenComment,
+    onlyFansCanComment: snapshot.onlyFansCanComment,
+    markdown: snapshot.markdown,
+    assets: snapshot.assets,
+    warnings: snapshot.warnings,
+    thumbMediaId: snapshot.thumbMediaId,
+    coverAssetToken: snapshot.coverAssetToken,
+    rendererVersion: snapshot.rendererVersion,
   };
-  return { ...prepared, contentHash: hashSnapshot(prepared) };
+  return {
+    ...prepared,
+    contentHash: hashSnapshot(prepared),
+    themeSourceHash: hashThemeSource(prepared),
+  };
 }

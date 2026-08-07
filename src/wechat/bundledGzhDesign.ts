@@ -4,6 +4,8 @@ import path from 'path';
 import { wesightHome } from '../paths';
 import { ensureDir, fileExists } from '../utils/fs';
 
+const materializedRootCache = new Map<string, string>();
+
 import skillRules from '../../vendor/gzh-design-skill/SKILL.md?raw';
 import license from '../../vendor/gzh-design-skill/LICENSE.txt?raw';
 import upstream from '../../vendor/gzh-design-skill/UPSTREAM.md?raw';
@@ -53,9 +55,14 @@ export function materializeBundledGzhDesign(
     'gzh-design',
     BUNDLED_GZH_DESIGN_COMMIT,
   );
+  const cached = materializedRootCache.get(root);
+  if (cached && fileExists(path.join(cached, 'SKILL.md'))) {
+    return cached;
+  }
   for (const [relativePath, content] of Object.entries(BUNDLED_FILES)) {
     writeBundledFile(root, relativePath, content);
   }
+  materializedRootCache.set(root, root);
   return root;
 }
 

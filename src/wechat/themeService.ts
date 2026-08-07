@@ -26,7 +26,7 @@ interface CachedThemeDocument extends WeChatThemeDocument {
 }
 
 export interface ThemeGenerationProgress {
-  phase: 'preparing' | 'streaming' | 'validating';
+  phase: 'preparing' | 'connecting' | 'streaming' | 'validating';
   label: string;
 }
 
@@ -50,6 +50,15 @@ const MAX_SKILL_CONTEXT_FILE_BYTES = 256 * 1024;
 const MAX_ARTICLE_CONTEXT_BYTES = 512 * 1024;
 const MAX_THEME_CONTEXT_BYTES = 1024 * 1024;
 const THEME_GENERATION_PROMPT_VERSION = 2;
+
+interface CachedSkillFile {
+  content: string;
+  bytes: number;
+  mtimeMs: number;
+  size: number;
+}
+
+const skillFileCache = new Map<string, CachedSkillFile>();
 
 interface ThemeGenerationContextSources {
   skillRules: string;
@@ -182,12 +191,18 @@ function readSkillContextFile(skillRoot: string, relativePath: string): {
   content: string;
   bytes: number;
 } {
-  const { absolutePath } = resolveSafeSkillFile(skillRoot, relativePath);
+  const { absolutePath, stat } = resolveSafeSkillFile(skillRoot, relativePath);
+  const cacheKey = `${absolutePath}:${stat.ino}:${stat.dev}`;
+  const cached = skillFileCache.get(cacheKey);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return { content: cached.content, bytes: cached.bytes };
+  }
   const content = fs.readFileSync(absolutePath, 'utf8');
   const bytes = Buffer.byteLength(content, 'utf8');
   if (bytes > MAX_SKILL_CONTEXT_FILE_BYTES) {
     throw new Error(`gzh-design Skill 上下文文件超过 256 KB：${relativePath}`);
   }
+  skillFileCache.set(cacheKey, { content, bytes, mtimeMs: stat.mtimeMs, size: stat.size });
   return { content, bytes };
 }
 
@@ -584,7 +599,7 @@ export class WeChatThemeService {
       );
       appendLocalLog('wechat_theme_context_prepared', {
         themeId,
-        sourceHash: snapshot.contentHash,
+        sourceHash: snapshot.themeSourceHash,
         skillRulesBytes: sources.bytes.skillRules,
         themeComponentsBytes: sources.bytes.themeComponents,
         commonComponentsBytes: sources.bytes.commonComponents,
@@ -595,6 +610,10 @@ export class WeChatThemeService {
         reducedBytes: sources.bytes.sourceTotal - sources.bytes.total,
         elapsedMs: Date.now() - contextStartedAt,
       }, this.env);
+      options.onProgress?.({
+        phase: 'connecting',
+        label: `正在启动 ${themeLabel} 主题生成…`,
+      });
       const runtimeStartedAt = Date.now();
       await this.options.runtimeManager.runTurn({
         conversationId: createId('wechat-theme'),
@@ -621,7 +640,7 @@ export class WeChatThemeService {
               previewStarted = true;
               appendLocalLog('wechat_theme_first_preview', {
                 themeId,
-                sourceHash: snapshot.contentHash,
+                sourceHash: snapshot.themeSourceHash,
                 elapsedMs: Date.now() - runtimeStartedAt,
                 previewBytes: Buffer.byteLength(preview, 'utf8'),
               }, this.env);
@@ -637,7 +656,7 @@ export class WeChatThemeService {
       });
       appendLocalLog('wechat_theme_runtime_complete', {
         themeId,
-        sourceHash: snapshot.contentHash,
+        sourceHash: snapshot.themeSourceHash,
         outputFileExists: fileExists(outputPath),
         outputTextParts: outputParts.length,
         runtimeError: runtimeError ? 'present' : null,
@@ -657,7 +676,7 @@ export class WeChatThemeService {
       if (errors.length) {
         appendLocalLog('wechat_theme_validation_failed', {
           themeId,
-          sourceHash: snapshot.contentHash,
+          sourceHash: snapshot.themeSourceHash,
           outputBytes: Buffer.byteLength(html, 'utf8'),
           errors,
         }, this.env);
@@ -667,9 +686,9 @@ export class WeChatThemeService {
         version: 1,
         cacheKey: context.key,
         themeId,
-        sourceHash: snapshot.contentHash,
+        sourceHash: snapshot.themeSourceHash,
         contentHash: hashSkillThemeDocument({
-          sourceHash: snapshot.contentHash,
+          sourceHash: snapshot.themeSourceHash,
           themeId,
           html: html.trim(),
           generatorSignature: context.signature,
@@ -682,7 +701,7 @@ export class WeChatThemeService {
       writeJsonFile(cachePath(context.key, this.env), document);
       appendLocalLog('wechat_theme_cached', {
         themeId,
-        sourceHash: snapshot.contentHash,
+        sourceHash: snapshot.themeSourceHash,
         contentHash: document.contentHash,
         outputBytes: Buffer.byteLength(document.html ?? '', 'utf8'),
       }, this.env);
@@ -691,7 +710,7 @@ export class WeChatThemeService {
       if (options.signal?.aborted || error instanceof ThemeGenerationCancelledError) {
         appendLocalLog('wechat_theme_generation_cancelled', {
           themeId,
-          sourceHash: snapshot.contentHash,
+          sourceHash: snapshot.themeSourceHash,
         }, this.env);
         throw error instanceof ThemeGenerationCancelledError
           ? error
@@ -699,7 +718,7 @@ export class WeChatThemeService {
       }
       appendLocalLog('wechat_theme_generation_failed', {
         themeId,
-        sourceHash: snapshot.contentHash,
+        sourceHash: snapshot.themeSourceHash,
         message: error instanceof Error ? error.message : String(error),
       }, this.env);
       throw error;
@@ -730,7 +749,7 @@ export class WeChatThemeService {
       skillRoot,
       signature,
       key: cacheKey({
-        sourceHash: snapshot.contentHash,
+        sourceHash: snapshot.themeSourceHash,
         themeId,
         skillSignature: skillFingerprint,
         generatorSignature: [generatorFingerprint, themeFingerprint].join(':'),
@@ -749,7 +768,7 @@ export class WeChatThemeService {
       || cached.version !== 1
       || cached.cacheKey !== context.key
       || cached.themeId !== themeId
-      || cached.sourceHash !== snapshot.contentHash
+      || cached.sourceHash !== snapshot.themeSourceHash
     ) return null;
     const errors = validateGeneratedThemeHtml(cached.html ?? '', usedAssetTokens(snapshot));
     return errors.length ? null : cached;

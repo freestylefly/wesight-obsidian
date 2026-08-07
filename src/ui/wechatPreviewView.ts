@@ -100,6 +100,7 @@ export class WeChatPreviewView extends ItemView {
   private digestValue = '';
   private temporaryCover: WeChatAssetDraft | null = null;
   private refreshTimer: number | null = null;
+  private metadataSaveTimer: number | null = null;
   private activeTab: WeChatPreviewTab = 'preview';
   private themeDocument: WeChatThemeDocument | null = null;
   private themeMenuEl: HTMLElement | null = null;
@@ -164,7 +165,7 @@ export class WeChatPreviewView extends ItemView {
       if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
       this.refreshTimer = window.setTimeout(() => {
         this.refreshTimer = null;
-        void this.reload();
+        void this.refreshContent();
       }, 450);
     }));
     if (!this.file) {
@@ -172,12 +173,14 @@ export class WeChatPreviewView extends ItemView {
       if (active) this.file = active;
     }
     await this.reload();
+    this.warmUpCodexRuntime();
   }
 
   override async onClose(): Promise<void> {
     this.invalidateThemeGeneration();
     if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
+    this.flushSaveMetadata();
     this.closeThemeMenus();
     this.clearTemporaryCover();
   }
@@ -238,10 +241,9 @@ export class WeChatPreviewView extends ItemView {
         this.draft = null;
         return;
       }
+      const previousSnapshot = this.snapshot;
       this.snapshot = await buildWeChatSnapshot(this.app, this.file);
-      this.titleValue = this.snapshot.title;
-      this.authorValue = this.snapshot.author;
-      this.digestValue = this.snapshot.digest;
+      this.applySnapshotMetadata(this.snapshot, previousSnapshot);
       this.loadCachedThemeDocument(this.snapshot);
       const publishState = parseWeChatPublishState(
         this.app.metadataCache.getFileCache(this.file)?.frontmatter,
@@ -267,6 +269,158 @@ export class WeChatPreviewView extends ItemView {
       this.loading = false;
       this.render();
     }
+  }
+
+
+  private async refreshContent(): Promise<void> {
+    if (
+      !this.file
+      || !this.snapshot
+      || !this.connection
+      || this.themeGenerationController
+    ) {
+      return this.reload();
+    }
+    try {
+      const previousSnapshot = this.snapshot;
+      const newSnapshot = await buildWeChatSnapshot(this.app, this.file);
+      this.snapshot = newSnapshot;
+      this.applySnapshotMetadata(newSnapshot, previousSnapshot);
+      if (!this.validThemeDocument(newSnapshot)) {
+        this.loadCachedThemeDocument(newSnapshot);
+      }
+      if (this.activeTab !== 'preview') {
+        // On the settings tab just keep snapshot/theme state fresh without UI disruption.
+        return;
+      }
+      if (this.themeNeedsGeneration(newSnapshot)) {
+        return this.reload();
+      }
+      if (!this.contentEl.querySelector('.wesight-wechat-preview-canvas-wrap')) {
+        return this.reload();
+      }
+      const canvasWrap = this.contentEl.querySelector<HTMLElement>(
+        '.wesight-wechat-preview-canvas-wrap',
+      );
+      const scrollTop = canvasWrap?.scrollTop ?? 0;
+      await this.updatePreviewArticle(newSnapshot, scrollTop);
+      this.updateToolbarAndSummary(newSnapshot);
+    } catch {
+      return this.reload();
+    }
+  }
+
+  private async updatePreviewArticle(
+    snapshot: WeChatPreviewSnapshot,
+    preserveScrollTop: number,
+  ): Promise<void> {
+    const canvasWrap = this.contentEl.querySelector<HTMLElement>(
+      '.wesight-wechat-preview-canvas-wrap',
+    );
+    const canvas = canvasWrap?.querySelector<HTMLElement>('.wesight-wechat-preview-canvas');
+    if (!canvasWrap || !canvas) return;
+    if (this.themeGenerationController && this.streamingThemeHtml !== null) return;
+
+    // The visible article may have had its className overwritten by the template
+    // renderer, so identify it by direct reference before appending the new one.
+    const oldArticle = Array.from(canvas.children).find(
+      child => child !== this.streamingPreviewIframe
+        && !child.classList.contains('wesight-wechat-streaming-preview'),
+    ) as HTMLElement | undefined;
+
+    const prepared = this.preparedSnapshot();
+    const newArticle = createDiv({ cls: 'wesight-wechat-preview-article' });
+    newArticle.addClass('wesight-wechat-preview-article-pending');
+    newArticle.setCssProps({
+      position: 'absolute',
+      visibility: 'hidden',
+      left: '-9999px',
+      width: '100%',
+    });
+    canvas.appendChild(newArticle);
+    try {
+      await renderWeChatArticle(this.app, this, prepared, newArticle, {
+        themeDocument: this.validThemeDocument(prepared),
+        templateTheme: this.currentTemplateTheme(),
+      });
+      if (oldArticle?.isConnected) {
+        oldArticle.replaceWith(newArticle);
+      }
+      newArticle.removeClass('wesight-wechat-preview-article-pending');
+      newArticle.setCssProps({
+        position: '',
+        visibility: '',
+        left: '',
+        width: '',
+      });
+      canvasWrap.scrollTop = Math.min(
+        preserveScrollTop,
+        Math.max(0, canvasWrap.scrollHeight - canvasWrap.clientHeight),
+      );
+    } catch (error) {
+      newArticle.remove();
+      throw error;
+    }
+  }
+
+  private updateToolbarAndSummary(snapshot: WeChatPreviewSnapshot): void {
+    const toolbar = this.contentEl.querySelector('.wesight-wechat-publish-toolbar');
+    if (toolbar) {
+      const newToolbar = createDiv({ cls: 'wesight-wechat-publish-toolbar' });
+      this.renderPublishingToolbar(newToolbar, snapshot);
+      toolbar.replaceWith(newToolbar);
+    }
+    const summary = this.contentEl.querySelector('.wesight-wechat-preview-summary');
+    if (summary) {
+      const newSummary = createDiv({ cls: 'wesight-wechat-preview-summary' });
+      this.renderPreviewSummary(newSummary, snapshot);
+      summary.replaceWith(newSummary);
+    }
+    this.updateBanners(snapshot);
+  }
+
+  private updateBanners(_snapshot: WeChatPreviewSnapshot): void {
+    const contentEl = this.contentEl;
+    const existingBanners = Array.from(
+      contentEl.querySelectorAll('.wesight-wechat-preview-banner'),
+    );
+    existingBanners.forEach(banner => banner.remove());
+    const toolbar = contentEl.querySelector('.wesight-wechat-publish-toolbar');
+    if (!toolbar) return;
+    const prepared = this.preparedSnapshot();
+    const banners: { icon: string; text: string }[] = [];
+    if (this.duplicatePath) {
+      banners.push({
+        icon: 'circle-alert',
+        text: `另一篇笔记“${this.duplicatePath}”关联了同一篇公众号草稿，本次只能另存为新草稿。`,
+      });
+    } else if (this.staleDraft) {
+      banners.push({
+        icon: 'circle-alert',
+        text: '原公众号草稿已删除、已发布或失效，本次将创建新草稿。',
+      });
+    }
+    if (this.themeGenerationError) {
+      banners.push({ icon: 'circle-alert', text: `主题生成失败：${this.themeGenerationError}` });
+    }
+    if (this.themeNeedsGeneration(prepared) && !this.themeGenerationController) {
+      banners.push({
+        icon: 'sparkles',
+        text: `${this.currentThemeLabel()} 主题待重新生成，当前暂时显示 Canghe Style 预览。`,
+      });
+    }
+    const summary = contentEl.querySelector('.wesight-wechat-preview-summary');
+    banners.forEach(({ icon, text }) => {
+      const banner = contentEl.createDiv({ cls: 'wesight-wechat-preview-banner' });
+      const bannerIcon = banner.createSpan();
+      setIcon(bannerIcon, icon);
+      banner.createSpan({ text });
+      if (summary) {
+        summary.before(banner);
+      } else {
+        toolbar.after(banner);
+      }
+    });
   }
 
   private render(): void {
@@ -567,6 +721,7 @@ export class WeChatPreviewView extends ItemView {
       },
     });
     preview.onclick = () => {
+      this.flushSaveMetadata();
       this.activeTab = 'preview';
       this.render();
     };
@@ -928,8 +1083,12 @@ export class WeChatPreviewView extends ItemView {
     titleInput.maxLength = 128;
     titleInput.oninput = () => {
       this.titleValue = titleInput.value;
+      this.scheduleSaveMetadata();
     };
-    titleInput.onblur = () => this.render();
+    titleInput.onblur = () => {
+      this.flushSaveMetadata();
+      this.render();
+    };
     const author = fields.createEl('label', { cls: 'is-wide' });
     author.createSpan({ text: '作者' });
     const authorInput = author.createEl('input', { type: 'text' });
@@ -937,8 +1096,12 @@ export class WeChatPreviewView extends ItemView {
     authorInput.maxLength = 64;
     authorInput.oninput = () => {
       this.authorValue = authorInput.value;
+      this.scheduleSaveMetadata();
     };
-    authorInput.onblur = () => this.render();
+    authorInput.onblur = () => {
+      this.flushSaveMetadata();
+      this.render();
+    };
     const digest = fields.createEl('label', { cls: 'is-wide' });
     const digestLabelRow = digest.createDiv({ cls: 'wesight-wechat-metadata-label-row' });
     digestLabelRow.createSpan({ text: '摘要' });
@@ -955,8 +1118,12 @@ export class WeChatPreviewView extends ItemView {
     digestInput.rows = 2;
     digestInput.oninput = () => {
       this.digestValue = digestInput.value;
+      this.scheduleSaveMetadata();
     };
-    digestInput.onblur = () => this.render();
+    digestInput.onblur = () => {
+      this.flushSaveMetadata();
+      this.render();
+    };
   }
 
   private async generateDigest(): Promise<void> {
@@ -1161,7 +1328,7 @@ export class WeChatPreviewView extends ItemView {
       return createTemplateThemeDocument(snapshot, themeId);
     }
     return this.themeDocument?.themeId === themeId
-      && this.themeDocument.sourceHash === snapshot.contentHash
+      && this.themeDocument.sourceHash === snapshot.themeSourceHash
       ? this.themeDocument
       : null;
   }
@@ -1169,6 +1336,67 @@ export class WeChatPreviewView extends ItemView {
   private themeNeedsGeneration(snapshot: WeChatPreviewSnapshot): boolean {
     return getWeChatTheme(this.currentThemeId()).kind !== 'template'
       && !this.validThemeDocument(snapshot);
+  }
+
+  private applySnapshotMetadata(
+    snapshot: WeChatPreviewSnapshot,
+    previous: WeChatPreviewSnapshot | null,
+  ): void {
+    if (previous && previous.sourcePath === snapshot.sourcePath) {
+      if (snapshot.title !== previous.title) this.titleValue = snapshot.title;
+      if (snapshot.author !== previous.author) this.authorValue = snapshot.author;
+      if (snapshot.digest !== previous.digest) this.digestValue = snapshot.digest;
+    } else {
+      this.titleValue = snapshot.title;
+      this.authorValue = snapshot.author;
+      this.digestValue = snapshot.digest;
+    }
+  }
+
+  private scheduleSaveMetadata(): void {
+    if (this.metadataSaveTimer !== null) window.clearTimeout(this.metadataSaveTimer);
+    this.metadataSaveTimer = window.setTimeout(() => {
+      this.metadataSaveTimer = null;
+      void this.savePublishingMetadata();
+    }, 600);
+  }
+
+  private flushSaveMetadata(): void {
+    if (this.metadataSaveTimer === null) return;
+    window.clearTimeout(this.metadataSaveTimer);
+    this.metadataSaveTimer = null;
+    void this.savePublishingMetadata();
+  }
+
+  private async savePublishingMetadata(): Promise<void> {
+    if (!this.file || !this.snapshot) return;
+    const title = this.titleValue.trim();
+    const author = this.authorValue.trim();
+    const digest = this.digestValue.trim();
+    const frontmatter = this.app.metadataCache.getFileCache(this.file)?.frontmatter;
+    const currentTitle = typeof frontmatter?.title === 'string' ? frontmatter.title.trim() : '';
+    const currentAuthor = typeof frontmatter?.author === 'string' ? frontmatter.author.trim() : '';
+    const currentDigest = typeof frontmatter?.digest === 'string' ? frontmatter.digest.trim() : '';
+    if (
+      title === currentTitle
+      && author === currentAuthor
+      && digest === currentDigest
+    ) return;
+    await this.app.fileManager.processFrontMatter(this.file, (fm: Record<string, unknown>) => {
+      if (title) fm.title = title;
+      else delete fm.title;
+      if (author) fm.author = author;
+      else delete fm.author;
+      if (digest) fm.digest = digest;
+      else delete fm.digest;
+    });
+  }
+
+  private warmUpCodexRuntime(): void {
+    const settings = this.options.getSettings();
+    if (settings.defaultAgentId !== 'codex') return;
+    if (settings.configSources.codex !== 'localCli') return;
+    void this.options.runtimeManager.refreshCodexStatus().catch(() => undefined);
   }
 
   private async refreshPreview(): Promise<void> {
