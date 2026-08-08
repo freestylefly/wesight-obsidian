@@ -303,6 +303,8 @@ export class WeSightSettingTab extends PluginSettingTab {
     const descriptor = getAgentDescriptor(agentId);
     const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
     new Setting(section).setName(descriptor.displayName).setHeading();
+    // Refresh skill discovery when switching tabs so newly installed skills appear immediately.
+    invalidateSkillCache(agentId);
     const settings = this.deps.getSettings();
     const status = new RuntimeDiscovery({
       configuredPaths: settings.configuredPaths,
@@ -425,7 +427,6 @@ export class WeSightSettingTab extends PluginSettingTab {
           });
       });
 
-    this.renderSkills(section, agentId);
   }
 
   private renderProfiles(containerEl: HTMLElement, agentFilter?: AgentId): void {
@@ -1222,7 +1223,16 @@ export class WeSightSettingTab extends PluginSettingTab {
     if (existing) existing.remove();
     if (skills.length === 0) return;
     const section = containerEl.createDiv({ cls: 'wesight-settings-section wesight-skills-section' });
-    new Setting(section).setName('Skills').setHeading();
+    new Setting(section)
+      .setName('Skills')
+      .setHeading()
+      .addButton(button => button
+        .setButtonText('刷新')
+        .setTooltip('重新扫描本地 skills 目录')
+        .onClick(() => {
+          invalidateSkillCache(agentId);
+          void this.loadAndRenderSkills(containerEl, agentId);
+        }));
 
     const table = section.createEl('table', { cls: 'wesight-skills-table' });
     const thead = table.createEl('thead');
@@ -1237,16 +1247,6 @@ export class WeSightSettingTab extends PluginSettingTab {
       row.createEl('td', { text: truncate(skill.description, 200), cls: 'wesight-skill-description' });
     }
 
-    const footer = section.createDiv({ cls: 'wesight-skills-footer' });
-    const refresh = footer.createEl('button', {
-      cls: 'wesight-skill-refresh-button',
-      text: '刷新',
-      attr: { type: 'button' },
-    });
-    refresh.onclick = () => {
-      invalidateSkillCache(agentId);
-      void this.loadAndRenderSkills(containerEl, agentId);
-    };
   }
 
   private renderPrivacy(containerEl: HTMLElement): void {
