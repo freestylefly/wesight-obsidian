@@ -88,10 +88,26 @@ export interface ChatImageArtifact {
 
 export type ChatArtifact = ChatImageArtifact;
 
+export interface ChatMessageProcessItem {
+  id: string;
+  type: 'thinking' | 'tool';
+  title: string;
+  content?: string;
+  status?: 'started' | 'completed' | 'error';
+  input?: unknown;
+  output?: unknown;
+  error?: string;
+  createdAt: number;
+}
+
 export interface ChatMessageMetadata extends Record<string, unknown> {
   artifacts?: ChatArtifact[];
   /** Total elapsed time of the assistant turn in milliseconds. */
   durationMs?: number;
+  /** Intermediate reasoning and tool-call progress shown while streaming and collapsed after completion. */
+  process?: ChatMessageProcessItem[];
+  /** Whether the process log is collapsed for a completed assistant message. */
+  processCollapsed?: boolean;
 }
 
 export interface ToolCallEvent {
@@ -132,6 +148,7 @@ export interface ChatTurnRequest {
 export type RuntimeTurnEvent =
   | { type: 'session'; sessionId: string }
   | { type: 'text'; content: string }
+  | { type: 'reasoning'; content: string; id?: string }
   | { type: 'tool'; toolCall: ToolCallEvent }
   | {
     type: 'artifact';

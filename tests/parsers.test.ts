@@ -88,6 +88,43 @@ describe('stream parsers', () => {
     }))).toContainEqual({ type: 'text', content: 'hi there' });
   });
 
+  test('parses Claude thinking content blocks', () => {
+    expect(parseClaudeStreamLine(JSON.stringify({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'Let me think' },
+          { type: 'text', text: 'hello' },
+        ],
+      },
+    }))).toEqual([
+      { type: 'reasoning', content: 'Let me think' },
+      { type: 'text', content: 'hello' },
+    ]);
+  });
+
+  test('parses Claude thinking deltas', () => {
+    expect(parseClaudeStreamLine(JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'thinking_delta', thinking: 'step 1' },
+      },
+    }))).toContainEqual({ type: 'reasoning', content: 'step 1' });
+  });
+
+  test('parses Codex thinking items', () => {
+    expect(parseCodexStreamLine(JSON.stringify({
+      type: 'item.completed',
+      item: { id: 'item_0', type: 'thinking', text: 'planning' },
+    }))).toContainEqual({ type: 'reasoning', content: 'planning' });
+    expect(parseCodexStreamLine(JSON.stringify({
+      type: 'item.agent_message.delta',
+      reasoning: 'reasoning delta',
+    }))).toContainEqual({ type: 'reasoning', content: 'reasoning delta' });
+  });
+
   test('parses OpenCode text payloads', () => {
     expect(parseOpenCodeStreamLine(JSON.stringify({
       type: 'message',

@@ -167,6 +167,44 @@ button.wesight-wechat-publish-btn .wesight-wechat-publish-icon svg {
   stroke-width: 1.75px;
 }
 
+button.wesight-share-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--background-modifier-hover);
+  box-shadow: none;
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+button.wesight-share-btn:hover {
+  background: var(--background-modifier-active);
+  color: var(--text-normal);
+}
+
+button.wesight-share-btn .wesight-share-btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+button.wesight-share-btn .wesight-share-btn-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.75px;
+}
+
 .wesight-account-slot {
   display: flex;
   min-width: 26px;
@@ -4358,4 +4396,89 @@ body.theme-dark .wesight-wechat-publish-button {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
+}
+
+/* Chat message process log (reasoning + tool progress) */
+.wesight-message-process {
+  margin-bottom: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  overflow: hidden;
+}
+
+.wesight-message-process.is-collapsed .wesight-process-body {
+  display: none;
+}
+
+.wesight-process-toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: start;
+  cursor: pointer;
+}
+
+.wesight-process-toggle:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.wesight-process-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.wesight-process-item {
+  padding: 4px 0;
+}
+
+.wesight-process-item.is-thinking {
+  color: var(--text-muted);
+}
+
+.wesight-process-item.is-tool.is-error {
+  color: var(--text-error);
+}
+
+.wesight-process-item-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.wesight-process-item-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-monospace);
+}
+
+.wesight-process-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wesight-process-item-status {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.wesight-process-item-error {
+  margin-top: 2px;
+  color: var(--text-error);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

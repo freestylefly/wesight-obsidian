@@ -576,6 +576,12 @@ export class WeChatPreviewView extends ItemView {
       .setTitle('账户详情')
       .setIcon('circle-user-round')
       .onClick(() => this.options.auth.openAccount()));
+    if (user.isAdmin) {
+      menu.addItem(item => item
+        .setTitle('管理后台')
+        .setIcon('layout-dashboard')
+        .onClick(() => this.options.auth.openAdmin()));
+    }
     menu.addItem(item => item
       .setTitle('会员与积分')
       .setIcon('wallet-cards')

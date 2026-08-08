@@ -42,6 +42,7 @@ export interface CloudUser {
   userId: string;
   nickname: string;
   avatarUrl: string | null;
+  isAdmin?: boolean;
 }
 
 export interface CloudBillingSummary {

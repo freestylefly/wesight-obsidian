@@ -42,7 +42,7 @@ export class WeChatPublishingSettings {
     section.createEl('h3', { text: '微信公众号' });
     section.createEl('p', {
       cls: 'wesight-settings-section-intro',
-      text: '连接后可将当前笔记按 Canghe Style 同步到公众号后台草稿箱。',
+      text: '连接后可一键同步您选择的排版到公众号后台',
     });
     if (this.loading || this.operation) {
       const loading = section.createDiv({ cls: 'wesight-wechat-settings-loading' });
@@ -144,7 +144,7 @@ export class WeChatPublishingSettings {
     new Setting(section)
       .setName('先配置微信 IP 白名单')
       .setDesc(ip
-        ? `请先把 ${ip} 加入微信公众平台“开发 → 基本配置 → IP 白名单”。`
+        ? '请先把固定出口 IP 加入微信公众平台“开发 → 基本配置 → IP 白名单”。'
         : 'Cloud 尚未配置固定出口 IP，公众号连接暂不可用。')
       .addButton(button => button
         .setButtonText('复制 IP')
@@ -153,6 +153,11 @@ export class WeChatPublishingSettings {
           if (!ip) return;
           await navigator.clipboard.writeText(ip);
           new Notice('固定出口 IP 已复制。');
+        }))
+      .addButton(button => button
+        .setButtonText('前往配置')
+        .onClick(() => {
+          window.open('https://developers.weixin.qq.com/console', '_blank', 'noopener,noreferrer');
         }));
   }
 

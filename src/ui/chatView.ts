@@ -10,11 +10,13 @@ import type {
   AgentId,
   ChatImageArtifact,
   ChatMessage,
+  ChatMessageProcessItem,
   FileAttachment,
   ProviderProfile,
   RuntimeConfigSource,
   RuntimeTurnEvent,
   StoredConversation,
+  ToolCallEvent,
   WeSightObsidianSettings,
 } from '../types';
 import { createId } from '../utils/id';
@@ -25,7 +27,6 @@ import { RuntimeDiscovery } from '../runtime/discovery';
 import { RuntimeManager } from '../runtime/runtimeManager';
 import { getClaudeDetectedLocalModel, listLocalModels } from '../runtime/localModels';
 import { RuntimeSetupModal } from './runtimeSetupModal';
-import { shouldRenderToolEvent } from './toolEventVisibility';
 
 export const WESIGHT_VIEW_TYPE = 'wesight-chat-view';
 
@@ -38,6 +39,7 @@ export interface ChatViewDeps {
   auth: CloudAuthService;
   openSettings: () => void;
   openWeChatPreview: (file?: TFile) => Promise<void>;
+  openSharePopover: (file: TFile, anchor?: HTMLElement | null) => void;
 }
 
 interface ActiveEditorContext {
@@ -344,6 +346,13 @@ export class WeSightChatView extends ItemView {
 
     const headerActions = header.createDiv({ cls: 'wesight-header-actions' });
 
+    const shareButton = headerActions.createEl('button', { cls: 'wesight-share-btn' });
+    const shareIcon = shareButton.createSpan({ cls: 'wesight-share-btn-icon' });
+    setIcon(shareIcon, 'share');
+    shareButton.createSpan({ cls: 'wesight-share-btn-label', text: '分享' });
+    shareButton.ariaLabel = '打开分享面板';
+    shareButton.onclick = () => void this.openSharePopover(shareButton);
+
     const wechatPublishButton = headerActions.createEl('button', { cls: 'wesight-wechat-publish-btn' });
     const wechatIcon = wechatPublishButton.createSpan({ cls: 'wesight-wechat-publish-icon' });
     setIcon(wechatIcon, 'message-circle');
@@ -541,6 +550,12 @@ export class WeSightChatView extends ItemView {
       .setTitle('账户详情')
       .setIcon('circle-user-round')
       .onClick(() => this.deps.auth.openAccount()));
+    if (user.isAdmin) {
+      menu.addItem(item => item
+        .setTitle('管理后台')
+        .setIcon('layout-dashboard')
+        .onClick(() => this.deps.auth.openAdmin()));
+    }
     menu.addItem(item => item
       .setTitle('会员与积分')
       .setIcon('wallet-cards')
@@ -1303,6 +1318,10 @@ export class WeSightChatView extends ItemView {
         : message.role;
     item.createDiv({ cls: 'wesight-message-role', text: role });
     if (message.role === 'assistant' || message.role === 'error') {
+      if (message.role === 'assistant' && message.metadata?.process?.length) {
+        const collapsed = message.metadata.processCollapsed !== false;
+        this.renderProcessContainer(item, message, !collapsed);
+      }
       void this.renderMessageMarkdown(item, message);
     } else {
       item.createEl('pre', { cls: 'wesight-message-content', text: message.content });
@@ -1313,6 +1332,86 @@ export class WeSightChatView extends ItemView {
     if (message.role === 'assistant' && typeof message.metadata?.durationMs === 'number') {
       this.renderTurnDuration(item, message.metadata.durationMs);
     }
+  }
+
+
+  private renderProcessContainer(parent: HTMLElement, message: ChatMessage, expanded: boolean): {
+    container: HTMLElement;
+    body: HTMLElement;
+    toggle: HTMLElement;
+  } {
+    parent.querySelector('.wesight-message-process')?.remove();
+    const container = parent.createDiv({ cls: 'wesight-message-process' });
+    if (!expanded) container.addClass('is-collapsed');
+    const toggle = container.createEl('button', {
+      cls: 'wesight-process-toggle',
+      attr: { type: 'button' },
+    });
+    const body = container.createDiv({ cls: 'wesight-process-body' });
+    const processItems = message.metadata?.process ?? [];
+    this.updateProcessToggleLabel(toggle, processItems, expanded);
+    for (const item of processItems) {
+      this.renderProcessItem(body, item);
+    }
+    toggle.onclick = event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const collapsed = container.hasClass('is-collapsed');
+      container.toggleClass('is-collapsed', !collapsed);
+      message.metadata = { ...(message.metadata ?? {}), processCollapsed: !collapsed };
+      this.updateProcessToggleLabel(toggle, message.metadata?.process ?? [], collapsed);
+    };
+    return { container, body, toggle };
+  }
+
+  private updateProcessToggleLabel(toggle: HTMLElement, processItems: ChatMessageProcessItem[], expanded: boolean): void {
+    const thinkingCount = processItems.filter(item => item.type === 'thinking').length;
+    const toolCount = processItems.filter(item => item.type === 'tool').length;
+    const total = processItems.length;
+    if (expanded) {
+      toggle.setText('收起过程');
+    } else {
+      const parts: string[] = [];
+      if (thinkingCount) parts.push(`${thinkingCount} 个思考`);
+      if (toolCount) parts.push(`${toolCount} 个工具步骤`);
+      toggle.setText(parts.length ? `展开过程（${parts.join('，')}）` : `展开过程（${total}）`);
+    }
+  }
+
+  private ensureProcessItem(body: HTMLElement, id: string, type: 'thinking' | 'tool'): HTMLElement {
+    let el: HTMLElement | null = body.querySelector(`.wesight-process-item[data-process-id="${id}"]`);
+    if (!el) {
+      el = body.createDiv({ cls: `wesight-process-item is-${type}` });
+      el.dataset.processId = id;
+    }
+    return el;
+  }
+
+  private renderProcessItem(body: HTMLElement, item: ChatMessageProcessItem): HTMLElement {
+    const el = this.ensureProcessItem(body, item.id, item.type);
+    el.empty();
+    el.addClass(`is-${item.type}`);
+    if (item.type === 'thinking') {
+      el.createDiv({ cls: 'wesight-process-item-title', text: item.title });
+      const contentEl = el.createDiv({ cls: 'wesight-process-item-content' });
+      contentEl.setText(item.content ?? '');
+    } else {
+      const header = el.createDiv({ cls: 'wesight-process-item-header' });
+      header.createDiv({ cls: 'wesight-process-item-title', text: item.title });
+      const statusEl = header.createDiv({ cls: 'wesight-process-item-status' });
+      statusEl.setText(this.formatToolStatus(item.status));
+      if (item.status === 'error' && item.error) {
+        el.createDiv({ cls: 'wesight-process-item-error', text: item.error });
+      }
+    }
+    return el;
+  }
+
+  private formatToolStatus(status?: 'started' | 'completed' | 'error'): string {
+    if (status === 'started') return '执行中';
+    if (status === 'error') return '失败';
+    if (status === 'completed') return '已完成';
+    return status ?? '运行中';
   }
 
   private renderTurnDuration(parent: HTMLElement, durationMs: number): void {
@@ -1399,10 +1498,13 @@ export class WeSightChatView extends ItemView {
       content: '',
       createdAt: Date.now(),
       agentId: this.agentId,
+      metadata: { process: [] },
     };
     conversation.messages.push(assistantMessage);
     const assistantEl = this.messagesEl.createDiv({ cls: 'wesight-message is-assistant is-streaming' });
     assistantEl.createDiv({ cls: 'wesight-message-role', text: getAgentDescriptor(this.agentId).displayName });
+    const process = this.renderProcessContainer(assistantEl, assistantMessage, true);
+    process.container.hide();
     const contentEl = assistantEl.createEl('pre', { cls: 'wesight-message-content', text: 'Thinking...' });
 
     // Deltas are appended as text nodes instead of re-setting the whole message,
@@ -1415,6 +1517,45 @@ export class WeSightChatView extends ItemView {
         streamStarted = true;
       }
       contentEl.appendText(delta);
+    };
+    const processItems = assistantMessage.metadata!.process!;
+    const processBody = process.body;
+    const processToggle = process.toggle;
+    let processVisible = false;
+    const ensureProcessVisible = (): void => {
+      if (!processVisible) {
+        processVisible = true;
+        process.container.show();
+      }
+    };
+    const refreshProcessToggle = (): void => {
+      this.updateProcessToggleLabel(processToggle, processItems, processVisible);
+    };
+    const appendReasoning = (content: string): void => {
+      ensureProcessVisible();
+      let item = processItems.find(p => p.type === 'thinking');
+      if (!item) {
+        item = { id: 'thinking', type: 'thinking', title: '思考', content: '', createdAt: Date.now() };
+        processItems.push(item);
+      }
+      item.content += content;
+      this.renderProcessItem(processBody, item);
+      refreshProcessToggle();
+    };
+    const updateTool = (toolCall: ToolCallEvent): void => {
+      ensureProcessVisible();
+      let item = processItems.find(p => p.type === 'tool' && p.id === toolCall.id);
+      if (!item) {
+        item = { id: toolCall.id, type: 'tool', title: toolCall.name, status: toolCall.status, createdAt: Date.now() };
+        processItems.push(item);
+      } else {
+        item.status = toolCall.status;
+      }
+      item.input = toolCall.input;
+      item.output = toolCall.output;
+      item.error = toolCall.error;
+      this.renderProcessItem(processBody, item);
+      refreshProcessToggle();
     };
     const agentId = this.agentId;
     const onEvent = (event: RuntimeTurnEvent): void => {
@@ -1432,11 +1573,11 @@ export class WeSightChatView extends ItemView {
         appendDelta(event.content);
         assistantEl.removeClass('is-streaming');
         this.scheduleScrollToBottom();
+      } else if (event.type === 'reasoning') {
+        appendReasoning(event.content);
+        this.scheduleScrollToBottom();
       } else if (event.type === 'tool') {
-        if (!shouldRenderToolEvent(agentId, event.toolCall)) return;
-        const line = `\n\n• ${event.toolCall.name} ${event.toolCall.status}`;
-        assistantMessage.content += line;
-        appendDelta(line);
+        updateTool(event.toolCall);
         this.scheduleScrollToBottom();
       } else if (event.type === 'artifact') {
         const task = this.deps.vaultStore.importGeneratedImage(conversation.id, event.artifact).then(artifact => {
@@ -1508,6 +1649,11 @@ export class WeSightChatView extends ItemView {
         assistantMessage.role = 'assistant';
         assistantMessage.content = '当前任务已取消';
         assistantEl.removeClass('is-error');
+      }
+      if (processVisible) {
+        process.container.addClass('is-collapsed');
+        assistantMessage.metadata = { ...(assistantMessage.metadata ?? {}), processCollapsed: true };
+        this.updateProcessToggleLabel(processToggle, processItems, false);
       }
       if (assistantEl.isConnected) {
         await this.renderMessageMarkdown(assistantEl, assistantMessage);
@@ -1749,6 +1895,15 @@ export class WeSightChatView extends ItemView {
       return;
     }
     await this.deps.openWeChatPreview(file);
+  }
+
+  private async openSharePopover(anchor?: HTMLElement): Promise<void> {
+    const file = this.activeEditorContext?.file ?? this.app.workspace.getActiveFile();
+    if (!(file instanceof TFile)) {
+      new Notice('请先打开一篇笔记，再打开分享面板。');
+      return;
+    }
+    this.deps.openSharePopover(file, anchor ?? null);
   }
 
   private async resolveActiveEditorContext(maxChars: number): Promise<{ prompt: string; attachments: FileAttachment[] }> {

@@ -46,6 +46,20 @@ function contentArrayText(content: unknown): string | null {
   return parts.length ? parts.join('') : null;
 }
 
+function contentArrayReasoning(content: unknown): string | null {
+  if (!Array.isArray(content)) return null;
+  const parts: string[] = [];
+  for (const item of content) {
+    if (isRecord(item)) {
+      const blockType = firstString(item.type);
+      if (blockType !== 'thinking' && blockType !== 'reasoning') continue;
+      const text = firstText(item.thinking, item.reasoning, item.text, item.content);
+      if (text) parts.push(text);
+    }
+  }
+  return parts.length ? parts.join('') : null;
+}
+
 export function parseClaudeStreamLine(line: string): RuntimeTurnEvent[] {
   const events: RuntimeTurnEvent[] = [];
   const parsed = parseJson(line);
@@ -76,6 +90,10 @@ export function parseClaudeStreamLine(line: string): RuntimeTurnEvent[] {
     isRecord(parsed.message)
     && (eventType === 'assistant' || firstString(parsed.message.role) === 'assistant')
   ) {
+    const reasoning = contentArrayReasoning(parsed.message.content);
+    if (reasoning) {
+      events.push({ type: 'reasoning', content: reasoning });
+    }
     const messageText = contentArrayText(parsed.message.content) ?? firstText(parsed.message.text);
     if (messageText) {
       events.push({ type: 'text', content: messageText });
@@ -85,6 +103,8 @@ export function parseClaudeStreamLine(line: string): RuntimeTurnEvent[] {
   if (isRecord(parsed.delta)) {
     const deltaText = firstText(parsed.delta.text);
     if (deltaText) events.push({ type: 'text', content: deltaText });
+    const deltaReasoning = firstText(parsed.delta.thinking, parsed.delta.reasoning);
+    if (deltaReasoning) events.push({ type: 'reasoning', content: deltaReasoning });
   }
 
   if (isRecord(parsed.event)) {
@@ -93,6 +113,8 @@ export function parseClaudeStreamLine(line: string): RuntimeTurnEvent[] {
     if (nestedType === 'content_block_delta' && nestedDelta) {
       const deltaText = firstText(nestedDelta.text, nestedDelta.content);
       if (deltaText) events.push({ type: 'text', content: deltaText });
+      const deltaReasoning = firstText(nestedDelta.thinking, nestedDelta.reasoning);
+      if (deltaReasoning) events.push({ type: 'reasoning', content: deltaReasoning });
     }
   }
 
@@ -109,6 +131,8 @@ export function parseCodexStreamLine(line: string): RuntimeTurnEvent[] {
     return sessionId ? [{ type: 'session', sessionId }] : [];
   }
   if (type === 'item.agent_message.delta') {
+    const reasoning = firstText(parsed.reasoning, parsed.thinking);
+    if (reasoning) return [{ type: 'reasoning', content: reasoning }];
     const text = firstText(parsed.delta, parsed.text, parsed.message);
     return text ? [{ type: 'text', content: text }] : [];
   }
@@ -117,6 +141,10 @@ export function parseCodexStreamLine(line: string): RuntimeTurnEvent[] {
     if (itemType === 'agent_message' || itemType === 'message') {
       const text = firstText(parsed.item.text, parsed.item.message) ?? contentArrayText(parsed.item.content);
       return text ? [{ type: 'text', content: text }] : [];
+    }
+    if (itemType === 'thinking' || itemType === 'reasoning') {
+      const text = firstText(parsed.item.text, parsed.item.thinking, parsed.item.reasoning, parsed.item.content);
+      return text ? [{ type: 'reasoning', content: text }] : [];
     }
     if (itemType === 'command_execution' || itemType === 'tool_call') {
       return [{ type: 'tool', toolCall: toolFromRecord(parsed.item) }];
@@ -130,6 +158,10 @@ export function parseCodexStreamLine(line: string): RuntimeTurnEvent[] {
     if (itemType === 'agent_message') {
       const text = firstText(parsed.item.text, parsed.item.content) ?? contentArrayText(parsed.item.content);
       return text ? [{ type: 'text', content: text }] : [];
+    }
+    if (itemType === 'thinking' || itemType === 'reasoning') {
+      const text = firstText(parsed.item.text, parsed.item.thinking, parsed.item.reasoning, parsed.item.content);
+      return text ? [{ type: 'reasoning', content: text }] : [];
     }
     if (itemType === 'command_execution' || itemType === 'tool_call') {
       return [{ type: 'tool', toolCall: toolFromRecord(parsed.item) }];

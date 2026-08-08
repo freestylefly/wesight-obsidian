@@ -41,4 +41,19 @@ describe('CloudAuthService browser URLs', () => {
       'noopener,noreferrer',
     );
   });
+
+  test('opens admin dashboard with the Obsidian source', () => {
+    const open = vi.fn();
+    vi.stubGlobal('window', { open });
+    const auth = new CloudAuthService({} as never);
+
+    expect(auth.getAdminUrl()).toBe('https://pay.wesight.ai/admin');
+    auth.openAdmin();
+
+    expect(open).toHaveBeenCalledWith(
+      'https://pay.wesight.ai/admin?source=obsidian',
+      '_blank',
+      'noopener,noreferrer',
+    );
+  });
 });

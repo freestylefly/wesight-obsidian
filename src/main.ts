@@ -111,6 +111,9 @@ export default class WeSightPlugin extends Plugin {
           }
           return this.activateWeChatPreview(file);
         },
+        openSharePopover: (file: TFile, anchor?: HTMLElement | null) => {
+          this.sharePopover.open(file, anchor ?? null, 'internet');
+        },
       }),
     );
     this.registerView(

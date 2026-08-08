@@ -84,6 +84,11 @@ class FakeAppServerClient extends EventEmitter {
     this.emit('notification', 'item/completed', {
       threadId,
       turnId,
+      item: { type: 'thinking', id: `thinking-${threadId}`, text: 'reasoning text' },
+    });
+    this.emit('notification', 'item/completed', {
+      threadId,
+      turnId,
       item: { type: 'agentMessage', id: messageId, text: reply },
     });
     this.emit('notification', 'item/started', {
@@ -165,6 +170,7 @@ describe('CodexAppServerRuntime', () => {
     expect(first.filter(event => event.type === 'tool')).toHaveLength(3);
     const firstSession = first.find((event): event is Extract<RuntimeTurnEvent, { type: 'session' }> => event.type === 'session');
     const firstThreadId = firstSession?.sessionId ?? '';
+    expect(first.filter(event => event.type === 'reasoning')).toEqual([{ type: 'reasoning', content: 'reasoning text', id: `thinking-${firstThreadId}` }]);
     expect(first.find(event => event.type === 'artifact')).toMatchObject({
       type: 'artifact',
       artifact: {

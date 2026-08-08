@@ -376,6 +376,15 @@ export class CodexAppServerRuntime extends EventEmitter {
       }
       return;
     }
+    if (method === 'item/thinking/delta' || method === 'item/reasoning/delta') {
+      const itemId = stringAt(params, 'itemId') ?? 'thinking';
+      const delta = stringAt(params, 'delta');
+      if (delta) {
+        active.emittedDeltas.set(itemId, `${active.emittedDeltas.get(itemId) ?? ''}${delta}`);
+        active.listener({ type: 'reasoning', content: delta, id: itemId });
+      }
+      return;
+    }
     if (method === 'item/started' || method === 'item/completed') {
       this.deliverItem(active, recordAt(params, 'item'), method === 'item/completed');
       return;
@@ -422,6 +431,14 @@ export class CodexAppServerRuntime extends EventEmitter {
       active.emittedItems.add(id);
       const text = stringAt(item, 'text');
       if (text && !active.emittedDeltas.has(id)) active.listener({ type: 'text', content: text });
+      return;
+    }
+
+    if (type === 'thinking' || type === 'reasoning') {
+      if (!completed) return;
+      active.emittedItems.add(id);
+      const text = stringAt(item, 'text') ?? stringAt(item, 'thinking') ?? stringAt(item, 'reasoning') ?? stringAt(item, 'content');
+      if (text && !active.emittedDeltas.has(id)) active.listener({ type: 'reasoning', content: text, id });
       return;
     }
 
