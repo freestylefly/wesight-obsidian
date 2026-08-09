@@ -3,7 +3,7 @@ import path from 'path';
 
 import type { DataAdapter } from 'obsidian';
 
-import type { ChatImageArtifact, ChatMessage, StoredConversation } from '../types';
+import type { ChatImageArtifact, ChatMessage, ConversationMode, StoredConversation } from '../types';
 import { createId } from '../utils/id';
 import type { SlashCommand } from '../utils/slashCommands';
 
@@ -36,7 +36,7 @@ export class VaultStore {
    * never persisted; the first replaceConversation() call after a message is
    * sent inserts it into the store.
    */
-  createDraftConversation(agentId: StoredConversation['agentId']): StoredConversation {
+  createDraftConversation(agentId: StoredConversation['agentId'], mode: ConversationMode = 'chat'): StoredConversation {
     const now = Date.now();
     return {
       id: createId('conv'),
@@ -45,6 +45,7 @@ export class VaultStore {
       createdAt: now,
       updatedAt: now,
       messages: [],
+      mode,
     };
   }
 

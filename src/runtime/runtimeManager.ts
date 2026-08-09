@@ -68,20 +68,23 @@ export class RuntimeManager {
    * output.
    */
   async runTurn(request: ChatTurnRequest, onEvent: RuntimeEventListener): Promise<void> {
+    const logRuntime = request.logPolicy !== 'metadata-only';
     const deliver = (event: RuntimeTurnEvent): void => {
       if (event.type === 'error') {
         if (event.providerProfileId && event.retryAfterSeconds) {
           this.cooldownByProfile.set(event.providerProfileId, Date.now() + event.retryAfterSeconds * 1_000);
         }
-        appendLocalLog('runtime_error', {
-          message: event.message,
-          detail: event.detail,
-          statusCode: event.statusCode,
-          retryAfterSeconds: event.retryAfterSeconds,
-          requestId: event.requestId,
-          providerProfileId: event.providerProfileId,
-          diagnostic: event.diagnostic,
-        });
+        if (logRuntime) {
+          appendLocalLog('runtime_error', {
+            message: event.message,
+            detail: event.detail,
+            statusCode: event.statusCode,
+            retryAfterSeconds: event.retryAfterSeconds,
+            requestId: event.requestId,
+            providerProfileId: event.providerProfileId,
+            diagnostic: event.diagnostic,
+          });
+        }
       }
       onEvent(event);
     };
@@ -97,7 +100,7 @@ export class RuntimeManager {
       configSources: settings.configSources,
     }).resolve(request.agentId, { withVersion: request.agentId === 'codex' });
     if (!status.binaryPath) {
-      appendLocalLog('runtime_missing', { agentId: request.agentId, error: status.error });
+      if (logRuntime) appendLocalLog('runtime_missing', { agentId: request.agentId, error: status.error });
       deliver({
         type: 'error',
         message: `${status.descriptor.displayName} is not installed.`,
@@ -117,32 +120,38 @@ export class RuntimeManager {
         return;
       }
       const startedAt = Date.now();
-      appendLocalLog('runtime_turn_start', {
-        agentId: 'codex',
-        configSource: 'localCli',
-        binarySource: status.source,
-        model: this.codexRuntime.getStatus().currentModelId,
-      });
+      if (logRuntime) {
+        appendLocalLog('runtime_turn_start', {
+          agentId: 'codex',
+          configSource: 'localCli',
+          binarySource: status.source,
+          model: this.codexRuntime.getStatus().currentModelId,
+        });
+      }
       await this.codexRuntime.runTurn(request, {
         binaryPath: status.binaryPath,
         binarySource: status.source,
         version: status.version,
         env: mergeEnvironment(process.env, settings.sharedEnvironmentVariables),
       }, deliver);
-      appendLocalLog('runtime_turn_finish', {
-        agentId: 'codex',
-        durationMs: Date.now() - startedAt,
-        cancelled: Boolean(request.signal?.aborted),
-      });
+      if (logRuntime) {
+        appendLocalLog('runtime_turn_finish', {
+          agentId: 'codex',
+          durationMs: Date.now() - startedAt,
+          cancelled: Boolean(request.signal?.aborted),
+        });
+      }
       return;
     }
 
     const profile = this.resolveProviderProfile(request);
     if (request.configSource === 'providerProfile' && !profile) {
-      appendLocalLog('runtime_profile_missing', {
-        agentId: request.agentId,
-        providerProfileId: request.providerProfileId ?? null,
-      });
+      if (logRuntime) {
+        appendLocalLog('runtime_profile_missing', {
+          agentId: request.agentId,
+          providerProfileId: request.providerProfileId ?? null,
+        });
+      }
       deliver({
         type: 'error',
         message: 'The selected provider profile no longer exists.',
@@ -183,24 +192,28 @@ export class RuntimeManager {
     request.signal?.addEventListener('abort', cancelAdapter, { once: true });
     this.activeAdapters.add(adapter);
     const startedAt = Date.now();
-    appendLocalLog('runtime_turn_start', {
-      agentId: request.agentId,
-      configSource: request.configSource,
-      providerProfileId: profile?.id,
-      providerName: profile?.name,
-      providerHost: profile ? providerHost(profile.baseUrl) : null,
-      model: profile?.defaultModel || profile?.model || request.model || null,
-      anthropicAuthMode: profile?.agentId === 'claude' ? resolveAnthropicAuthMode(profile) : null,
-    });
+    if (logRuntime) {
+      appendLocalLog('runtime_turn_start', {
+        agentId: request.agentId,
+        configSource: request.configSource,
+        providerProfileId: profile?.id,
+        providerName: profile?.name,
+        providerHost: profile ? providerHost(profile.baseUrl) : null,
+        model: profile?.defaultModel || profile?.model || request.model || null,
+        anthropicAuthMode: profile?.agentId === 'claude' ? resolveAnthropicAuthMode(profile) : null,
+      });
+    }
     const unsubscribe = adapter.onRuntimeEvent(deliver);
     try {
       await adapter.run(request);
-      appendLocalLog('runtime_turn_finish', {
-        agentId: request.agentId,
-        providerProfileId: profile?.id,
-        durationMs: Date.now() - startedAt,
-        cancelled: Boolean(request.signal?.aborted),
-      });
+      if (logRuntime) {
+        appendLocalLog('runtime_turn_finish', {
+          agentId: request.agentId,
+          providerProfileId: profile?.id,
+          durationMs: Date.now() - startedAt,
+          cancelled: Boolean(request.signal?.aborted),
+        });
+      }
     } finally {
       request.signal?.removeEventListener('abort', cancelAdapter);
       unsubscribe();

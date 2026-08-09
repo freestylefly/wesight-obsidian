@@ -1048,6 +1048,10 @@ button.wesight-history-item-delete:hover {
   cursor: pointer;
 }
 
+.wesight-permission-toggle.is-hidden {
+  display: none;
+}
+
 .wesight-permission-label {
   min-width: 28px;
   color: var(--text-muted);
@@ -1057,6 +1061,44 @@ button.wesight-history-item-delete:hover {
 .wesight-permission-label.plan-active {
   color: rgb(92, 148, 140);
   font-weight: 600;
+}
+
+.wesight-permission-label.knowledge-active {
+  color: var(--wesight-brand);
+  font-weight: 600;
+}
+
+button.wesight-kb-mode-switch {
+  height: auto;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+}
+
+button.wesight-kb-mode-switch:hover,
+button.wesight-kb-mode-switch:focus-visible {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+button.wesight-kb-mode-switch.is-locked .wesight-permission-label {
+  color: var(--text-faint);
+}
+
+.wesight-kb-mode-lock {
+  display: inline-flex;
+  color: var(--text-faint);
+}
+
+.wesight-kb-mode-lock svg {
+  width: 12px;
+  height: 12px;
+}
+
+.wesight-kb-mode-label {
+  min-width: 33px;
 }
 
 .wesight-toggle-switch {
@@ -1287,6 +1329,195 @@ button.wesight-settings-tab.is-active::after {
 
 .wesight-settings-panel {
   min-width: 0;
+}
+
+.wesight-kb-status {
+  margin: 0.75rem 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.wesight-kb-beta-badge {
+  display: inline-flex;
+  margin-left: 0.5rem;
+  padding: 0.08rem 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 38%, transparent);
+  border-radius: 999px;
+  color: var(--interactive-accent);
+  font-size: 0.68rem;
+  font-weight: 650;
+  vertical-align: middle;
+}
+
+.wesight-kb-access-status {
+  font-weight: 600;
+}
+
+.wesight-kb-status > div + div {
+  margin-top: 0.2rem;
+}
+
+.wesight-kb-progress {
+  min-height: 1.25rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.wesight-kb-error {
+  color: var(--text-error);
+  margin-top: 0.5rem;
+}
+
+.wesight-kb-actions,
+.wesight-kb-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.wesight-kb-save-button {
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.wesight-kb-save-button:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.wesight-kb-save-button.is-locked {
+  color: var(--text-faint);
+}
+
+.wesight-kb-access-modal h2 {
+  margin: 0.5rem 0;
+}
+
+.wesight-kb-access-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+}
+
+.wesight-kb-access-icon svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.wesight-kb-access-note {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.wesight-kb-access-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.wesight-kb-preview-warnings {
+  color: var(--text-error);
+  margin: 0.75rem 0;
+}
+
+.wesight-kb-preview-summary,
+.wesight-kb-health-summary {
+  margin: 0.75rem 0;
+  color: var(--text-muted);
+}
+
+.wesight-kb-health-finding {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.wesight-kb-health-finding.is-critical,
+.wesight-kb-health-finding.is-high {
+  border-left-color: var(--text-error);
+}
+
+.wesight-kb-health-finding.is-medium {
+  border-left-color: var(--text-warning);
+}
+
+.wesight-kb-answer-badge {
+  color: var(--interactive-accent);
+}
+
+.wesight-kb-answer-badge {
+  display: inline-flex;
+  width: fit-content;
+  margin: 0 0 0.35rem;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 40%, transparent);
+  border-radius: 999px;
+  font-size: 0.7rem;
+}
+
+.wesight-kb-saved-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.wesight-kb-saved-state button {
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wesight-kb-citations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.65rem;
+}
+
+.wesight-kb-citations-title {
+  flex-basis: 100%;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.wesight-kb-citations button {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.35rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wesight-kb-citation-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.wesight-kb-citation-icon svg {
+  width: 0.85rem;
+  height: 0.85rem;
 }
 
 .wesight-provider-console {

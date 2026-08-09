@@ -186,7 +186,18 @@ export class AgentAdapter extends EventEmitter {
           '--effort',
           'low',
           '--system-prompt',
-          'Follow the user instructions exactly and return only the requested text output.',
+          request.systemPrompt?.trim() || 'Follow the user instructions exactly and return only the requested text output.',
+        );
+      } else if (request.accessMode === 'read-only') {
+        args.push(
+          '--safe-mode',
+          '--disable-slash-commands',
+          '--tools',
+          'Read,Glob,Grep',
+          '--permission-mode',
+          'plan',
+          '--system-prompt',
+          request.systemPrompt?.trim() || 'Read only. Do not modify files or execute commands.',
         );
       }
       const model = request.configSource === 'providerProfile'
@@ -198,7 +209,7 @@ export class AgentAdapter extends EventEmitter {
       if (request.sessionId?.trim()) {
         args.push('--resume', request.sessionId.trim());
       }
-      if (request.planMode) {
+      if (request.planMode && request.accessMode !== 'read-only') {
         args.push('--permission-mode', 'plan');
       }
       // `claude -p` without a positional prompt reads it from stdin.

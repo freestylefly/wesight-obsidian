@@ -171,4 +171,33 @@ describe('RuntimeManager provider safeguards', () => {
     expect(fastEvents).toContainEqual({ type: 'text', content: 'FAST' });
     expect(fastEvents).toContainEqual({ type: 'done' });
   });
+
+  test('suppresses prompt-adjacent runtime logs for metadata-only knowledge turns', async () => {
+    const canary = 'SENSITIVE_KNOWLEDGE_CANARY';
+    const binaryPath = path.join(tempDir, 'fake-claude-private');
+    fs.writeFileSync(binaryPath, [
+      '#!/bin/sh',
+      'cat >/dev/null',
+      `echo ${JSON.stringify(`API Error: ${canary} /private/vault/note.md`)} >&2`,
+      'exit 1',
+    ].join('\n'));
+    fs.chmodSync(binaryPath, 0o755);
+    const profile = makeProfile('sk-test');
+    const providerStore = { find: () => profile } as unknown as ProviderStore;
+    const manager = new RuntimeManager(providerStore, () => makeSettings(binaryPath));
+
+    await manager.runTurn({
+      ...request,
+      prompt: canary,
+      logPolicy: 'metadata-only',
+      accessMode: 'read-only',
+    }, () => undefined);
+
+    const logs = path.join(tempDir, 'logs');
+    const text = fs.existsSync(logs)
+      ? fs.readdirSync(logs).map(file => fs.readFileSync(path.join(logs, file), 'utf8')).join('\n')
+      : '';
+    expect(text).not.toContain(canary);
+    expect(text).not.toContain('/private/vault/note.md');
+  });
 });

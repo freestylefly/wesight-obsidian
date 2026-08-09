@@ -1,5 +1,13 @@
 # Third-Party Notices
 
+## claude-obsidian
+
+Knowledge Brain downloads [AgriciDaniel/claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) on demand. WeSight pins version `2.1.0` at commit `a3b3df4539802e150e942266fd310c1b5978a3c0` and verifies the archive before installation.
+
+Copyright (c) 2026 AgriciDaniel (AI Marketing Hub).
+
+License: MIT. The license text is available at `LICENSES/claude-obsidian-MIT.txt` and is also included in the downloaded runtime archive.
+
 ## gzh-design-skill
 
 WeSight includes a functional subset of

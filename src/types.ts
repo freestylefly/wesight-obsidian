@@ -4,6 +4,10 @@ export type AgentId = 'claude' | 'codex' | 'opencode';
 
 export type RuntimeConfigSource = 'localCli' | 'providerProfile';
 
+export type RuntimeAccessMode = 'read-only' | 'workspace-write';
+
+export type ConversationMode = 'chat' | 'knowledge';
+
 export type RuntimeBinarySource = 'configured' | 'desktopApp' | 'managed' | 'path';
 
 export type AgentStatusState = 'ready' | 'missing' | 'unsupported';
@@ -108,6 +112,22 @@ export interface ChatMessageMetadata extends Record<string, unknown> {
   process?: ChatMessageProcessItem[];
   /** Whether the process log is collapsed for a completed assistant message. */
   processCollapsed?: boolean;
+  /** Marks an answer rendered from the local knowledge brain. */
+  knowledgeBased?: boolean;
+  /** Host-validated knowledge pages and immutable source snapshots used by the answer. */
+  knowledgeCitations?: Array<{
+    path: string;
+    kind: 'knowledge' | 'source';
+    line?: number;
+  }>;
+  /** Marks a user-cancelled turn so it cannot be saved as a successful answer. */
+  cancelled?: boolean;
+  /** Applied knowledge transaction paths for an explicitly saved answer. */
+  knowledgeSave?: {
+    status: 'saved';
+    changedPaths: string[];
+    savedAt: number;
+  };
 }
 
 export interface ToolCallEvent {
@@ -141,6 +161,10 @@ export interface ChatTurnRequest {
   attachments?: FileAttachment[];
   /** Runs generation without tools, project customizations, or session persistence. */
   textOnly?: boolean;
+  /** Hard filesystem access boundary requested from the agent runtime. */
+  accessMode?: RuntimeAccessMode;
+  /** Suppresses prompt-adjacent runtime diagnostics for privacy-sensitive knowledge turns. */
+  logPolicy?: 'standard' | 'metadata-only';
   /** Cancels only this runtime turn without stopping other active agents. */
   signal?: AbortSignal;
 }
@@ -207,8 +231,12 @@ export interface StoredConversation {
   createdAt: number;
   updatedAt: number;
   messages: ChatMessage[];
+  /** Missing on legacy conversations, which are read as ordinary chat. */
+  mode?: ConversationMode;
   /** Last runtime session id per agent, used to resume multi-turn context. */
   sessionIds?: Partial<Record<AgentId, string>>;
+  /** Session IDs isolated by chat mode. Legacy sessionIds belong to chat mode. */
+  modeSessionIds?: Partial<Record<ConversationMode, Partial<Record<AgentId, string>>>>;
 }
 
 export type ConfigSourcesByAgent = Record<AgentId, RuntimeConfigSource>;

@@ -132,4 +132,31 @@ describe('AgentAdapter Claude provider failures', () => {
     expect(args).toContain('low');
     expect(args).toContain('--system-prompt');
   });
+
+  test('limits read-only Claude turns to safe read tools and plan permission mode', async () => {
+    const argsPath = path.join(tempDir, 'read-only-args.json');
+    const binaryPath = path.join(tempDir, 'fake-claude-read-only');
+    fs.writeFileSync(binaryPath, [
+      '#!/bin/sh',
+      `printf '%s\n' "$@" > ${JSON.stringify(argsPath)}`,
+      'cat >/dev/null',
+      'echo \'{"type":"result","subtype":"success","result":"done"}\'',
+    ].join('\n'));
+    fs.chmodSync(binaryPath, 0o755);
+    const adapter = new AgentAdapter({
+      agentId: 'claude',
+      binaryPath,
+      sharedEnvironmentVariables: '',
+      providerProfile: profile,
+    });
+
+    await adapter.run({ ...request, accessMode: 'read-only', systemPrompt: 'Only inspect supplied evidence.' });
+
+    const args = fs.readFileSync(argsPath, 'utf8').split('\n');
+    expect(args).toContain('--safe-mode');
+    expect(args).toContain('--disable-slash-commands');
+    expect(args[args.indexOf('--tools') + 1]).toBe('Read,Glob,Grep');
+    expect(args[args.indexOf('--permission-mode') + 1]).toBe('plan');
+    expect(args[args.indexOf('--system-prompt') + 1]).toBe('Only inspect supplied evidence.');
+  });
 });

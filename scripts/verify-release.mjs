@@ -55,6 +55,10 @@ requireCondition(license.includes('GNU AFFERO GENERAL PUBLIC LICENSE'), 'Root li
 
 const bundle = fs.readFileSync('main.js', 'utf8');
 requireCondition(!/sourceMappingURL=/.test(bundle), 'Production main.js must not include a source map.');
+requireCondition(
+  !/\bimport\(\s*["'](?:node:)?(?:assert|buffer|child_process|crypto|events|fs(?:\/promises)?|https?|os|path|stream|url|util|zlib)["']\s*\)/.test(bundle),
+  'Production main.js must not dynamically import Node.js built-ins in the Obsidian renderer.',
+);
 for (const relativePath of fs.readdirSync('src', { recursive: true })) {
   if (!relativePath.endsWith('.ts')) continue;
   const source = fs.readFileSync(`src/${relativePath}`, 'utf8');

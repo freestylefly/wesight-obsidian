@@ -20,6 +20,11 @@ import { inferAnthropicAuthMode, requiresProviderApiKey } from '../utils/provide
 import { fetchProviderModels, resolveProviderModels, testProviderConnection } from '../utils/providerModels';
 import type { WeChatCloudApi } from '../wechat/cloudApi';
 import { promptForText } from './textPromptModal';
+import type { KnowledgeBrain } from '../knowledgeBrain/service';
+import type { KnowledgeBrainEntitlementService } from '../knowledgeBrain/entitlement';
+import { KnowledgeBrainAccessModal } from '../knowledgeBrain/accessModal';
+import type { KnowledgeBrainAccessStatus } from '../knowledgeBrain/types';
+import { KnowledgeHealthModal, KnowledgeRecoveryModal } from '../knowledgeBrain/healthModal';
 import { WeChatPublishingSettings } from './wechatPublishingSettings';
 import { initializeStoredSecretInput, resolveSecretInput } from './secretInput';
 
@@ -31,6 +36,8 @@ interface SettingsTabDeps {
   refreshViews: () => void;
   cloudAuth: CloudAuthService;
   wechatApi: WeChatCloudApi;
+  knowledgeBrain: KnowledgeBrain;
+  knowledgeBrainEntitlement: KnowledgeBrainEntitlementService;
 }
 
 type SettingsTabId = 'general' | AgentId;
@@ -214,6 +221,7 @@ export class WeSightSettingTab extends PluginSettingTab {
   private activeTab: SettingsTabId = 'general';
   private selectedProviderKey = 'deepseek';
   private readonly publishingSettings: WeChatPublishingSettings;
+  private knowledgeStatusListener: ((event: { message?: string }) => void) | null = null;
 
   constructor(app: App, plugin: Plugin, private readonly deps: SettingsTabDeps) {
     super(app, plugin);
@@ -230,6 +238,9 @@ export class WeSightSettingTab extends PluginSettingTab {
       this.publishingSettings.activate(true);
       this.display();
     }));
+    plugin.register(deps.knowledgeBrainEntitlement.onChange(() => {
+      if (this.activeTab === 'general') this.display();
+    }));
   }
 
   openTab(tab: SettingsTabId): void {
@@ -239,6 +250,10 @@ export class WeSightSettingTab extends PluginSettingTab {
   }
 
   override display(): void {
+    if (this.knowledgeStatusListener) {
+      this.deps.knowledgeBrain.off('status', this.knowledgeStatusListener);
+      this.knowledgeStatusListener = null;
+    }
     const { containerEl } = this;
     containerEl.empty();
     this.renderTabs(containerEl);
@@ -249,10 +264,19 @@ export class WeSightSettingTab extends PluginSettingTab {
       this.publishingSettings.activate();
       this.renderEnvironment(panel);
       this.renderPrivacy(panel);
+      this.renderKnowledgeBrainCard(panel);
       return;
     }
     this.renderAgentSettings(panel, this.activeTab);
     if (this.activeTab !== 'codex') this.renderProfiles(panel, this.activeTab);
+  }
+
+  override hide(): void {
+    if (this.knowledgeStatusListener) {
+      this.deps.knowledgeBrain.off('status', this.knowledgeStatusListener);
+      this.knowledgeStatusListener = null;
+    }
+    super.hide();
   }
 
   private renderTabs(containerEl: HTMLElement): void {
@@ -297,6 +321,131 @@ export class WeSightSettingTab extends PluginSettingTab {
             this.deps.refreshViews();
           });
       });
+  }
+
+
+  private renderKnowledgeBrainCard(containerEl: HTMLElement): void {
+    const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
+    const heading = new Setting(section).setName('知识大脑').setHeading();
+    heading.nameEl.createSpan({ cls: 'wesight-kb-beta-badge', text: '会员内测' });
+    const statusEl = section.createDiv({ cls: 'wesight-kb-status' });
+    const progressEl = section.createDiv({ cls: 'wesight-kb-progress' });
+    const actions = section.createDiv({ cls: 'wesight-kb-actions' });
+    const enableBtn = actions.createEl('button', { text: '开启知识大脑' });
+    const cancelBtn = actions.createEl('button', { text: '取消初始化' });
+    cancelBtn.hide();
+    const healthBtn = actions.createEl('button', { text: '运行健康检查' });
+    const recoveryBtn = actions.createEl('button', { text: '恢复中断事务' });
+    recoveryBtn.hide();
+    const accessBtn = actions.createEl('button', { cls: 'mod-cta', text: '检查会员资格' });
+    accessBtn.hide();
+    let latestAccess: KnowledgeBrainAccessStatus | null = null;
+    const openAccess = (): void => {
+      if (!latestAccess) return;
+      new KnowledgeBrainAccessModal(
+        this.app,
+        this.deps.cloudAuth,
+        latestAccess,
+        async () => { await this.deps.knowledgeBrainEntitlement.probe(true); },
+      ).open();
+    };
+    const renderStatus = async (): Promise<void> => {
+      statusEl.empty();
+      const status = await this.deps.knowledgeBrain.probe();
+      latestAccess = status.access;
+      const accessLine = statusEl.createDiv({ cls: 'wesight-kb-access-status' });
+      if (status.access.allowed) {
+        accessLine.setText(status.access.state === 'offline-grace' ? '会员资格：离线可用' : '会员资格：已验证');
+        if (status.access.expiresAt) {
+          const expiry = new Date(status.access.expiresAt).toLocaleDateString('zh-CN');
+          accessLine.createSpan({ text: ` · 至 ${expiry}` });
+        }
+      } else {
+        accessLine.setText(status.access.reason ?? '知识大脑会员资格不可用。');
+        accessLine.addClass('wesight-kb-error');
+      }
+      const labels: Record<string, string> = {
+        disabled: '未开启',
+        installing: '初始化中…',
+        'needs-python': '需要 Python 3.11+',
+        'needs-agent': '需要可用 Agent',
+        ready: '已就绪',
+        busy: '运行中',
+        'recovery-required': '需要恢复',
+        unsupported: '当前平台不支持',
+        error: '错误',
+      };
+      statusEl.createDiv({ text: `状态：${labels[status.state] ?? status.state}` });
+      if (status.pythonVersion) {
+        statusEl.createDiv({ text: `Python：${status.pythonVersion} (${status.pythonPath ?? ''})` });
+      }
+      if (status.runtimeVersion) {
+        statusEl.createDiv({ text: `运行包：${status.runtimeVersion}` });
+      }
+      statusEl.createDiv({
+        text: `Agent：Claude ${status.availableAgents.claude ? '可用' : '不可用'} · Codex ${status.availableAgents.codex ? '可用' : '不可用'}`,
+      });
+      if (status.doctorOk !== null) statusEl.createDiv({ text: `Doctor：${status.doctorOk ? '通过' : '未通过'}` });
+      if (status.retrieveCapability) statusEl.createDiv({ text: `检索能力：${status.retrieveCapability}` });
+      if (status.error) {
+        statusEl.createDiv({ text: status.error, cls: 'wesight-kb-error' });
+      }
+      recoveryBtn.toggle(status.state === 'recovery-required');
+      enableBtn.toggle(status.access.allowed);
+      enableBtn.disabled = status.state === 'installing' || status.state === 'busy';
+      healthBtn.toggle(Boolean(status.runtimeVersion && status.vaultAdopted));
+      accessBtn.toggle(!status.access.allowed);
+      accessBtn.setText(status.access.state === 'login-required'
+        ? '登录 WeSight'
+        : status.access.state === 'membership-required'
+          ? '开通会员'
+          : status.access.state === 'expired'
+            ? '续费会员'
+            : '重新检查');
+    };
+    void renderStatus();
+    this.knowledgeStatusListener = event => {
+      progressEl.setText(event.message ?? '知识大脑正在处理…');
+    };
+    this.deps.knowledgeBrain.on('status', this.knowledgeStatusListener);
+    enableBtn.onclick = async () => {
+      const access = await this.deps.knowledgeBrainEntitlement.probe();
+      latestAccess = access;
+      if (!access.allowed) {
+        openAccess();
+        return;
+      }
+      enableBtn.disabled = true;
+      enableBtn.setText('正在开启…');
+      cancelBtn.show();
+      const result = await this.deps.knowledgeBrain.enable();
+      await renderStatus();
+      cancelBtn.hide();
+      enableBtn.disabled = false;
+      enableBtn.setText(result.ok ? '知识大脑已开启' : '重新开启');
+      progressEl.setText(result.ok ? '初始化完成。' : (result.error ?? '初始化失败。'));
+    };
+    cancelBtn.onclick = () => {
+      this.deps.knowledgeBrain.cancel();
+      progressEl.setText('正在取消初始化…');
+    };
+    healthBtn.onclick = async () => {
+      healthBtn.disabled = true;
+      healthBtn.setText('检查中…');
+      const report = await this.deps.knowledgeBrain.runHealthCheck();
+      await renderStatus();
+      healthBtn.disabled = false;
+      healthBtn.setText('运行健康检查');
+      new KnowledgeHealthModal(this.app, report).open();
+    };
+    recoveryBtn.onclick = () => {
+      new KnowledgeRecoveryModal(this.app, async () => {
+        const report = await this.deps.knowledgeBrain.recover();
+        await renderStatus();
+        return report;
+      }).open();
+    };
+    accessBtn.onclick = openAccess;
   }
 
   private renderAgentSettings(containerEl: HTMLElement, agentId: AgentId): void {

@@ -111,4 +111,24 @@ describe('VaultStore generated images', () => {
       sourcePath: textPath,
     })).rejects.toThrow('unsupported');
   });
+
+  test('persists knowledge mode and separate agent session IDs while accepting legacy conversations', async () => {
+    const adapter = new MemoryAdapter();
+    const store = new VaultStore(adapter as unknown as DataAdapter);
+    const conversation = store.createDraftConversation('codex', 'knowledge');
+    conversation.modeSessionIds = { knowledge: { codex: 'kb-thread' }, chat: { codex: 'chat-thread' } };
+    await store.replaceConversation(conversation);
+
+    expect(await store.getConversation(conversation.id)).toMatchObject({
+      mode: 'knowledge',
+      modeSessionIds: { knowledge: { codex: 'kb-thread' }, chat: { codex: 'chat-thread' } },
+    });
+
+    adapter.texts.set('.wesight/conversations.json', JSON.stringify({
+      version: 1,
+      conversations: [{ id: 'legacy', title: 'Legacy', agentId: 'claude', createdAt: 1, updatedAt: 1, messages: [] }],
+    }));
+    const legacy = await store.getConversation('legacy');
+    expect(legacy?.mode).toBeUndefined();
+  });
 });

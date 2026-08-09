@@ -11,6 +11,7 @@ import type {
   ChatImageArtifact,
   ChatMessage,
   ChatMessageProcessItem,
+  ConversationMode,
   FileAttachment,
   ProviderProfile,
   RuntimeConfigSource,
@@ -19,6 +20,11 @@ import type {
   ToolCallEvent,
   WeSightObsidianSettings,
 } from '../types';
+import type { KnowledgeBrain } from '../knowledgeBrain/service';
+import type { KnowledgeBrainEntitlementService } from '../knowledgeBrain/entitlement';
+import type { KnowledgeBrainAccessStatus, KnowledgeRuntimeEvent } from '../knowledgeBrain/types';
+import { KnowledgePreviewModal } from '../knowledgeBrain/previewModal';
+import { KnowledgeBrainAccessModal } from '../knowledgeBrain/accessModal';
 import { createId } from '../utils/id';
 import { resolveMentions, findMentionQuery, findSlashQuery } from '../utils/context';
 import { filterSlashCommands, loadChatSkills, type SlashCommand } from '../utils/slashCommands';
@@ -40,6 +46,8 @@ export interface ChatViewDeps {
   openSettings: () => void;
   openWeChatPreview: (file?: TFile) => Promise<void>;
   openSharePopover: (file: TFile, anchor?: HTMLElement | null) => void;
+  knowledgeBrain: KnowledgeBrain;
+  knowledgeBrainEntitlement: KnowledgeBrainEntitlementService;
 }
 
 interface ActiveEditorContext {
@@ -55,6 +63,7 @@ export class WeSightChatView extends ItemView {
   private conversation: StoredConversation | null = null;
   private agentId: AgentId = 'claude';
   private planMode = false;
+  private conversationMode: ConversationMode = 'chat';
   private selectedSkill: SlashCommand | null = null;
   private skillPillEl: HTMLElement | null = null;
   private messagesEl!: HTMLElement;
@@ -81,6 +90,7 @@ export class WeSightChatView extends ItemView {
   private submenuHideTimeout: number | null = null;
   private scrollScheduled = false;
   private authUnsubscribe: (() => void) | null = null;
+  private knowledgeAccessUnsubscribe: (() => void) | null = null;
   private codexStatusUnsubscribe: (() => void) | null = null;
   private accountMenu: Menu | null = null;
 
@@ -98,6 +108,23 @@ export class WeSightChatView extends ItemView {
 
   override getIcon(): string {
     return 'sparkles';
+  }
+
+  async activateKnowledgeMode(): Promise<void> {
+    await this.switchConversationMode('knowledge');
+  }
+
+  async saveLatestAnswerToKnowledgeBrain(): Promise<void> {
+    const message = [...(this.conversation?.messages ?? [])].reverse().find(item => (
+      item.role === 'assistant'
+      && item.content.trim().length > 0
+      && item.metadata?.cancelled !== true
+    ));
+    if (!message) {
+      new Notice('当前对话没有可保存的成功回答。');
+      return;
+    }
+    await this.openKnowledgeSavePreview(message);
   }
 
   override async onOpen(): Promise<void> {
@@ -120,6 +147,14 @@ export class WeSightChatView extends ItemView {
         this.accountMenu?.hide();
         this.accountMenu = null;
         this.renderAccountControl();
+      });
+    }
+    if (!this.knowledgeAccessUnsubscribe) {
+      this.knowledgeAccessUnsubscribe = this.deps.knowledgeBrainEntitlement.onChange(() => {
+        if (this.running) return;
+        this.render();
+        this.renderMessages();
+        this.refreshStatus();
       });
     }
     if (!this.codexStatusUnsubscribe) {
@@ -147,6 +182,8 @@ export class WeSightChatView extends ItemView {
     this.accountMenu = null;
     this.authUnsubscribe?.();
     this.authUnsubscribe = null;
+    this.knowledgeAccessUnsubscribe?.();
+    this.knowledgeAccessUnsubscribe = null;
     this.codexStatusUnsubscribe?.();
     this.codexStatusUnsubscribe = null;
   }
@@ -322,6 +359,28 @@ export class WeSightChatView extends ItemView {
     };
   }
 
+  private knowledgeComposerPlaceholder(): string {
+    if (this.conversationMode !== 'knowledge') return 'Message WeSight...';
+    const access = this.deps.knowledgeBrainEntitlement.getCurrentStatus();
+    return access.allowed ? '基于知识库提问…' : (access.reason ?? '会员内测功能暂不可用');
+  }
+
+  private openKnowledgeAccess(access: KnowledgeBrainAccessStatus): void {
+    new KnowledgeBrainAccessModal(
+      this.app,
+      this.deps.auth,
+      access,
+      async () => { await this.deps.knowledgeBrainEntitlement.probe(true); },
+    ).open();
+  }
+
+  private async requireKnowledgeAccess(): Promise<boolean> {
+    const access = await this.deps.knowledgeBrainEntitlement.probe();
+    if (access.allowed) return true;
+    this.openKnowledgeAccess(access);
+    return false;
+  }
+
   private render(): void {
     this.hideConfigSubmenu();
     this.hideModelSubmenu();
@@ -331,6 +390,7 @@ export class WeSightChatView extends ItemView {
     root.empty();
     root.addClass('wesight-view');
     root.setAttribute('data-agent', this.agentId);
+    root.setAttribute('data-chat-mode', this.conversationMode);
 
     const header = root.createDiv({ cls: 'wesight-header' });
     const brand = header.createDiv({ cls: 'wesight-title-slot' });
@@ -397,9 +457,11 @@ export class WeSightChatView extends ItemView {
     this.inputEl = inputWrapper.createEl('textarea', {
       cls: 'wesight-input',
       attr: {
-        placeholder: 'Message WeSight...',
+        placeholder: this.knowledgeComposerPlaceholder(),
       },
     });
+    const currentAccess = this.deps.knowledgeBrainEntitlement.getCurrentStatus();
+    this.inputEl.disabled = this.conversationMode === 'knowledge' && !currentAccess.allowed;
     this.inputEl.value = pendingInput;
     this.renderSkillPill();
     this.inputEl.oninput = () => void this.updateSuggestions();
@@ -414,6 +476,7 @@ export class WeSightChatView extends ItemView {
           event.stopPropagation();
           this.cancelledByUser = true;
           this.deps.runtimeManager.cancel();
+          this.deps.knowledgeBrain.cancel();
         }
         this.clearSuggestions();
       }
@@ -425,7 +488,34 @@ export class WeSightChatView extends ItemView {
     this.renderModelSelector(toolbarLeft);
 
     const toolbarRight = toolbar.createDiv({ cls: 'wesight-toolbar-right' });
+    const knowledgeActive = this.conversationMode === 'knowledge';
+    const knowledgeToggle = toolbarRight.createEl('button', {
+      cls: 'wesight-permission-toggle wesight-kb-mode-switch',
+      attr: {
+        type: 'button',
+        'aria-label': '切换普通对话与知识库模式',
+        'aria-pressed': String(knowledgeActive),
+      },
+    });
+    knowledgeToggle.toggleClass('is-locked', !currentAccess.allowed);
+    const knowledgeLabel = knowledgeToggle.createSpan({ cls: 'wesight-permission-label wesight-kb-mode-label', text: '知识库' });
+    if (!currentAccess.allowed) {
+      const lock = knowledgeToggle.createSpan({ cls: 'wesight-kb-mode-lock' });
+      setIcon(lock, 'lock-keyhole');
+    }
+    knowledgeLabel.toggleClass('knowledge-active', knowledgeActive);
+    const knowledgeSwitch = knowledgeToggle.createDiv({ cls: 'wesight-toggle-switch' });
+    knowledgeSwitch.toggleClass('active', knowledgeActive);
+    knowledgeToggle.onclick = () => {
+      if (!currentAccess.allowed && !knowledgeActive) {
+        this.openKnowledgeAccess(currentAccess);
+        return;
+      }
+      void this.switchConversationMode(knowledgeActive ? 'chat' : 'knowledge');
+    };
+
     const planToggle = toolbarRight.createDiv({ cls: 'wesight-permission-toggle' });
+    planToggle.toggleClass('is-hidden', this.conversationMode === 'knowledge');
     const planLabel = planToggle.createSpan({ cls: 'wesight-permission-label', text: 'Plan' });
     planLabel.toggleClass('plan-active', this.planMode);
     const planSwitch = planToggle.createDiv({ cls: 'wesight-toggle-switch' });
@@ -450,6 +540,7 @@ export class WeSightChatView extends ItemView {
     this.stopButtonEl.onclick = () => {
       this.cancelledByUser = true;
       this.deps.runtimeManager.cancel();
+      this.deps.knowledgeBrain.cancel();
     };
 
     this.sendButtonEl = toolbarRight.createEl('button', { cls: 'clickable-icon wesight-send-btn' });
@@ -952,7 +1043,7 @@ export class WeSightChatView extends ItemView {
     body.createDiv({ cls: 'wesight-history-item-title', text: conversation.title || '未命名对话' });
     body.createDiv({
       cls: 'wesight-history-item-meta',
-      text: `${getAgentDescriptor(conversation.agentId).displayName} · ${formatRelativeTime(conversation.updatedAt)}`,
+      text: `${conversation.mode === 'knowledge' ? '知识库 · ' : ''}${getAgentDescriptor(conversation.agentId).displayName} · ${formatRelativeTime(conversation.updatedAt)}`,
     });
     item.onclick = () => {
       void this.openHistoryConversation(conversation);
@@ -969,6 +1060,7 @@ export class WeSightChatView extends ItemView {
   private async openHistoryConversation(conversation: StoredConversation): Promise<void> {
     this.hideHistoryPopover();
     this.conversation = conversation;
+    this.conversationMode = conversation.mode ?? 'chat';
     if (this.agentId !== conversation.agentId) {
       this.agentId = conversation.agentId;
     }
@@ -1292,7 +1384,7 @@ export class WeSightChatView extends ItemView {
   // first message is sent, so open/close cycles never litter the store.
   private ensureConversation(forceNew = false): void {
     if (this.conversation && !forceNew) return;
-    this.conversation = this.deps.vaultStore.createDraftConversation(this.agentId);
+    this.conversation = this.deps.vaultStore.createDraftConversation(this.agentId, this.conversationMode);
   }
 
   private renderMessages(): void {
@@ -1317,6 +1409,7 @@ export class WeSightChatView extends ItemView {
         ? getAgentDescriptor(message.agentId ?? this.agentId).displayName
         : message.role;
     item.createDiv({ cls: 'wesight-message-role', text: role });
+    if (message.metadata?.knowledgeBased) item.createDiv({ cls: 'wesight-kb-answer-badge', text: '基于知识库' });
     if (message.role === 'assistant' || message.role === 'error') {
       if (message.role === 'assistant' && message.metadata?.process?.length) {
         const collapsed = message.metadata.processCollapsed !== false;
@@ -1331,6 +1424,10 @@ export class WeSightChatView extends ItemView {
     }
     if (message.role === 'assistant' && typeof message.metadata?.durationMs === 'number') {
       this.renderTurnDuration(item, message.metadata.durationMs);
+    }
+    if (message.role === 'assistant') {
+      this.renderKnowledgeCitations(item, message);
+      this.renderKnowledgeBrainSaveButton(item, message);
     }
   }
 
@@ -1414,6 +1511,101 @@ export class WeSightChatView extends ItemView {
     return status ?? '运行中';
   }
 
+  private renderKnowledgeBrainSaveButton(parent: HTMLElement, message: ChatMessage): void {
+    if (!message.content.trim() || message.metadata?.cancelled) return;
+    const saved = message.metadata?.knowledgeSave;
+    if (saved) {
+      const group = parent.createDiv({ cls: 'wesight-kb-saved-state' });
+      group.createSpan({ text: '已保存到知识大脑' });
+      for (const savedPath of saved.changedPaths.filter(item => item.startsWith('wiki/') && item.endsWith('.md')).slice(0, 3)) {
+        const link = group.createEl('button', { text: savedPath, attr: { type: 'button' } });
+        link.onclick = () => void this.app.workspace.openLinkText(savedPath, '', false);
+      }
+      return;
+    }
+    if (message.agentId !== 'claude' && message.agentId !== 'codex') return;
+    const agentId = message.agentId;
+    const access = this.deps.knowledgeBrainEntitlement.getCurrentStatus();
+    const button = parent.createEl('button', {
+      cls: 'wesight-kb-save-button',
+      text: access.allowed ? '保存到知识大脑' : '保存到知识大脑 · 会员',
+    });
+    button.toggleClass('is-locked', !access.allowed);
+    button.onclick = async () => {
+      button.disabled = true;
+      await this.openKnowledgeSavePreview(message, agentId);
+      button.disabled = false;
+    };
+  }
+
+  private renderKnowledgeCitations(parent: HTMLElement, message: ChatMessage): void {
+    const citations = message.metadata?.knowledgeCitations ?? [];
+    if (!citations.length) return;
+    const group = parent.createDiv({ cls: 'wesight-kb-citations' });
+    group.createDiv({ cls: 'wesight-kb-citations-title', text: '引用来源' });
+    for (const citation of citations) {
+      const button = group.createEl('button', { attr: { type: 'button' } });
+      const icon = button.createSpan({ cls: 'wesight-kb-citation-icon' });
+      setIcon(icon, citation.kind === 'source' ? 'file-archive' : 'book-open');
+      const filename = citation.path.split('/').pop()?.replace(/\.md$/i, '') ?? citation.path;
+      const label = citation.kind === 'source'
+        ? filename.replace(/^[a-f0-9]{16}-/i, '')
+        : filename;
+      button.createSpan({ text: `${citation.kind === 'source' ? '原始资料' : '知识页'} · ${label}` });
+      button.onclick = () => {
+        const file = this.app.vault.getAbstractFileByPath(citation.path);
+        if (file instanceof TFile) void this.app.workspace.getLeaf(false).openFile(file);
+        else if (citation.path.startsWith('.raw/captured/')) {
+          new Notice(`原始笔记已移动或删除，归档快照保存在 ${citation.path}`);
+        } else void this.app.workspace.openLinkText(citation.path, '', false);
+      };
+    }
+  }
+
+  private async openKnowledgeSavePreview(message: ChatMessage, knownAgentId?: 'claude' | 'codex'): Promise<void> {
+    if (!(await this.requireKnowledgeAccess())) return;
+    if (message.agentId !== 'claude' && message.agentId !== 'codex') {
+      new Notice('知识大脑首版仅支持 Claude Code 与 Codex 回答。');
+      return;
+    }
+    const agentId = knownAgentId ?? message.agentId;
+    const sourceConversation = this.conversation;
+    if (!sourceConversation) {
+      new Notice('当前回答不再属于可用对话。');
+      return;
+    }
+    const messages = sourceConversation.messages;
+    const index = messages.findIndex(item => item.id === message.id);
+    const question = messages.slice(0, index).reverse().find(item => item.role === 'user');
+    if (!question) {
+      new Notice('找不到对应的问题。');
+      return;
+    }
+    try {
+      const preview = await this.deps.knowledgeBrain.planSaveAnswer({
+        conversationId: sourceConversation.id,
+        messageId: message.id,
+        question: question.content,
+        answer: message.content,
+        agentId,
+      });
+      new KnowledgePreviewModal(this.app, preview, async () => {
+        const result = await this.deps.knowledgeBrain.applyPreview(preview.previewId);
+        if (result.ok) {
+          message.metadata = {
+            ...(message.metadata ?? {}),
+            knowledgeSave: { status: 'saved', changedPaths: result.changedPaths, savedAt: Date.now() },
+          };
+          await this.deps.vaultStore.replaceConversation(sourceConversation);
+          if (this.conversation?.id === sourceConversation.id) this.renderMessages();
+        }
+        return result;
+      }, async () => this.deps.knowledgeBrain.discardPreview(preview.previewId)).open();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : '保存失败。');
+    }
+  }
+
   private renderTurnDuration(parent: HTMLElement, durationMs: number): void {
     const seconds = Math.max(0, durationMs) / 1000;
     parent.createDiv({ cls: 'wesight-turn-duration', text: `总耗时 ${seconds.toFixed(1)}s` });
@@ -1446,7 +1638,7 @@ export class WeSightChatView extends ItemView {
 
   private renderEmptyState(): void {
     const empty = this.messagesEl.createDiv({ cls: 'wesight-welcome' });
-    empty.createDiv({ cls: 'wesight-welcome-greeting', text: 'How can I help?' });
+    empty.createDiv({ cls: 'wesight-welcome-greeting', text: this.conversationMode === 'knowledge' ? '向你的知识库提问' : 'How can I help?' });
   }
 
   private async sendMessage(): Promise<void> {
@@ -1454,18 +1646,29 @@ export class WeSightChatView extends ItemView {
     this.cancelledByUser = false;
     const rawPrompt = this.inputEl.value.trim();
     if (!rawPrompt && !this.selectedSkill) return;
+    if (this.conversationMode === 'knowledge' && !(await this.requireKnowledgeAccess())) return;
     const skillPrompt = this.selectedSkill?.insertText ?? '';
     this.ensureConversation();
     const conversation = this.conversation;
     if (!conversation) return;
+    conversation.mode = this.conversationMode;
     const vaultBasePath = getVaultBasePath(this.app);
     if (!vaultBasePath) {
       new Notice('WeSight needs a local desktop vault path.');
       return;
     }
     const settings = this.deps.getSettings();
-    const resolved = await resolveMentions(this.app, rawPrompt, settings.maxContextFileChars);
-    const activeContext = await this.resolveActiveEditorContext(settings.maxContextFileChars);
+    const knowledgeMode = this.conversationMode === 'knowledge';
+    if (knowledgeMode && this.agentId !== 'claude' && this.agentId !== 'codex') {
+      new Notice('知识大脑首版仅支持 Claude Code 与 Codex。');
+      return;
+    }
+    const resolved = knowledgeMode
+      ? { prompt: rawPrompt, attachments: [] as FileAttachment[] }
+      : await resolveMentions(this.app, rawPrompt, settings.maxContextFileChars);
+    const activeContext = knowledgeMode
+      ? { prompt: '', attachments: [] as FileAttachment[] }
+      : await this.resolveActiveEditorContext(settings.maxContextFileChars);
     const userPrompt = activeContext.prompt
       ? `${resolved.prompt}\n\n${activeContext.prompt}`
       : resolved.prompt;
@@ -1498,7 +1701,7 @@ export class WeSightChatView extends ItemView {
       content: '',
       createdAt: Date.now(),
       agentId: this.agentId,
-      metadata: { process: [] },
+      metadata: { process: [], knowledgeBased: knowledgeMode },
     };
     conversation.messages.push(assistantMessage);
     const assistantEl = this.messagesEl.createDiv({ cls: 'wesight-message is-assistant is-streaming' });
@@ -1558,16 +1761,25 @@ export class WeSightChatView extends ItemView {
       refreshProcessToggle();
     };
     const agentId = this.agentId;
+    const storeSession = (sessionId: string): void => {
+      conversation.modeSessionIds = {
+        ...(conversation.modeSessionIds ?? {}),
+        [this.conversationMode]: {
+          ...(conversation.modeSessionIds?.[this.conversationMode] ?? {}),
+          [agentId]: sessionId,
+        },
+      };
+      if (this.conversationMode === 'chat') {
+        conversation.sessionIds = { ...(conversation.sessionIds ?? {}), [agentId]: sessionId };
+      }
+    };
     const onEvent = (event: RuntimeTurnEvent): void => {
       // A user-requested cancel must not surface runtime teardown output
       // (for example a JSON shutdown line) mid-stream; the turn ends with
       // the cancellation notice instead.
       if (this.cancelledByUser) return;
       if (event.type === 'session') {
-        conversation.sessionIds = {
-          ...(conversation.sessionIds ?? {}),
-          [agentId]: event.sessionId,
-        };
+        storeSession(event.sessionId);
       } else if (event.type === 'text') {
         assistantMessage.content += event.content;
         appendDelta(event.content);
@@ -1606,27 +1818,62 @@ export class WeSightChatView extends ItemView {
         streamStarted = true;
       }
     };
+    const onKnowledgeEvent = (event: KnowledgeRuntimeEvent): void => {
+      if (this.cancelledByUser) return;
+      if (event.type === 'session') storeSession(event.sessionId);
+      else if (event.type === 'status') contentEl.setText(event.message ?? '正在查询知识库…');
+      else if (event.type === 'text') {
+        assistantMessage.content += event.content;
+        contentEl.setText(assistantMessage.content);
+        streamStarted = true;
+        assistantEl.removeClass('is-streaming');
+      } else if (event.type === 'citation') {
+        const citations = assistantMessage.metadata?.knowledgeCitations ?? [];
+        if (!citations.some(item => item.path === event.path)) {
+          assistantMessage.metadata = {
+            ...(assistantMessage.metadata ?? {}),
+            knowledgeCitations: [...citations, { path: event.path, kind: event.kind, line: event.line }],
+          };
+        }
+      } else if (event.type === 'error') {
+        assistantMessage.role = 'error';
+        assistantMessage.content = event.message;
+        assistantEl.addClass('is-error');
+        contentEl.setText(event.message);
+        streamStarted = true;
+      }
+    };
 
     const turnStartedAt = Date.now();
     this.running = true;
     this.updateRunControls();
     try {
-      const modelOverride = this.agentId === 'claude' && settings.configSources.claude === 'localCli'
-        ? ''
-        : settings.localModelByAgent[this.agentId];
-      await this.deps.runtimeManager.runTurn({
-        conversationId: conversation.id,
-        agentId: this.agentId,
-        prompt: runtimePrompt,
-        cwd: vaultBasePath,
-        configSource: settings.configSources[this.agentId],
-        providerProfileId: settings.providerProfileByAgent[this.agentId],
-        model: modelOverride,
-        sessionId: conversation.sessionIds?.[this.agentId],
-        systemPrompt: settings.systemPrompt,
-        planMode: this.planMode,
-        attachments,
-      }, onEvent);
+      if (knowledgeMode && (this.agentId === 'claude' || this.agentId === 'codex')) {
+        await this.deps.knowledgeBrain.query({
+          conversationId: conversation.id,
+          question: rawPrompt,
+          agentId: this.agentId,
+          sessionId: conversation.modeSessionIds?.knowledge?.[this.agentId],
+        }, onKnowledgeEvent);
+      } else {
+        const modelOverride = this.agentId === 'claude' && settings.configSources.claude === 'localCli'
+          ? ''
+          : settings.localModelByAgent[this.agentId];
+        await this.deps.runtimeManager.runTurn({
+          conversationId: conversation.id,
+          agentId: this.agentId,
+          prompt: runtimePrompt,
+          cwd: vaultBasePath,
+          configSource: settings.configSources[this.agentId],
+          providerProfileId: settings.providerProfileByAgent[this.agentId],
+          model: modelOverride,
+          sessionId: conversation.modeSessionIds?.chat?.[this.agentId] ?? conversation.sessionIds?.[this.agentId],
+          systemPrompt: settings.systemPrompt,
+          planMode: this.planMode,
+          attachments,
+          accessMode: 'workspace-write',
+        }, onEvent);
+      }
       await Promise.allSettled(artifactTasks);
       if (!assistantMessage.content.trim() && !(assistantMessage.metadata?.artifacts?.length)) {
         assistantMessage.content = 'Done.';
@@ -1639,8 +1886,6 @@ export class WeSightChatView extends ItemView {
         ...(assistantMessage.metadata ?? {}),
         durationMs,
       };
-      conversation.updatedAt = Date.now();
-      await this.deps.vaultStore.replaceConversation(conversation);
       this.running = false;
       this.updateRunControls();
       this.refreshStatus();
@@ -1648,6 +1893,7 @@ export class WeSightChatView extends ItemView {
         this.cancelledByUser = false;
         assistantMessage.role = 'assistant';
         assistantMessage.content = '当前任务已取消';
+        assistantMessage.metadata = { ...(assistantMessage.metadata ?? {}), cancelled: true };
         assistantEl.removeClass('is-error');
       }
       if (processVisible) {
@@ -1655,10 +1901,14 @@ export class WeSightChatView extends ItemView {
         assistantMessage.metadata = { ...(assistantMessage.metadata ?? {}), processCollapsed: true };
         this.updateProcessToggleLabel(processToggle, processItems, false);
       }
+      conversation.updatedAt = Date.now();
+      await this.deps.vaultStore.replaceConversation(conversation);
       if (assistantEl.isConnected) {
         await this.renderMessageMarkdown(assistantEl, assistantMessage);
         if (assistantMessage.role === 'assistant') {
           this.renderTurnDuration(assistantEl, durationMs);
+          this.renderKnowledgeCitations(assistantEl, assistantMessage);
+          this.renderKnowledgeBrainSaveButton(assistantEl, assistantMessage);
         }
       }
     }
@@ -1681,7 +1931,28 @@ export class WeSightChatView extends ItemView {
     this.inputEl.focus();
   }
 
+  private async switchConversationMode(mode: ConversationMode): Promise<void> {
+    if (this.running || mode === this.conversationMode) return;
+    if (mode === 'knowledge' && !(await this.requireKnowledgeAccess())) return;
+    this.conversationMode = mode;
+    if (mode === 'knowledge' && this.agentId !== 'claude' && this.agentId !== 'codex') this.agentId = 'claude';
+    if (this.conversation?.messages.length) {
+      this.conversation = this.deps.vaultStore.createDraftConversation(this.agentId, mode);
+    } else if (this.conversation) {
+      this.conversation.mode = mode;
+      this.conversation.agentId = this.agentId;
+    }
+    this.render();
+    this.renderMessages();
+    this.refreshStatus();
+    this.inputEl.focus();
+  }
+
   private async switchAgent(agentId: AgentId, promptInstallIfMissing = false): Promise<void> {
+    if (this.conversationMode === 'knowledge' && agentId === 'opencode') {
+      new Notice('知识大脑首版仅支持 Claude Code 与 Codex。');
+      return;
+    }
     this.agentId = agentId;
     this.render();
     this.renderMessages();
@@ -1858,8 +2129,10 @@ export class WeSightChatView extends ItemView {
   }
 
   private updateRunControls(): void {
+    const knowledgeLocked = this.conversationMode === 'knowledge'
+      && !this.deps.knowledgeBrainEntitlement.getCurrentStatus().allowed;
     if (this.sendButtonEl) {
-      this.sendButtonEl.disabled = this.running;
+      this.sendButtonEl.disabled = this.running || knowledgeLocked;
     }
     if (this.stopButtonEl) {
       this.stopButtonEl.disabled = !this.running;

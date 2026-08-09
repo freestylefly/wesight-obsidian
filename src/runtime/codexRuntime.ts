@@ -172,7 +172,7 @@ export class CodexAppServerRuntime extends EventEmitter {
     const threadOptions = {
       cwd: request.cwd,
       approvalPolicy: 'never',
-      sandbox: 'workspace-write',
+      sandbox: request.accessMode === 'read-only' ? 'read-only' : 'workspace-write',
       developerInstructions: request.systemPrompt?.trim() || undefined,
       serviceName: 'wesight_obsidian',
     };
@@ -236,13 +236,16 @@ export class CodexAppServerRuntime extends EventEmitter {
         input,
         cwd: request.cwd,
         approvalPolicy: 'never',
-        sandboxPolicy: {
-          type: 'workspaceWrite',
-          writableRoots: [request.cwd],
-          networkAccess: true,
-          excludeTmpdirEnvVar: false,
-          excludeSlashTmp: false,
-        },
+        ...(request.textOnly ? { effort: 'low' } : {}),
+        sandboxPolicy: request.accessMode === 'read-only'
+          ? { type: 'readOnly' }
+          : {
+              type: 'workspaceWrite',
+              writableRoots: [request.cwd],
+              networkAccess: true,
+              excludeTmpdirEnvVar: false,
+              excludeSlashTmp: false,
+            },
       };
       if (request.planMode) {
         const planModel = stringAt(threadResult, 'thread', 'model')

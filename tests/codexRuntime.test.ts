@@ -197,6 +197,25 @@ describe('CodexAppServerRuntime', () => {
     await runtime.shutdown();
   });
 
+  test('uses low reasoning effort for bounded text-only protocol turns', async () => {
+    const client = new FakeAppServerClient();
+    const runtime = new CodexAppServerRuntime(client as unknown as CodexAppServerClient);
+    const events: RuntimeTurnEvent[] = [];
+
+    await runtime.runTurn({
+      ...request('BOUNDED_DRAFT'),
+      textOnly: true,
+      accessMode: 'read-only',
+    }, connection, event => events.push(event));
+
+    expect(client.requests.find(entry => entry.method === 'turn/start')?.params).toMatchObject({
+      effort: 'low',
+      sandboxPolicy: { type: 'readOnly' },
+    });
+    expect(events).toContainEqual({ type: 'text', content: 'reply:BOUNDED_DRAFT' });
+    await runtime.shutdown();
+  });
+
   test('resumes an existing thread, sends plan collaboration mode, and interrupts through AbortSignal', async () => {
     const client = new FakeAppServerClient();
     const runtime = new CodexAppServerRuntime(client as unknown as CodexAppServerClient);
@@ -253,6 +272,22 @@ describe('CodexAppServerRuntime', () => {
     expect(events.some(event => event.type === 'error')).toBe(false);
     expect(events).toContainEqual({ type: 'text', content: 'reply:WARNING_ONLY' });
     expect(events.at(-1)).toMatchObject({ type: 'done' });
+    await runtime.shutdown();
+  });
+
+  test('uses the App Server read-only sandbox without writable roots for knowledge turns', async () => {
+    const client = new FakeAppServerClient();
+    const runtime = new CodexAppServerRuntime(client as unknown as CodexAppServerClient);
+
+    await runtime.runTurn({ ...request('READ_ONLY'), accessMode: 'read-only' }, connection, () => undefined);
+
+    expect(client.requests.find(entry => entry.method === 'thread/start')?.params).toMatchObject({
+      sandbox: 'read-only',
+      approvalPolicy: 'never',
+    });
+    const turn = client.requests.find(entry => entry.method === 'turn/start')?.params;
+    expect(turn).toMatchObject({ sandboxPolicy: { type: 'readOnly' } });
+    expect(turn).not.toHaveProperty('sandboxPolicy.writableRoots');
     await runtime.shutdown();
   });
 });
