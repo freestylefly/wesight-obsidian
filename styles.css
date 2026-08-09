@@ -3329,7 +3329,7 @@ button.wesight-share-primary-button.is-wechat:hover {
 .wesight-wechat-preview-tabs {
   display: grid;
   min-height: 48px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
 }
@@ -4159,6 +4159,553 @@ body.theme-dark .wesight-wechat-publish-button {
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* WeChat data monitoring tab */
+.wesight-wechat-monitoring {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 18px;
+  overflow-y: auto;
+  background: var(--background-secondary-alt);
+}
+
+.wesight-wechat-monitoring-empty {
+  display: flex;
+  min-height: min(560px, calc(100% - 2px));
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  padding: 48px 24px 64px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 14px;
+  background: var(--background-primary);
+  text-align: center;
+}
+
+.wesight-wechat-monitoring-empty-icon {
+  display: grid;
+  width: 68px;
+  height: 68px;
+  margin-bottom: 20px;
+  place-items: center;
+  border-radius: 20px;
+  background: rgba(7, 193, 96, 0.1);
+  color: #07b95b;
+}
+
+.wesight-wechat-monitoring-empty-icon svg {
+  width: 32px;
+  height: 32px;
+}
+
+.wesight-wechat-monitoring-empty h2 {
+  margin: 0 0 10px;
+  color: var(--text-normal);
+  font-size: 20px;
+}
+
+.wesight-wechat-monitoring-empty p {
+  max-width: 480px;
+  margin: 0 0 24px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.75;
+}
+
+.wesight-wechat-monitoring-add-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding-inline: 18px;
+  background: #07b95b !important;
+  color: #fff !important;
+}
+
+.wesight-wechat-monitoring-supported {
+  margin-top: 13px;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.wesight-wechat-monitoring-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.wesight-wechat-monitoring-heading h2,
+.wesight-wechat-monitoring-heading p {
+  margin: 0;
+}
+
+.wesight-wechat-monitoring-heading h2 {
+  margin-bottom: 4px;
+  color: var(--text-normal);
+  font-size: 20px;
+}
+
+.wesight-wechat-monitoring-heading p {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.wesight-wechat-monitoring-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.wesight-wechat-monitoring-updated {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+}
+
+.wesight-wechat-monitoring-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  background: #07b95b !important;
+  color: #fff !important;
+}
+
+.wesight-wechat-monitoring-refresh:disabled svg,
+.wesight-wechat-monitoring-state.is-loading > span svg {
+  animation: wesight-wechat-spin 0.9s linear infinite;
+}
+
+.wesight-wechat-monitoring-link {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 9px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 9px;
+  background: var(--background-primary);
+}
+
+.wesight-wechat-monitoring-link > span {
+  display: flex;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.wesight-wechat-monitoring-link > a:first-of-type {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wesight-wechat-monitoring-open {
+  flex: 0 0 auto;
+  color: #07ad56 !important;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.wesight-wechat-monitoring-change {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 4px 8px 4px 12px;
+  border: 0;
+  border-left: 1px solid var(--background-modifier-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.wesight-wechat-monitoring-overview {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.1fr) minmax(320px, 2fr);
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.wesight-wechat-monitoring-reading {
+  position: relative;
+  display: flex;
+  min-height: 168px;
+  flex-direction: column;
+  padding: 22px;
+  overflow: hidden;
+  border-radius: 13px;
+  background: linear-gradient(138deg, #354c66, #263a50);
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.wesight-wechat-monitoring-reading::after {
+  position: absolute;
+  right: -58px;
+  bottom: -84px;
+  width: 166px;
+  height: 166px;
+  border: 26px solid rgba(255, 255, 255, 0.055);
+  border-radius: 50%;
+  content: '';
+}
+
+.wesight-wechat-monitoring-reading-value {
+  margin: 12px 0 2px;
+  color: #fff;
+  font-size: 38px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+
+.wesight-wechat-monitoring-reading strong {
+  color: #fff;
+  font-size: var(--font-ui-small);
+}
+
+.wesight-wechat-monitoring-reading small {
+  margin-top: auto;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.wesight-wechat-monitoring-rates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.wesight-wechat-monitoring-rate {
+  display: flex;
+  min-height: 168px;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 20px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 13px;
+  background: var(--background-primary);
+}
+
+.wesight-wechat-monitoring-rate > span,
+.wesight-wechat-monitoring-rate small {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.wesight-wechat-monitoring-rate > strong {
+  color: var(--text-normal);
+  font-size: 30px;
+}
+
+.wesight-wechat-monitoring-rate-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--background-modifier-border);
+}
+
+.wesight-wechat-monitoring-rate-track > div {
+  height: 100%;
+  min-width: 3px;
+  border-radius: inherit;
+  background: #07b95b;
+}
+
+.wesight-wechat-monitoring-details {
+  display: grid;
+  grid-template-columns: minmax(340px, 1.35fr) minmax(290px, 1fr);
+  gap: 14px;
+}
+
+.wesight-wechat-monitoring-panel {
+  padding: 18px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 13px;
+  background: var(--background-primary);
+}
+
+.wesight-wechat-monitoring-panel h3 {
+  margin: 0 0 14px;
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+}
+
+.wesight-wechat-monitoring-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.wesight-wechat-monitoring-metric {
+  display: flex;
+  min-height: 82px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin: 0;
+  padding: 13px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 9px;
+  background: var(--background-primary-alt);
+  box-shadow: none;
+  color: var(--text-normal);
+  text-align: left;
+}
+
+.wesight-wechat-monitoring-metric:hover,
+.wesight-wechat-monitoring-metric[aria-pressed='true'] {
+  border-color: rgba(7, 185, 91, 0.55);
+  background: rgba(7, 185, 91, 0.07);
+}
+
+.wesight-wechat-monitoring-metric-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.wesight-wechat-monitoring-metric strong {
+  color: var(--text-normal);
+  font-size: 22px;
+}
+
+.wesight-wechat-monitoring-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ef5b61;
+}
+
+.wesight-wechat-monitoring-metric.is-share .wesight-wechat-monitoring-dot,
+.wesight-wechat-monitoring-chart-row.is-share .wesight-wechat-monitoring-chart-bar {
+  background: #17b987;
+}
+
+.wesight-wechat-monitoring-metric.is-watching .wesight-wechat-monitoring-dot,
+.wesight-wechat-monitoring-chart-row.is-watching .wesight-wechat-monitoring-chart-bar {
+  background: #f2a019;
+}
+
+.wesight-wechat-monitoring-metric.is-favorite .wesight-wechat-monitoring-dot,
+.wesight-wechat-monitoring-chart-row.is-favorite .wesight-wechat-monitoring-chart-bar {
+  background: #845be3;
+}
+
+.wesight-wechat-monitoring-metric.is-comment .wesight-wechat-monitoring-dot,
+.wesight-wechat-monitoring-chart-row.is-comment .wesight-wechat-monitoring-chart-bar {
+  background: #19a9c6;
+}
+
+.wesight-wechat-monitoring-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wesight-wechat-monitoring-chart-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 9px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  transition: opacity 0.16s ease;
+}
+
+.wesight-wechat-monitoring-chart-row strong {
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.wesight-wechat-monitoring-chart-track {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--background-modifier-border);
+}
+
+.wesight-wechat-monitoring-chart-bar {
+  height: 100%;
+  min-width: 3px;
+  border-radius: inherit;
+  background: #ef5b61;
+}
+
+.wesight-wechat-monitoring-chart.has-selection .wesight-wechat-monitoring-chart-row:not(.is-selected) {
+  opacity: 0.28;
+}
+
+.wesight-wechat-monitoring-chart-note {
+  margin: 14px 0 0;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.wesight-wechat-monitoring-state {
+  display: flex;
+  min-height: 320px;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  padding: 32px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 13px;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.wesight-wechat-monitoring-state > span {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 14px;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--background-primary-alt);
+}
+
+.wesight-wechat-monitoring-state.is-error > span {
+  color: var(--text-error);
+}
+
+.wesight-wechat-monitoring-state strong {
+  color: var(--text-normal);
+}
+
+.wesight-wechat-monitoring-state p {
+  max-width: 460px;
+  margin: 7px 0 0;
+  font-size: var(--font-ui-small);
+}
+
+.wesight-wechat-monitoring-state-actions {
+  display: flex;
+  gap: 9px;
+  margin-top: 18px;
+}
+
+/* WeChat article link modal */
+.wesight-wechat-article-link-modal {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.wesight-wechat-article-link-modal .modal-content > h2 {
+  margin-bottom: 6px;
+}
+
+.wesight-wechat-article-link-modal-description {
+  margin: 0 0 20px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.wesight-wechat-article-link-field label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+}
+
+.wesight-wechat-article-link-field input {
+  width: 100%;
+  height: 42px;
+}
+
+.wesight-wechat-article-link-help,
+.wesight-wechat-article-link-error {
+  margin: 7px 0 0;
+  font-size: var(--font-ui-smaller);
+}
+
+.wesight-wechat-article-link-help {
+  color: var(--text-muted);
+}
+
+.wesight-wechat-article-link-error {
+  min-height: 17px;
+  color: var(--text-error);
+}
+
+.wesight-wechat-article-link-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+@media (max-width: 760px) {
+  .wesight-wechat-monitoring-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .wesight-wechat-monitoring-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .wesight-wechat-monitoring-overview,
+  .wesight-wechat-monitoring-details {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 460px) {
+  .wesight-wechat-monitoring {
+    padding: 12px;
+  }
+
+  .wesight-wechat-monitoring-empty {
+    min-height: 460px;
+    padding-inline: 18px;
+  }
+
+  .wesight-wechat-monitoring-link {
+    flex-wrap: wrap;
+  }
+
+  .wesight-wechat-monitoring-link > a:first-of-type {
+    max-width: calc(100% - 30px);
+  }
+
+  .wesight-wechat-monitoring-open {
+    margin-left: 26px;
+  }
+
+  .wesight-wechat-monitoring-rates {
+    gap: 9px;
+  }
+
+  .wesight-wechat-monitoring-rate {
+    min-height: 142px;
+    padding: 14px;
+  }
+
+  .wesight-wechat-monitoring-rate > strong {
+    font-size: 24px;
+  }
+
+  .wesight-wechat-monitoring-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* WeChat article stats side panel */

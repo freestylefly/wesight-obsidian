@@ -348,21 +348,21 @@ export default class WeSightPlugin extends Plugin {
 
   async activateWeChatArticleStats(file: TFile): Promise<void> {
     let leaf: WorkspaceLeaf | null =
-      this.app.workspace.getLeavesOfType(WESIGHT_WECHAT_ARTICLE_STATS_VIEW_TYPE)[0] ?? null;
+      this.app.workspace.getLeavesOfType(WESIGHT_WECHAT_PREVIEW_VIEW_TYPE)[0] ?? null;
     if (!leaf) {
       leaf = this.app.workspace.getRightLeaf(false);
       await leaf?.setViewState({
-        type: WESIGHT_WECHAT_ARTICLE_STATS_VIEW_TYPE,
+        type: WESIGHT_WECHAT_PREVIEW_VIEW_TYPE,
         active: true,
-        state: { filePath: file.path },
+        state: { filePath: file.path, activeTab: 'monitoring' },
       });
     }
     if (!leaf) {
       new Notice('无法打开公众号文章数据。');
       return;
     }
-    if (leaf.view instanceof WeChatArticleStatsView) {
-      await leaf.view.setFile(file);
+    if (leaf.view instanceof WeChatPreviewView) {
+      await leaf.view.showDataMonitoring(file);
     }
     await this.app.workspace.revealLeaf(leaf);
   }

@@ -25,10 +25,17 @@ import {
 } from '../wechat/themeService';
 import { mergeRuntimeText } from '../wechat/themeService';
 import {
+  WECHAT_ARTICLE_URL_FRONTMATTER_KEY,
   WECHAT_DRAFT_ID_FRONTMATTER_KEY,
+  normalizeWeChatArticleUrl,
   parseWeChatPublishState,
   writeWeChatDraftFrontmatter,
 } from '../wechat/frontmatter';
+import {
+  fetchWeChatArticleStats,
+  resolveErrorMessage as resolveArticleStatsErrorMessage,
+  type ArticleStatsResult,
+} from '../wechat/articleStats';
 import {
   renderWeChatArticle,
   renderStreamingWeChatThemePreview,
@@ -67,10 +74,11 @@ import { createId } from '../utils/id';
 import { ensureDir, safeRemoveDir } from '../utils/fs';
 import { tmpDir } from '../paths';
 import { StreamingPreviewAutoFollow } from './streamingPreviewAutoFollow';
+import { promptForWeChatArticleLink } from './wechatArticleLinkModal';
 
 export const WESIGHT_WECHAT_PREVIEW_VIEW_TYPE = 'wesight-wechat-preview';
 
-type WeChatPreviewTab = 'preview' | 'settings';
+type WeChatPreviewTab = 'preview' | 'settings' | 'monitoring';
 
 interface WeChatPreviewViewOptions {
   auth: CloudAuthService;
@@ -125,6 +133,12 @@ export class WeChatPreviewView extends ItemView {
   private pendingPreviewScrollRestore: { top: number; followBottom: boolean } | null = null;
   private themeGenerationError: string | null = null;
   private publishAttempt: { signature: string; idempotencyKey: string } | null = null;
+  private articleUrl = '';
+  private articleStats: ArticleStatsResult | null = null;
+  private articleStatsError: string | null = null;
+  private articleStatsLoading = false;
+  private articleStatsUpdatedAt: Date | null = null;
+  private articleStatsRequestId = 0;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -177,6 +191,7 @@ export class WeChatPreviewView extends ItemView {
   }
 
   override async onClose(): Promise<void> {
+    this.articleStatsRequestId += 1;
     this.invalidateThemeGeneration();
     if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
@@ -200,7 +215,9 @@ export class WeChatPreviewView extends ItemView {
     const filePath = typeof state.filePath === 'string' ? state.filePath : '';
     const file = filePath ? this.app.vault.getAbstractFileByPath(filePath) : null;
     if (file instanceof TFile) this.file = file;
-    this.activeTab = state.activeTab === 'settings' ? 'settings' : 'preview';
+    this.activeTab = state.activeTab === 'settings' || state.activeTab === 'monitoring'
+      ? state.activeTab
+      : 'preview';
     await super.setState(state, result);
     if (this.contentEl.isConnected) await this.reload();
   }
@@ -208,7 +225,13 @@ export class WeChatPreviewView extends ItemView {
   async setFile(file: TFile): Promise<void> {
     if (this.file?.path === file.path && this.snapshot) return;
     this.invalidateThemeGeneration();
+    this.articleStatsRequestId += 1;
     this.file = file;
+    this.articleUrl = '';
+    this.articleStats = null;
+    this.articleStatsError = null;
+    this.articleStatsLoading = false;
+    this.articleStatsUpdatedAt = null;
     this.clearTemporaryCover();
     this.acknowledgedWarnings = false;
     await this.leaf.setViewState({
@@ -217,6 +240,16 @@ export class WeChatPreviewView extends ItemView {
       state: { filePath: file.path },
     });
     await this.reload();
+  }
+
+  async showDataMonitoring(file: TFile): Promise<void> {
+    if (this.file?.path !== file.path || !this.snapshot) await this.setFile(file);
+    this.activeTab = 'monitoring';
+    this.readArticleUrl();
+    this.render();
+    if (this.articleUrl && !this.articleStats && !this.articleStatsLoading) {
+      await this.refreshArticleStats();
+    }
   }
 
   private async reload(): Promise<void> {
@@ -243,6 +276,7 @@ export class WeChatPreviewView extends ItemView {
       }
       const previousSnapshot = this.snapshot;
       this.snapshot = await buildWeChatSnapshot(this.app, this.file);
+      this.readArticleUrl();
       this.applySnapshotMetadata(this.snapshot, previousSnapshot);
       this.loadCachedThemeDocument(this.snapshot);
       const publishState = parseWeChatPublishState(
@@ -268,6 +302,15 @@ export class WeChatPreviewView extends ItemView {
     } finally {
       this.loading = false;
       this.render();
+      if (
+        this.activeTab === 'monitoring'
+        && this.articleUrl
+        && !this.articleStats
+        && !this.articleStatsLoading
+        && !this.error
+      ) {
+        void this.refreshArticleStats();
+      }
     }
   }
 
@@ -289,8 +332,17 @@ export class WeChatPreviewView extends ItemView {
       if (!this.validThemeDocument(newSnapshot)) {
         this.loadCachedThemeDocument(newSnapshot);
       }
+      if (this.activeTab === 'monitoring') {
+        const previousUrl = this.articleUrl;
+        this.readArticleUrl();
+        this.render();
+        if (this.articleUrl && this.articleUrl !== previousUrl) {
+          void this.refreshArticleStats();
+        }
+        return;
+      }
       if (this.activeTab !== 'preview') {
-        // On the settings tab just keep snapshot/theme state fresh without UI disruption.
+        // Keep snapshot/theme state fresh while publishing settings are visible.
         return;
       }
       if (this.themeNeedsGeneration(newSnapshot)) {
@@ -429,7 +481,11 @@ export class WeChatPreviewView extends ItemView {
     contentEl.addClass('wesight-wechat-preview-view');
     this.renderHeader(contentEl);
     if (this.loading) {
-      this.renderStatus(contentEl, 'loader-circle', '正在生成公众号预览…');
+      this.renderStatus(
+        contentEl,
+        'loader-circle',
+        this.activeTab === 'monitoring' ? '正在加载公众号数据…' : '正在生成公众号预览…',
+      );
       return;
     }
     if (!this.file) {
@@ -469,22 +525,24 @@ export class WeChatPreviewView extends ItemView {
     brand.createEl('h4', { text: 'WeSight', cls: 'wesight-wechat-preview-brand-text' });
 
     const actions = header.createDiv({ cls: 'wesight-wechat-preview-header-actions' });
-    const refresh = actions.createEl('button', {
-      cls: 'clickable-icon wesight-header-btn',
-      attr: {
-        type: 'button',
-        'aria-label': this.themeGenerationController ? '停止公众号主题生成' : '刷新公众号排版',
-      },
-    });
-    setIcon(refresh, this.themeGenerationController ? 'square' : 'refresh-cw');
-    refresh.toggleClass('is-stop', Boolean(this.themeGenerationController));
-    refresh.disabled = this.loading
-      || this.themeGenerationStopping
-      || (Boolean(this.operation) && !this.themeGenerationController);
-    refresh.onclick = () => {
-      if (this.themeGenerationController) this.stopThemeGeneration();
-      else void this.refreshPreview();
-    };
+    if (this.activeTab !== 'monitoring') {
+      const refresh = actions.createEl('button', {
+        cls: 'clickable-icon wesight-header-btn',
+        attr: {
+          type: 'button',
+          'aria-label': this.themeGenerationController ? '停止公众号主题生成' : '刷新公众号排版',
+        },
+      });
+      setIcon(refresh, this.themeGenerationController ? 'square' : 'refresh-cw');
+      refresh.toggleClass('is-stop', Boolean(this.themeGenerationController));
+      refresh.disabled = this.loading
+        || this.themeGenerationStopping
+        || (Boolean(this.operation) && !this.themeGenerationController);
+      refresh.onclick = () => {
+        if (this.themeGenerationController) this.stopThemeGeneration();
+        else void this.refreshPreview();
+      };
+    }
 
     this.renderAccountControl(actions);
   }
@@ -642,6 +700,10 @@ export class WeChatPreviewView extends ItemView {
 
   private renderEditor(parent: HTMLElement, snapshot: WeChatPreviewSnapshot): void {
     this.renderTabs(parent, snapshot);
+    if (this.activeTab === 'monitoring') {
+      this.renderDataMonitoring(parent);
+      return;
+    }
     this.renderPublishingToolbar(parent, snapshot);
 
     if (this.duplicatePath) {
@@ -750,6 +812,329 @@ export class WeChatPreviewView extends ItemView {
       this.activeTab = 'settings';
       this.render();
     };
+    const monitoring = tabs.createEl('button', {
+      cls: this.activeTab === 'monitoring' ? 'is-active' : '',
+      text: '数据监控',
+      attr: {
+        type: 'button',
+        role: 'tab',
+        'aria-selected': String(this.activeTab === 'monitoring'),
+      },
+    });
+    monitoring.onclick = () => {
+      this.flushSaveMetadata();
+      this.activeTab = 'monitoring';
+      this.readArticleUrl();
+      this.render();
+      if (this.articleUrl && !this.articleStats && !this.articleStatsLoading) {
+        void this.refreshArticleStats();
+      }
+    };
+  }
+
+  private readArticleUrl(): void {
+    const frontmatter = this.file
+      ? this.app.metadataCache.getFileCache(this.file)?.frontmatter
+      : null;
+    const nextUrl = normalizeWeChatArticleUrl(
+      frontmatter?.[WECHAT_ARTICLE_URL_FRONTMATTER_KEY],
+    ) ?? '';
+    if (nextUrl !== this.articleUrl) {
+      this.articleStatsRequestId += 1;
+      this.articleStats = null;
+      this.articleStatsError = null;
+      this.articleStatsLoading = false;
+      this.articleStatsUpdatedAt = null;
+    }
+    this.articleUrl = nextUrl;
+  }
+
+  private async refreshArticleStats(): Promise<void> {
+    if (!this.articleUrl || this.articleStatsLoading) return;
+    const requestId = ++this.articleStatsRequestId;
+    this.articleStatsLoading = true;
+    this.articleStatsError = null;
+    this.render();
+    try {
+      const result = await fetchWeChatArticleStats(this.articleUrl, this.options.auth);
+      if (requestId !== this.articleStatsRequestId) return;
+      this.articleStats = result;
+      this.articleStatsUpdatedAt = new Date();
+    } catch (error) {
+      if (requestId !== this.articleStatsRequestId) return;
+      if (error instanceof CloudApiError && error.status === 402 && error.data) {
+        openBillingModal(
+          this.app,
+          this.options.auth,
+          error.data as import('../share/types').CloudBillingSummary,
+        );
+      }
+      this.articleStats = null;
+      this.articleStatsError = resolveArticleStatsErrorMessage(error);
+    } finally {
+      if (requestId === this.articleStatsRequestId) {
+        this.articleStatsLoading = false;
+        this.render();
+      }
+    }
+  }
+
+  private async editArticleUrl(): Promise<void> {
+    if (!this.file) return;
+    const articleUrl = await promptForWeChatArticleLink(this.app, {
+      initialValue: this.articleUrl,
+    });
+    if (!articleUrl) return;
+    try {
+      await this.app.fileManager.processFrontMatter(
+        this.file,
+        (frontmatter: Record<string, unknown>) => {
+          frontmatter[WECHAT_ARTICLE_URL_FRONTMATTER_KEY] = articleUrl;
+        },
+      );
+      this.articleStatsRequestId += 1;
+      this.articleUrl = articleUrl;
+      this.articleStats = null;
+      this.articleStatsError = null;
+      this.articleStatsLoading = false;
+      this.articleStatsUpdatedAt = null;
+      this.render();
+      new Notice('发布链接已绑定，正在同步文章数据。');
+      await this.refreshArticleStats();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : '发布链接保存失败。');
+    }
+  }
+
+  private renderDataMonitoring(parent: HTMLElement): void {
+    const monitoring = parent.createDiv({ cls: 'wesight-wechat-monitoring' });
+    if (!this.articleUrl) {
+      this.renderMonitoringEmpty(monitoring);
+      return;
+    }
+
+    this.renderMonitoringHeading(monitoring);
+    this.renderMonitoringLink(monitoring);
+    if (this.articleStatsLoading) {
+      const loading = monitoring.createDiv({
+        cls: 'wesight-wechat-monitoring-state is-loading',
+      });
+      const icon = loading.createSpan();
+      setIcon(icon, 'loader-circle');
+      loading.createEl('strong', { text: '正在同步文章数据' });
+      loading.createEl('p', { text: '请稍候，公众号公开数据正在加载。' });
+      return;
+    }
+    if (this.articleStatsError) {
+      const error = monitoring.createDiv({ cls: 'wesight-wechat-monitoring-state is-error' });
+      const icon = error.createSpan();
+      setIcon(icon, 'circle-alert');
+      error.createEl('strong', { text: '数据同步失败' });
+      error.createEl('p', { text: this.articleStatsError });
+      const actions = error.createDiv({ cls: 'wesight-wechat-monitoring-state-actions' });
+      const retry = actions.createEl('button', {
+        cls: 'mod-cta',
+        text: '重新同步',
+        attr: { type: 'button' },
+      });
+      retry.onclick = () => void this.refreshArticleStats();
+      const change = actions.createEl('button', {
+        text: '更换链接',
+        attr: { type: 'button' },
+      });
+      change.onclick = () => void this.editArticleUrl();
+      return;
+    }
+    if (!this.articleStats?.data) {
+      const state = monitoring.createDiv({ cls: 'wesight-wechat-monitoring-state' });
+      const icon = state.createSpan();
+      setIcon(icon, 'chart-no-axes-column');
+      state.createEl('strong', { text: '暂时没有可展示的数据' });
+      state.createEl('p', { text: '稍后可再次同步公众号文章数据。' });
+      return;
+    }
+    this.renderMonitoringData(monitoring, this.articleStats.data);
+  }
+
+  private renderMonitoringEmpty(parent: HTMLElement): void {
+    const empty = parent.createDiv({ cls: 'wesight-wechat-monitoring-empty' });
+    const icon = empty.createSpan({ cls: 'wesight-wechat-monitoring-empty-icon' });
+    setIcon(icon, 'link-2');
+    empty.createEl('h2', { text: '添加发布链接，开始监控数据' });
+    empty.createEl('p', {
+      text: '文章发布后，粘贴微信公众平台的文章链接。系统将同步阅读、点赞、转发、在看、收藏和评论数据。',
+    });
+    const add = empty.createEl('button', {
+      cls: 'mod-cta wesight-wechat-monitoring-add-link',
+      attr: { type: 'button' },
+    });
+    const addIcon = add.createSpan();
+    setIcon(addIcon, 'plus');
+    add.createSpan({ text: '添加发布链接' });
+    add.onclick = () => void this.editArticleUrl();
+    empty.createSpan({
+      cls: 'wesight-wechat-monitoring-supported',
+      text: '支持 mp.weixin.qq.com 文章链接',
+    });
+  }
+
+  private renderMonitoringHeading(parent: HTMLElement): void {
+    const heading = parent.createDiv({ cls: 'wesight-wechat-monitoring-heading' });
+    const copy = heading.createDiv();
+    copy.createEl('h2', { text: '公众号文章数据' });
+    copy.createEl('p', { text: '同步微信公众平台数据，快速查看文章阅读与互动表现。' });
+    const actions = heading.createDiv({ cls: 'wesight-wechat-monitoring-actions' });
+    actions.createSpan({
+      cls: 'wesight-wechat-monitoring-updated',
+      text: this.articleStatsUpdatedAt
+        ? `最后更新：${this.formatArticleStatsTime(this.articleStatsUpdatedAt)}`
+        : '尚未同步',
+    });
+    const refresh = actions.createEl('button', {
+      cls: 'mod-cta wesight-wechat-monitoring-refresh',
+      attr: { type: 'button' },
+    });
+    const refreshIcon = refresh.createSpan();
+    setIcon(refreshIcon, 'refresh-cw');
+    refresh.createSpan({ text: '同步数据' });
+    refresh.disabled = this.articleStatsLoading;
+    refresh.onclick = () => void this.refreshArticleStats();
+  }
+
+  private renderMonitoringLink(parent: HTMLElement): void {
+    const linkBar = parent.createDiv({ cls: 'wesight-wechat-monitoring-link' });
+    const icon = linkBar.createSpan();
+    setIcon(icon, 'link-2');
+    const link = linkBar.createEl('a', {
+      text: this.articleUrl,
+      href: this.articleUrl,
+      attr: { target: '_blank', rel: 'noopener noreferrer' },
+    });
+    link.title = this.articleUrl;
+    linkBar.createEl('a', {
+      cls: 'wesight-wechat-monitoring-open',
+      text: '打开原文 ↗',
+      href: this.articleUrl,
+      attr: { target: '_blank', rel: 'noopener noreferrer' },
+    });
+    const change = linkBar.createEl('button', {
+      cls: 'wesight-wechat-monitoring-change',
+      text: '更换链接',
+      attr: { type: 'button' },
+    });
+    change.onclick = () => void this.editArticleUrl();
+  }
+
+  private renderMonitoringData(parent: HTMLElement, data: Record<string, unknown>): void {
+    const read = this.parseArticleStatsNumber(data.read);
+    const like = this.parseArticleStatsNumber(data.zan);
+    const share = this.parseArticleStatsNumber(data.share_num);
+    const watching = this.parseArticleStatsNumber(data.looking);
+    const favorite = this.parseArticleStatsNumber(data.collect_num);
+    const comment = this.parseArticleStatsNumber(data.comment_count);
+
+    const overview = parent.createDiv({ cls: 'wesight-wechat-monitoring-overview' });
+    const reading = overview.createDiv({ cls: 'wesight-wechat-monitoring-reading' });
+    reading.createSpan({ text: '核心指标' });
+    reading.createDiv({
+      cls: 'wesight-wechat-monitoring-reading-value',
+      text: this.formatArticleStatsCount(read),
+    });
+    reading.createEl('strong', { text: '阅读数' });
+    reading.createEl('small', { text: '文章累计阅读表现' });
+
+    const rates = overview.createDiv({ cls: 'wesight-wechat-monitoring-rates' });
+    this.renderMonitoringRate(rates, '赞阅比', like, read, '点赞数 / 阅读数');
+    this.renderMonitoringRate(rates, '转阅比', share, read, '转发数 / 阅读数');
+
+    const details = parent.createDiv({ cls: 'wesight-wechat-monitoring-details' });
+    const metricPanel = details.createDiv({ cls: 'wesight-wechat-monitoring-panel' });
+    metricPanel.createEl('h3', { text: '互动明细' });
+    const metrics = metricPanel.createDiv({ cls: 'wesight-wechat-monitoring-metrics' });
+    const items = [
+      { id: 'like', label: '点赞数', shortLabel: '点赞', value: like },
+      { id: 'share', label: '转发数', shortLabel: '转发', value: share },
+      { id: 'watching', label: '在看数', shortLabel: '在看', value: watching },
+      { id: 'favorite', label: '收藏数', shortLabel: '收藏', value: favorite },
+      { id: 'comment', label: '评论数', shortLabel: '评论', value: comment },
+    ];
+    const chartPanel = details.createDiv({ cls: 'wesight-wechat-monitoring-panel' });
+    chartPanel.createEl('h3', { text: '互动数据对比' });
+    const chart = chartPanel.createDiv({ cls: 'wesight-wechat-monitoring-chart' });
+    const numericValues = items
+      .map(item => item.value)
+      .filter((value): value is number => value !== null);
+    const max = Math.max(1, ...numericValues);
+
+    for (const item of items) {
+      const metric = metrics.createEl('button', {
+        cls: `wesight-wechat-monitoring-metric is-${item.id}`,
+        attr: { type: 'button', 'aria-pressed': 'false' },
+      });
+      const label = metric.createSpan({ cls: 'wesight-wechat-monitoring-metric-label' });
+      label.createSpan({ cls: 'wesight-wechat-monitoring-dot' });
+      label.createSpan({ text: item.label });
+      metric.createEl('strong', { text: this.formatArticleStatsCount(item.value) });
+
+      const row = chart.createDiv({
+        cls: `wesight-wechat-monitoring-chart-row is-${item.id}`,
+      });
+      row.createSpan({ text: item.shortLabel });
+      const track = row.createDiv({ cls: 'wesight-wechat-monitoring-chart-track' });
+      const bar = track.createDiv({ cls: 'wesight-wechat-monitoring-chart-bar' });
+      bar.style.width = `${item.value === null ? 0 : (item.value / max) * 100}%`;
+      row.createEl('strong', { text: this.formatArticleStatsCount(item.value) });
+
+      metric.onclick = () => {
+        const selected = metric.getAttribute('aria-pressed') !== 'true';
+        metrics.querySelectorAll<HTMLButtonElement>('.wesight-wechat-monitoring-metric')
+          .forEach(element => element.setAttribute('aria-pressed', 'false'));
+        chart.querySelectorAll<HTMLElement>('.wesight-wechat-monitoring-chart-row')
+          .forEach(element => element.removeClass('is-selected'));
+        chart.removeClass('has-selection');
+        if (selected) {
+          metric.setAttribute('aria-pressed', 'true');
+          row.addClass('is-selected');
+          chart.addClass('has-selection');
+        }
+      };
+    }
+    chartPanel.createEl('p', {
+      cls: 'wesight-wechat-monitoring-chart-note',
+      text: '点击左侧指标可联动突出对应数据。',
+    });
+  }
+
+  private renderMonitoringRate(
+    parent: HTMLElement,
+    label: string,
+    numerator: number | null,
+    denominator: number | null,
+    description: string,
+  ): void {
+    const rate = denominator && numerator !== null ? numerator / denominator : null;
+    const card = parent.createDiv({ cls: 'wesight-wechat-monitoring-rate' });
+    card.createSpan({ text: label });
+    card.createEl('strong', { text: rate === null ? '—' : `${(rate * 100).toFixed(2)}%` });
+    const track = card.createDiv({ cls: 'wesight-wechat-monitoring-rate-track' });
+    const value = track.createDiv();
+    value.style.width = `${rate === null ? 0 : Math.min(100, rate * 100)}%`;
+    card.createEl('small', { text: description });
+  }
+
+  private parseArticleStatsNumber(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value !== 'string' || !value.trim()) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  private formatArticleStatsCount(value: number | null): string {
+    return value === null ? '—' : new Intl.NumberFormat('zh-CN').format(value);
+  }
+
+  private formatArticleStatsTime(value: Date): string {
+    return value.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   }
 
   private renderPublishingToolbar(parent: HTMLElement, snapshot: WeChatPreviewSnapshot): void {
