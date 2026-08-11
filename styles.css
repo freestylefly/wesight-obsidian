@@ -210,7 +210,30 @@ button.wesight-share-btn .wesight-share-btn-icon svg {
   min-width: 26px;
   align-items: center;
   justify-content: center;
+  gap: 5px;
   flex: 0 0 auto;
+}
+
+button.wesight-header-update-button {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  border: 1px solid var(--interactive-accent);
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--interactive-accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+button.wesight-header-update-button:hover {
+  background: var(--background-modifier-hover);
+  box-shadow: none;
 }
 
 button.wesight-login-button {
@@ -244,6 +267,7 @@ button.wesight-account-button:focus-visible {
 }
 
 button.wesight-account-button {
+  position: relative;
   display: flex;
   width: 26px;
   height: 26px;
@@ -263,6 +287,19 @@ button.wesight-account-button {
 button.wesight-account-button:hover {
   background: rgba(217, 119, 87, 0.08);
   box-shadow: none;
+}
+
+.wesight-update-dot {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--background-primary);
+  border-radius: 50%;
+  background: var(--color-red);
+  box-sizing: border-box;
+  pointer-events: none;
 }
 
 .wesight-account-avatar {

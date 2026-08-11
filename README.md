@@ -75,7 +75,7 @@ Canghe Style is the default local template. The theme selector can also generate
 
 ## Accounts and network use
 
-Knowledge Brain contacts `api.wesight.ai` to verify member access and contacts GitHub only after an eligible user explicitly enables it. Entitlement requests contain the existing account credential and do not include Vault content, questions, answers, file paths, or message identifiers. Claude Code or Codex may send the supplied prompt and evidence to the model provider selected by your existing agent configuration.
+Knowledge Brain contacts `api.wesight.ai` to verify member access and contacts GitHub after an eligible user explicitly enables it. The plugin also reads the manifest from the latest formal GitHub Release at startup and every six hours to discover updates. Update checks send no Vault content, account data, or device identifiers. Entitlement requests contain the existing account credential and do not include Vault content, questions, answers, file paths, or message identifiers. Claude Code or Codex may send the supplied prompt and evidence to the model provider selected by your existing agent configuration.
 
 Local chat and inline editing do not require a WeSight account. A WeSight account with an active Creator membership is required for the Knowledge Brain internal test. A WeSight account is also required for internet sharing and WeChat publishing. Feishu publishing uses the account configured by Lark CLI.
 
@@ -83,6 +83,7 @@ The plugin connects to remote services only for features that need them:
 
 - `api.wesight.ai` handles WeSight sign-in, Knowledge Brain member entitlements, share snapshots, share assets, comments configuration, and WeChat draft operations.
 - `share.wesight.ai` hosts links created by the internet-sharing feature.
+- GitHub Releases provides the latest formal WeSight plugin manifest for update discovery and hosts optional Knowledge Brain resources.
 - The provider URL selected in settings may be contacted to load its model list. Agent subprocesses contact providers according to their own configuration.
 - Generating a Skill-based WeChat theme sends the article Markdown to the provider used by the selected agent configuration.
 - Lark CLI contacts Feishu when you configure, authorize, create, or update a document.

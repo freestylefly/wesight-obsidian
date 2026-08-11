@@ -1,6 +1,6 @@
 {
   "name": "wesight-obsidian",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "WeSight Obsidian plugin for local agent runtimes.",
   "type": "module",
   "main": "main.js",

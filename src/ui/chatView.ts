@@ -32,6 +32,7 @@ import { getVaultBasePath, resolveVaultAbsolutePath, guessMimeType } from '../ut
 import { RuntimeDiscovery } from '../runtime/discovery';
 import { RuntimeManager } from '../runtime/runtimeManager';
 import { getClaudeDetectedLocalModel, listLocalModels } from '../runtime/localModels';
+import type { UpdateService, UpdateState } from '../update/updateService';
 import { RuntimeSetupModal } from './runtimeSetupModal';
 
 export const WESIGHT_VIEW_TYPE = 'wesight-chat-view';
@@ -48,6 +49,7 @@ export interface ChatViewDeps {
   openSharePopover: (file: TFile, anchor?: HTMLElement | null) => void;
   knowledgeBrain: KnowledgeBrain;
   knowledgeBrainEntitlement: KnowledgeBrainEntitlementService;
+  updateService: UpdateService;
 }
 
 interface ActiveEditorContext {
@@ -90,6 +92,7 @@ export class WeSightChatView extends ItemView {
   private submenuHideTimeout: number | null = null;
   private scrollScheduled = false;
   private authUnsubscribe: (() => void) | null = null;
+  private updateUnsubscribe: (() => void) | null = null;
   private knowledgeAccessUnsubscribe: (() => void) | null = null;
   private codexStatusUnsubscribe: (() => void) | null = null;
   private accountMenu: Menu | null = null;
@@ -149,6 +152,13 @@ export class WeSightChatView extends ItemView {
         this.renderAccountControl();
       });
     }
+    if (!this.updateUnsubscribe) {
+      this.updateUnsubscribe = this.deps.updateService.onChange(() => {
+        this.accountMenu?.hide();
+        this.accountMenu = null;
+        this.renderAccountControl();
+      });
+    }
     if (!this.knowledgeAccessUnsubscribe) {
       this.knowledgeAccessUnsubscribe = this.deps.knowledgeBrainEntitlement.onChange(() => {
         if (this.running) return;
@@ -182,6 +192,8 @@ export class WeSightChatView extends ItemView {
     this.accountMenu = null;
     this.authUnsubscribe?.();
     this.authUnsubscribe = null;
+    this.updateUnsubscribe?.();
+    this.updateUnsubscribe = null;
     this.knowledgeAccessUnsubscribe?.();
     this.knowledgeAccessUnsubscribe = null;
     this.codexStatusUnsubscribe?.();
@@ -558,8 +570,25 @@ export class WeSightChatView extends ItemView {
     if (!this.accountSlotEl) return;
     this.accountSlotEl.empty();
     const user = this.deps.auth.getCurrentUser();
+    const updateState = this.deps.updateService.getState();
 
     if (!user) {
+      if (hasPendingUpdate(updateState)) {
+        const update = this.accountSlotEl.createEl('button', {
+          cls: 'wesight-header-update-button',
+          text: '更新',
+          attr: {
+            type: 'button',
+            'aria-label': updateState.status === 'incompatible'
+              ? `WeSight ${updateState.latestVersion ?? ''} 需要更高版本的 Obsidian`
+              : `前往更新 WeSight ${updateState.latestVersion ?? ''}`,
+          },
+        });
+        update.onclick = event => {
+          event.stopPropagation();
+          this.handleKnownUpdate(updateState);
+        };
+      }
       const login = this.accountSlotEl.createEl('button', {
         cls: 'wesight-login-button',
         text: '登录',
@@ -583,6 +612,14 @@ export class WeSightChatView extends ItemView {
     });
     const avatar = account.createSpan({ cls: 'wesight-account-avatar' });
     this.renderUserAvatar(avatar, user);
+    if (hasPendingUpdate(updateState)) {
+      account.addClass('has-update');
+      account.createSpan({ cls: 'wesight-update-dot', attr: { 'aria-hidden': 'true' } });
+      account.setAttribute(
+        'aria-label',
+        `${user.nickname}，发现 WeSight 新版本 ${updateState.latestVersion ?? ''}，打开账户菜单`,
+      );
+    }
     account.onclick = (event) => {
       event.stopPropagation();
       this.openAccountMenu(account, user);
@@ -637,6 +674,8 @@ export class WeSightChatView extends ItemView {
       .setIcon('gem')
       .setIsLabel(true));
     menu.addSeparator();
+    this.addUpdateMenuItem(menu);
+    menu.addSeparator();
     menu.addItem(item => item
       .setTitle('账户详情')
       .setIcon('circle-user-round')
@@ -669,6 +708,62 @@ export class WeSightChatView extends ItemView {
       width: accountMenuWidth,
     });
     this.accountMenu = menu;
+  }
+
+  private addUpdateMenuItem(menu: Menu): void {
+    const state = this.deps.updateService.getState();
+    if (state.status === 'checking') {
+      menu.addItem(item => item
+        .setTitle('正在检查更新…')
+        .setIcon('refresh-cw')
+        .setDisabled(true));
+      return;
+    }
+    if (state.status === 'available') {
+      menu.addItem(item => item
+        .setTitle(`发现新版本 ${state.latestVersion ?? ''}`)
+        .setIcon('download')
+        .onClick(() => this.deps.updateService.openOfficialUpdatePage()));
+      return;
+    }
+    if (state.status === 'incompatible') {
+      menu.addItem(item => item
+        .setTitle(`新版本 ${state.latestVersion ?? ''} 需要 Obsidian ${state.minAppVersion ?? '更高版本'}`)
+        .setIcon('triangle-alert')
+        .onClick(() => this.handleKnownUpdate(state)));
+      return;
+    }
+    menu.addItem(item => item
+      .setTitle('检查更新')
+      .setIcon('refresh-cw')
+      .onClick(() => void this.checkForUpdatesManually()));
+  }
+
+  private async checkForUpdatesManually(): Promise<void> {
+    try {
+      const state = await this.deps.updateService.checkForUpdates();
+      if (state.status === 'available') {
+        this.deps.updateService.openOfficialUpdatePage();
+        return;
+      }
+      if (state.status === 'incompatible') {
+        this.handleKnownUpdate(state);
+        return;
+      }
+      new Notice(`当前已是最新版本 ${state.currentVersion}。`);
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : `检查更新失败：${String(error)}`);
+    }
+  }
+
+  private handleKnownUpdate(state: Readonly<UpdateState>): void {
+    if (state.status === 'incompatible') {
+      new Notice(
+        `WeSight ${state.latestVersion ?? '新版本'} 需要 Obsidian ${state.minAppVersion ?? '更高版本'} 或更高版本。`,
+      );
+      return;
+    }
+    this.deps.updateService.openOfficialUpdatePage();
   }
 
   private setupDropdown(selector: HTMLElement, button: HTMLElement): void {
@@ -2247,6 +2342,10 @@ export class WeSightChatView extends ItemView {
     }
     new RuntimeSetupModal(this.app, status, this.deps.openSettings).open();
   }
+}
+
+function hasPendingUpdate(state: Readonly<UpdateState>): boolean {
+  return state.status === 'available' || state.status === 'incompatible';
 }
 
 function contextSignature(context: ActiveEditorContext): string {

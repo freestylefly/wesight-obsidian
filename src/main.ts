@@ -1,4 +1,5 @@
 import {
+  apiVersion,
   type App,
   MarkdownView,
   Notice,
@@ -39,6 +40,12 @@ import {
   WeChatArticleStatsView,
   WESIGHT_WECHAT_ARTICLE_STATS_VIEW_TYPE,
 } from './ui/wechatArticleStatsView';
+import {
+  shouldNotifyUpdate,
+  startUpdatePolling,
+  UpdateService,
+  type UpdateState,
+} from './update/updateService';
 
 interface AppWithSettings extends App {
   setting?: {
@@ -62,6 +69,7 @@ export default class WeSightPlugin extends Plugin {
   settingTab!: WeSightSettingTab;
   knowledgeBrain!: KnowledgeBrain;
   knowledgeBrainEntitlement!: KnowledgeBrainEntitlementService;
+  updateService!: UpdateService;
   private shareActions = new WeakMap<MarkdownView, HTMLElement>();
   private knowledgeActions = new WeakMap<MarkdownView, HTMLElement>();
   private shareActionElements = new Set<HTMLElement>();
@@ -75,6 +83,11 @@ export default class WeSightPlugin extends Plugin {
     );
     await this.loadTemplateThemeDefinitions();
     await this.loadSettings();
+    this.updateService = new UpdateService({
+      currentVersion: this.manifest.version,
+      currentAppVersion: apiVersion,
+    });
+    this.register(this.updateService.onChange(state => this.handleUpdateStateChange(state)));
     this.providerStore = new ProviderStore(this.app.secretStorage);
     this.vaultStore = new VaultStore(this.app.vault.adapter);
     this.runtimeManager = new RuntimeManager(this.providerStore, () => this.settings);
@@ -128,6 +141,7 @@ export default class WeSightPlugin extends Plugin {
         runtimeManager: this.runtimeManager,
         knowledgeBrain: this.knowledgeBrain,
         knowledgeBrainEntitlement: this.knowledgeBrainEntitlement,
+        updateService: this.updateService,
         auth: this.cloudAuth,
         openSettings: () => this.openSettings(),
         openWeChatPreview: (file?: TFile) => {
@@ -279,6 +293,13 @@ export default class WeSightPlugin extends Plugin {
     });
 
     this.app.workspace.onLayoutReady(() => this.installMarkdownShareActions());
+    this.app.workspace.onLayoutReady(() => {
+      const intervalId = startUpdatePolling(
+        () => this.updateService.checkForUpdates(),
+        (handler, timeout) => window.setInterval(handler, timeout),
+      );
+      this.registerInterval(intervalId);
+    });
     this.registerEvent(this.app.workspace.on('layout-change', () => this.installMarkdownShareActions()));
     this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.installMarkdownShareActions()));
     this.registerEvent(this.app.workspace.on('file-open', () => this.installMarkdownShareActions()));
@@ -521,12 +542,30 @@ export default class WeSightPlugin extends Plugin {
       new Notice(error instanceof Error ? error.message : 'WeSight 登录失败。');
     }
   }
+
+  private handleUpdateStateChange(state: Readonly<UpdateState>): void {
+    if (!shouldNotifyUpdate(state, this.settings.lastNotifiedUpdateVersion)) return;
+
+    if (!state.latestVersion) return;
+    this.settings.lastNotifiedUpdateVersion = state.latestVersion;
+    void this.saveData(this.settings).catch(() => undefined);
+    if (state.status === 'incompatible') {
+      new Notice(
+        `发现 WeSight 新版本 ${state.latestVersion}，需要 Obsidian ${state.minAppVersion ?? '更高版本'} 或更高版本。`,
+      );
+      return;
+    }
+    new Notice(`发现 WeSight 新版本 ${state.latestVersion}，点击右上角更新入口即可前往更新。`);
+  }
 }
 
 function normalizeSettings(value: Partial<WeSightObsidianSettings> | null | undefined): WeSightObsidianSettings {
   return {
     ...DEFAULT_SETTINGS,
     ...value,
+    lastNotifiedUpdateVersion: typeof value?.lastNotifiedUpdateVersion === 'string'
+      ? value.lastNotifiedUpdateVersion
+      : '',
     configSources: {
       ...DEFAULT_SETTINGS.configSources,
       ...(value?.configSources ?? {}),

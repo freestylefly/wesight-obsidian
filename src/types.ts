@@ -246,6 +246,8 @@ export type LocalModelByAgent = Record<AgentId, string>;
 
 export interface WeSightObsidianSettings {
   defaultAgentId: AgentId;
+  /** Latest plugin version already announced in this vault. */
+  lastNotifiedUpdateVersion?: string;
   configSources: ConfigSourcesByAgent;
   configuredPaths: ConfiguredPathsByAgent;
   providerProfileByAgent: ProfileSelectionByAgent;
@@ -291,6 +293,7 @@ export const DEFAULT_LOCAL_MODELS: LocalModelByAgent = {
 
 export const DEFAULT_SETTINGS: WeSightObsidianSettings = {
   defaultAgentId: 'claude',
+  lastNotifiedUpdateVersion: '',
   configSources: DEFAULT_CONFIG_SOURCES,
   configuredPaths: DEFAULT_CONFIGURED_PATHS,
   providerProfileByAgent: DEFAULT_PROFILE_SELECTION,
