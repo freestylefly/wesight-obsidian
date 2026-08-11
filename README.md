@@ -18,9 +18,11 @@ WeSight detects existing executables from the configured path, the system path, 
 1. Open **Settings → WeSight** and select Claude Code, Codex, or OpenCode.
 2. Confirm that WeSight detects the CLI, or enter its executable path.
 3. Open the WeSight sidebar from the ribbon or command palette.
-4. Chat with the selected agent, mention vault files, switch models, or use slash commands.
+4. Chat with the selected agent, mention vault files, attach or paste images, switch models, or use slash commands.
 
 Local chats and inline edits run the selected CLI as a child process. Agent capabilities, provider requests, tool calls, file access, and approval behavior follow that CLI's own configuration.
+
+Chat image input supports PNG, JPEG, WebP, and GIF files up to 25 MB each. Selected images are copied into the current vault, shown with the conversation, and passed to the selected agent CLI as local attachments. The CLI and its configured provider determine whether those image bytes leave the device.
 
 ### Knowledge Brain
 
@@ -95,7 +97,7 @@ Note text and supported local images are sent to WeSight Cloud only after you ex
 
 When Knowledge Brain is enabled, the plugin writes the runtime and install record under `~/.wesight/knowledge-brain/`. Reviewed operations create or update knowledge files under `wiki/`, immutable source snapshots under `.raw/`, and upstream transaction state under `.vault-meta/`. Permission-restricted transaction previews use `~/.wesight/tmp/knowledge-brain/` and are cleaned after confirmation, cancellation, failure, plugin shutdown, or the next startup. Operational logs contain action types, durations, versions, statuses, counts, and error codes; they exclude note content, questions, answers, file paths, message identifiers, and transaction payloads.
 
-WeSight reads the active note and files you explicitly mention or publish. It writes conversation data under `.wesight/` in the current vault and may update WeSight-owned frontmatter fields when linking a note to a share, Feishu document, or WeChat draft.
+WeSight reads the active note and files you explicitly mention or publish. It writes conversation data under `.wesight/` in the current vault and may update WeSight-owned frontmatter fields when linking a note to a share, Feishu document, or WeChat draft. Images attached to chat are stored under `.wesight/input-images/` and removed with their conversation.
 
 The desktop plugin also accesses these paths outside the vault:
 

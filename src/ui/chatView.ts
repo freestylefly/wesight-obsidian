@@ -9,6 +9,7 @@ import { VaultStore } from '../storage/vaultStore';
 import type {
   AgentId,
   ChatImageArtifact,
+  ChatInputImage,
   ChatMessage,
   ChatMessageProcessItem,
   ConversationMode,
@@ -76,6 +77,8 @@ export class WeSightChatView extends ItemView {
   private historyTriggerEl: HTMLElement | null = null;
   private sendButtonEl!: HTMLButtonElement;
   private stopButtonEl!: HTMLButtonElement;
+  private pendingInputImages: ChatInputImage[] = [];
+  private importingImages = false;
   private suggestEl: HTMLElement | null = null;
   private running = false;
   private cancelledByUser = false;
@@ -150,6 +153,7 @@ export class WeSightChatView extends ItemView {
         this.accountMenu?.hide();
         this.accountMenu = null;
         this.renderAccountControl();
+        this.renderMessages();
       });
     }
     if (!this.updateUnsubscribe) {
@@ -185,6 +189,7 @@ export class WeSightChatView extends ItemView {
   }
 
   override async onClose(): Promise<void> {
+    await this.discardPendingInputImages();
     // Submenus live on document.body, so they outlive contentEl unless removed here.
     this.hideConfigSubmenu();
     this.hideHistoryPopover();
@@ -341,8 +346,13 @@ export class WeSightChatView extends ItemView {
   private renderActiveContextChip(): void {
     if (!this.contextRowEl) return;
     this.contextRowEl.empty();
+    if (this.conversationMode === 'chat') {
+      for (const image of this.pendingInputImages) {
+        this.renderPendingInputImage(this.contextRowEl, image);
+      }
+    }
     const context = this.getVisibleEditorContext();
-    this.contextRowEl.toggleClass('has-content', Boolean(context));
+    this.contextRowEl.toggleClass('has-content', Boolean(context) || (this.conversationMode === 'chat' && this.pendingInputImages.length > 0));
     if (!context) return;
 
     const hasSelection = Boolean(context.selection.trim());
@@ -368,6 +378,28 @@ export class WeSightChatView extends ItemView {
       event.stopPropagation();
       this.dismissedContextSignature = contextSignature(context);
       this.renderActiveContextChip();
+    };
+  }
+
+  private renderPendingInputImage(parent: HTMLElement, image: ChatInputImage): void {
+    const chip = parent.createDiv({ cls: 'wesight-input-image-chip' });
+    const resourcePath = this.deps.vaultStore.getResourcePath(image.vaultPath);
+    chip.createEl('img', {
+      cls: 'wesight-input-image-preview',
+      attr: { src: resourcePath, alt: image.fileName },
+    });
+    chip.createSpan({ cls: 'wesight-input-image-name', text: image.fileName });
+    const remove = chip.createEl('button', {
+      cls: 'wesight-input-image-remove',
+      attr: { type: 'button', 'aria-label': `移除 ${image.fileName}` },
+    });
+    setIcon(remove, 'x');
+    remove.onclick = event => {
+      event.stopPropagation();
+      this.pendingInputImages = this.pendingInputImages.filter(item => item.id !== image.id);
+      void this.deps.vaultStore.deleteInputImage(image);
+      this.renderActiveContextChip();
+      this.updateRunControls();
     };
   }
 
@@ -477,6 +509,15 @@ export class WeSightChatView extends ItemView {
     this.inputEl.value = pendingInput;
     this.renderSkillPill();
     this.inputEl.oninput = () => void this.updateSuggestions();
+    this.inputEl.onpaste = event => {
+      if (this.conversationMode !== 'chat') return;
+      const files = Array.from(event.clipboardData?.files ?? []).filter(file => file.type.startsWith('image/'));
+      if (files.length === 0) return;
+      event.preventDefault();
+      const text = event.clipboardData?.getData('text/plain') ?? '';
+      if (text) this.insertTextAtCursor(text);
+      void this.addInputImages(files);
+    };
     this.inputEl.onkeydown = event => {
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
@@ -498,6 +539,14 @@ export class WeSightChatView extends ItemView {
     const toolbarLeft = toolbar.createDiv({ cls: 'wesight-toolbar-left' });
     this.renderAgentSelector(toolbarLeft);
     this.renderModelSelector(toolbarLeft);
+    if (this.conversationMode === 'chat') {
+      const addImageButton = toolbarLeft.createEl('button', {
+        cls: 'clickable-icon wesight-add-image-btn',
+        attr: { type: 'button', 'aria-label': '添加图片', title: '添加图片' },
+      });
+      setIcon(addImageButton, 'plus');
+      addImageButton.onclick = () => this.openImagePicker();
+    }
 
     const toolbarRight = toolbar.createDiv({ cls: 'wesight-toolbar-right' });
     const knowledgeActive = this.conversationMode === 'knowledge';
@@ -1154,6 +1203,7 @@ export class WeSightChatView extends ItemView {
 
   private async openHistoryConversation(conversation: StoredConversation): Promise<void> {
     this.hideHistoryPopover();
+    await this.discardPendingInputImages();
     this.conversation = conversation;
     this.conversationMode = conversation.mode ?? 'chat';
     if (this.agentId !== conversation.agentId) {
@@ -1498,12 +1548,37 @@ export class WeSightChatView extends ItemView {
 
   private renderMessage(message: ChatMessage): void {
     const item = this.messagesEl.createDiv({ cls: `wesight-message is-${message.role}` });
+    if (message.role === 'user') {
+      // Obsidian's workspace containers use pointer handlers for pane dragging.
+      // Keep those handlers from turning a text drag inside a user bubble into
+      // a pane gesture, while preserving the browser's native text selection.
+      item.addEventListener('pointerdown', event => event.stopPropagation());
+      item.addEventListener('mousedown', event => event.stopPropagation());
+      item.addEventListener('selectstart', event => event.stopPropagation());
+      item.addEventListener('copy', event => event.stopPropagation());
+    }
     const role = message.role === 'user'
-      ? 'You'
+      ? (this.deps.auth.getCurrentUser()?.nickname || 'You')
       : message.role === 'assistant'
         ? getAgentDescriptor(message.agentId ?? this.agentId).displayName
         : message.role;
-    item.createDiv({ cls: 'wesight-message-role', text: role });
+    const header = item.createDiv({ cls: 'wesight-message-header' });
+    header.createDiv({ cls: 'wesight-message-role', text: role });
+    if (message.role === 'user' && message.content) {
+      const copyButton = header.createEl('button', {
+        cls: 'clickable-icon wesight-user-message-copy',
+        attr: { type: 'button', 'aria-label': '复制用户提问', title: '复制用户提问' },
+      });
+      setIcon(copyButton, 'copy');
+      copyButton.onclick = event => {
+        event.preventDefault();
+        event.stopPropagation();
+        void navigator.clipboard.writeText(message.content).then(
+          () => new Notice('已复制用户提问。'),
+          () => new Notice('复制失败，请重试。'),
+        );
+      };
+    }
     if (message.metadata?.knowledgeBased) item.createDiv({ cls: 'wesight-kb-answer-badge', text: '基于知识库' });
     if (message.role === 'assistant' || message.role === 'error') {
       if (message.role === 'assistant' && message.metadata?.process?.length) {
@@ -1511,8 +1586,18 @@ export class WeSightChatView extends ItemView {
         this.renderProcessContainer(item, message, !collapsed);
       }
       void this.renderMessageMarkdown(item, message);
+    } else if (message.role === 'user') {
+      const content = item.createEl('pre', {
+        cls: 'wesight-message-content wesight-user-message-text',
+        text: message.content,
+        attr: { 'aria-label': '用户提问，可选择并复制' },
+      });
+      this.enableUserMessageSelection(content);
     } else {
       item.createEl('pre', { cls: 'wesight-message-content', text: message.content });
+    }
+    for (const image of message.metadata?.inputImages ?? []) {
+      this.renderInputImage(item, image);
     }
     for (const artifact of message.metadata?.artifacts ?? []) {
       if (artifact.type === 'image') this.renderImageArtifact(item, artifact);
@@ -1524,6 +1609,50 @@ export class WeSightChatView extends ItemView {
       this.renderKnowledgeCitations(item, message);
       this.renderKnowledgeBrainSaveButton(item, message);
     }
+  }
+
+  private enableUserMessageSelection(content: HTMLElement): void {
+    let anchorOffset: number | null = null;
+    const selectTo = (focusOffset: number): void => {
+      if (anchorOffset === null) return;
+      const range = document.createRange();
+      const start = Math.min(anchorOffset, focusOffset);
+      const end = Math.max(anchorOffset, focusOffset);
+      const startPoint = textPointAtOffset(content, start);
+      const endPoint = textPointAtOffset(content, end);
+      if (!startPoint || !endPoint) return;
+      range.setStart(startPoint.node, startPoint.offset);
+      range.setEnd(endPoint.node, endPoint.offset);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    };
+    content.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return;
+      const offset = textOffsetAtPoint(content, event.clientX, event.clientY);
+      if (offset === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      anchorOffset = offset;
+      content.setPointerCapture(event.pointerId);
+      selectTo(offset);
+    });
+    content.addEventListener('pointermove', event => {
+      if (anchorOffset === null || !content.hasPointerCapture(event.pointerId)) return;
+      const offset = textOffsetAtPoint(content, event.clientX, event.clientY);
+      if (offset === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      selectTo(offset);
+    });
+    const finish = (event: PointerEvent): void => {
+      if (anchorOffset === null) return;
+      event.stopPropagation();
+      anchorOffset = null;
+      if (content.hasPointerCapture(event.pointerId)) content.releasePointerCapture(event.pointerId);
+    };
+    content.addEventListener('pointerup', finish);
+    content.addEventListener('pointercancel', finish);
   }
 
 
@@ -1731,6 +1860,15 @@ export class WeSightChatView extends ItemView {
     }
   }
 
+  private renderInputImage(parent: HTMLElement, image: ChatInputImage): void {
+    const resourcePath = this.deps.vaultStore.getResourcePath(image.vaultPath);
+    const link = parent.createEl('a', {
+      cls: 'wesight-message-input-image',
+      attr: { href: resourcePath, target: '_blank', rel: 'noopener', title: image.fileName },
+    });
+    link.createEl('img', { attr: { src: resourcePath, alt: image.fileName } });
+  }
+
   private renderEmptyState(): void {
     const empty = this.messagesEl.createDiv({ cls: 'wesight-welcome' });
     empty.createDiv({ cls: 'wesight-welcome-greeting', text: this.conversationMode === 'knowledge' ? '向你的知识库提问' : 'How can I help?' });
@@ -1740,7 +1878,8 @@ export class WeSightChatView extends ItemView {
     if (this.running) return;
     this.cancelledByUser = false;
     const rawPrompt = this.inputEl.value.trim();
-    if (!rawPrompt && !this.selectedSkill) return;
+    const inputImages = this.conversationMode === 'chat' ? [...this.pendingInputImages] : [];
+    if (!rawPrompt && !this.selectedSkill && inputImages.length === 0) return;
     if (this.conversationMode === 'knowledge' && !(await this.requireKnowledgeAccess())) return;
     const skillPrompt = this.selectedSkill?.insertText ?? '';
     this.ensureConversation();
@@ -1770,23 +1909,31 @@ export class WeSightChatView extends ItemView {
     const runtimePrompt = skillPrompt
       ? `${skillPrompt}\n\n${userPrompt}`
       : userPrompt;
-    const attachments = mergeAttachments([...resolved.attachments, ...activeContext.attachments]);
+    const imageAttachments = inputImages.map(image => ({
+      vaultPath: image.vaultPath,
+      absolutePath: resolveVaultAbsolutePath(this.app, image.vaultPath) ?? '',
+      mimeType: image.mimeType,
+    })).filter(attachment => Boolean(attachment.absolutePath));
+    const attachments = mergeAttachments([...resolved.attachments, ...activeContext.attachments, ...imageAttachments]);
     const userMessage: ChatMessage = {
       id: createId('msg'),
       role: 'user',
       content: rawPrompt,
       createdAt: Date.now(),
       agentId: this.agentId,
+      metadata: inputImages.length > 0 ? { inputImages } : undefined,
     };
     if (conversation.messages.length === 0) {
       this.messagesEl.empty();
     }
     conversation.messages.push(userMessage);
     if (!conversation.title || conversation.title === 'New WeSight session') {
-      conversation.title = rawPrompt.replace(/\s+/g, ' ').trim().slice(0, 60) || conversation.title;
+      conversation.title = rawPrompt.replace(/\s+/g, ' ').trim().slice(0, 60) || (inputImages.length > 0 ? '图片对话' : conversation.title);
     }
     this.renderMessage(userMessage);
     this.inputEl.value = '';
+    this.pendingInputImages = [];
+    this.renderActiveContextChip();
     this.clearSuggestions();
     this.removeSkill();
 
@@ -2021,6 +2168,7 @@ export class WeSightChatView extends ItemView {
   }
 
   private async startNewConversation(): Promise<void> {
+    await this.discardPendingInputImages();
     this.ensureConversation(true);
     this.renderMessages();
     this.inputEl.focus();
@@ -2029,6 +2177,7 @@ export class WeSightChatView extends ItemView {
   private async switchConversationMode(mode: ConversationMode): Promise<void> {
     if (this.running || mode === this.conversationMode) return;
     if (mode === 'knowledge' && !(await this.requireKnowledgeAccess())) return;
+    await this.discardPendingInputImages();
     this.conversationMode = mode;
     if (mode === 'knowledge' && this.agentId !== 'claude' && this.agentId !== 'codex') this.agentId = 'claude';
     if (this.conversation?.messages.length) {
@@ -2227,12 +2376,69 @@ export class WeSightChatView extends ItemView {
     const knowledgeLocked = this.conversationMode === 'knowledge'
       && !this.deps.knowledgeBrainEntitlement.getCurrentStatus().allowed;
     if (this.sendButtonEl) {
-      this.sendButtonEl.disabled = this.running || knowledgeLocked;
+      this.sendButtonEl.disabled = this.running || this.importingImages || knowledgeLocked;
     }
     if (this.stopButtonEl) {
       this.stopButtonEl.disabled = !this.running;
     }
     this.cancelHintEl?.toggleClass('is-visible', this.running);
+  }
+
+  private openImagePicker(): void {
+    const picker = this.containerEl.createEl('input', {
+      cls: 'wesight-hidden-image-picker',
+      attr: {
+        type: 'file',
+        accept: 'image/png,image/jpeg,image/webp,image/gif',
+        multiple: '',
+      },
+    });
+    picker.onchange = () => {
+      const files = Array.from(picker.files ?? []);
+      if (files.length > 0) void this.addInputImages(files);
+      picker.remove();
+    };
+    picker.oncancel = () => picker.remove();
+    picker.click();
+  }
+
+  private async addInputImages(files: File[]): Promise<void> {
+    if (this.conversationMode !== 'chat' || files.length === 0) return;
+    this.ensureConversation();
+    if (!this.conversation) return;
+    this.importingImages = true;
+    this.updateRunControls();
+    let added = 0;
+    for (const file of files) {
+      try {
+        const image = await this.deps.vaultStore.importInputImage(this.conversation.id, file.name || 'clipboard-image.png', await file.arrayBuffer());
+        if (this.pendingInputImages.some(item => item.contentHash === image.contentHash)) {
+          await this.deps.vaultStore.deleteInputImage(image);
+          continue;
+        }
+        this.pendingInputImages.push(image);
+        added += 1;
+      } catch (error) {
+        new Notice(error instanceof Error ? error.message : `无法添加图片：${String(error)}`);
+      }
+    }
+    this.importingImages = false;
+    this.renderActiveContextChip();
+    this.updateRunControls();
+    if (added > 0) this.inputEl.focus();
+  }
+
+  private async discardPendingInputImages(): Promise<void> {
+    const images = this.pendingInputImages;
+    this.pendingInputImages = [];
+    await Promise.allSettled(images.map(image => this.deps.vaultStore.deleteInputImage(image)));
+  }
+
+  private insertTextAtCursor(text: string): void {
+    const start = this.inputEl.selectionStart ?? this.inputEl.value.length;
+    const end = this.inputEl.selectionEnd ?? start;
+    this.inputEl.setRangeText(text, start, end, 'end');
+    this.inputEl.dispatchEvent(new Event('input'));
   }
 
   private attachActiveNote(): void {
@@ -2346,6 +2552,42 @@ export class WeSightChatView extends ItemView {
 
 function hasPendingUpdate(state: Readonly<UpdateState>): boolean {
   return state.status === 'available' || state.status === 'incompatible';
+}
+
+function textOffsetAtPoint(content: HTMLElement, x: number, y: number): number | null {
+  const caretDocument = document as Document & {
+    caretPositionFromPoint?: (clientX: number, clientY: number) => { offsetNode: Node; offset: number } | null;
+  };
+  const position = caretDocument.caretPositionFromPoint?.(x, y);
+  const chromiumCaretRange = Reflect.get(document, 'caretRangeFromPoint') as
+    | ((clientX: number, clientY: number) => Range | null)
+    | undefined;
+  const fallbackRange = position ? null : chromiumCaretRange?.call(document, x, y);
+  const node = position?.offsetNode ?? fallbackRange?.startContainer;
+  const offset = position?.offset ?? fallbackRange?.startOffset;
+  if (!node || offset === undefined || (node !== content && !content.contains(node))) return null;
+  const prefix = document.createRange();
+  prefix.selectNodeContents(content);
+  try {
+    prefix.setEnd(node, offset);
+  } catch {
+    return null;
+  }
+  return prefix.toString().length;
+}
+
+function textPointAtOffset(content: HTMLElement, requestedOffset: number): { node: Node; offset: number } | null {
+  const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+  let remaining = Math.max(0, requestedOffset);
+  let last: Text | null = null;
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const textNode = node as Text;
+    last = textNode;
+    const length = textNode.data.length;
+    if (remaining <= length) return { node: textNode, offset: remaining };
+    remaining -= length;
+  }
+  return last ? { node: last, offset: last.data.length } : null;
 }
 
 function contextSignature(context: ActiveEditorContext): string {

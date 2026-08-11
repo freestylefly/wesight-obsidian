@@ -32,6 +32,20 @@ class MemoryAdapter {
     return value;
   }
 
+  async rmdir(target: string, recursive: boolean): Promise<void> {
+    if (!recursive) throw new Error('Expected recursive directory removal');
+    for (const key of [...this.binaries.keys()]) {
+      if (key.startsWith(`${target}/`)) this.binaries.delete(key);
+    }
+    for (const directory of [...this.directories]) {
+      if (directory === target || directory.startsWith(`${target}/`)) this.directories.delete(directory);
+    }
+  }
+
+  async remove(target: string): Promise<void> {
+    this.binaries.delete(target);
+  }
+
   getResourcePath(target: string): string {
     return `app://vault/${target}`;
   }
@@ -110,6 +124,58 @@ describe('VaultStore generated images', () => {
       itemId: 'unsupported',
       sourcePath: textPath,
     })).rejects.toThrow('unsupported');
+  });
+
+  test('imports supported input images, persists metadata, and cleans them up with the conversation', async () => {
+    const adapter = new MemoryAdapter();
+    const store = new VaultStore(adapter as unknown as DataAdapter);
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).buffer;
+    const image = await store.importInputImage('conversation/unsafe', 'screen shot.fake', png);
+
+    expect(image).toMatchObject({
+      mimeType: 'image/png',
+      fileName: 'screen_shot.png',
+    });
+    expect(image.contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(image.vaultPath).toMatch(/^\.wesight\/input-images\/conversation_unsafe\/.+screen_shot\.png$/);
+
+    await store.replaceConversation({
+      id: 'conversation/unsafe',
+      title: '图片对话',
+      agentId: 'codex',
+      createdAt: 1,
+      updatedAt: 1,
+      messages: [{
+        id: 'message-1',
+        role: 'user',
+        content: '',
+        createdAt: 1,
+        metadata: { inputImages: [image] },
+      }],
+    });
+    expect((await store.getConversation('conversation/unsafe'))?.messages[0]?.metadata?.inputImages).toEqual([image]);
+
+    await store.deleteConversation('conversation/unsafe');
+    expect(adapter.binaries.has(image.vaultPath)).toBe(false);
+  });
+
+  test('accepts GIF input and rejects empty or unsupported input images', async () => {
+    const store = new VaultStore(new MemoryAdapter() as unknown as DataAdapter);
+    const gif = Uint8Array.from(Buffer.from('GIF89a')).buffer;
+    await expect(store.importInputImage('conversation', 'animation.gif', gif)).resolves.toMatchObject({ mimeType: 'image/gif' });
+    await expect(store.importInputImage('conversation', 'empty.png', new ArrayBuffer(0))).rejects.toThrow('为空');
+    await expect(store.importInputImage('conversation', 'fake.png', Uint8Array.from([1, 2, 3]).buffer)).rejects.toThrow('仅支持');
+  });
+
+  test('removes unused input images without allowing paths outside the managed directory', async () => {
+    const adapter = new MemoryAdapter();
+    const store = new VaultStore(adapter as unknown as DataAdapter);
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).buffer;
+    const image = await store.importInputImage('conversation', 'pending.png', png);
+
+    await store.deleteInputImage(image);
+    expect(adapter.binaries.has(image.vaultPath)).toBe(false);
+    await expect(store.deleteInputImage({ ...image, vaultPath: 'notes/important.md' })).rejects.toThrow('拒绝删除');
   });
 
   test('persists knowledge mode and separate agent session IDs while accepting legacy conversations', async () => {

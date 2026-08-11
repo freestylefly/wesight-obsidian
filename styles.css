@@ -374,6 +374,8 @@ button.wesight-account-button:hover {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 .wesight-chat-log:focus {
@@ -404,6 +406,8 @@ button.wesight-account-button:hover {
   padding: 10px 14px;
   border-radius: 8px;
   overflow-wrap: anywhere;
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 .wesight-message-role {
@@ -412,6 +416,39 @@ button.wesight-account-button:hover {
   font-weight: 600;
   letter-spacing: 0;
   color: var(--text-muted);
+}
+
+.wesight-message-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.wesight-message-header .wesight-message-role {
+  margin-bottom: 0;
+}
+
+button.wesight-user-message-copy {
+  width: 20px;
+  height: 20px;
+  padding: 2px;
+  border: 0;
+  color: var(--text-faint);
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+button.wesight-user-message-copy:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+button.wesight-user-message-copy svg {
+  width: 13px;
+  height: 13px;
 }
 
 .wesight-message > pre.wesight-message-content {
@@ -444,6 +481,23 @@ button.wesight-account-button:hover {
   align-self: flex-end;
   background: var(--background-secondary);
   border-end-end-radius: 4px;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.wesight-message.is-user .wesight-message-role,
+.wesight-message.is-user .wesight-message-content {
+  cursor: text;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.wesight-user-message-text {
+  cursor: text;
+  user-select: text !important;
+  -webkit-app-region: no-drag;
+  -webkit-user-select: text !important;
 }
 
 body.theme-dark .wesight-message.is-user {
@@ -479,6 +533,24 @@ body.theme-dark .wesight-message.is-user {
 
 .wesight-message.is-error {
   color: var(--text-error);
+}
+
+.wesight-message-input-image {
+  display: inline-block;
+  margin-top: 8px;
+  margin-right: 8px;
+  border-radius: 8px;
+  line-height: 0;
+  overflow: hidden;
+}
+
+.wesight-message-input-image img {
+  display: block;
+  width: auto;
+  max-width: min(280px, 100%);
+  max-height: 240px;
+  border-radius: 8px;
+  object-fit: contain;
 }
 
 .wesight-skill-pill {
@@ -640,6 +712,63 @@ button.wesight-file-chip-remove svg {
   height: 12px;
 }
 
+.wesight-input-image-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  padding: 3px 24px 3px 3px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+}
+
+.wesight-input-image-preview {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: 5px;
+  object-fit: cover;
+}
+
+.wesight-input-image-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-normal);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.wesight-input-image-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--background-primary-alt);
+  box-shadow: none;
+  cursor: pointer;
+}
+
+button.wesight-input-image-remove:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+button.wesight-input-image-remove svg {
+  width: 12px;
+  height: 12px;
+}
+
 .wesight-input {
   width: 100%;
   flex: 1 1 0;
@@ -738,6 +867,25 @@ button.wesight-file-chip-remove svg {
 .wesight-model-chevron svg {
   width: 12px;
   height: 12px;
+}
+
+button.wesight-add-image-btn {
+  width: 26px;
+  height: 26px;
+  padding: 4px;
+  border: 0;
+  color: var(--text-muted);
+  background: transparent;
+  box-shadow: none;
+}
+
+button.wesight-add-image-btn:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.wesight-hidden-image-picker {
+  display: none;
 }
 
 .wesight-model-dropdown {

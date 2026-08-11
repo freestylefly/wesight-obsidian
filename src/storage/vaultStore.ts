@@ -1,9 +1,10 @@
 import { promises as fs } from 'fs';
+import { createHash } from 'crypto';
 import path from 'path';
 
 import type { DataAdapter } from 'obsidian';
 
-import type { ChatImageArtifact, ChatMessage, ConversationMode, StoredConversation } from '../types';
+import type { ChatImageArtifact, ChatInputImage, ChatMessage, ConversationMode, StoredConversation } from '../types';
 import { createId } from '../utils/id';
 import type { SlashCommand } from '../utils/slashCommands';
 
@@ -16,7 +17,9 @@ const CONVERSATIONS_PATH = '.wesight/conversations.json';
 const COMMANDS_PATH = '.wesight/commands.json';
 const MENTION_CACHE_PATH = '.wesight/mention-cache.json';
 const GENERATED_IMAGES_PATH = '.wesight/generated-images';
+const INPUT_IMAGES_PATH = '.wesight/input-images';
 const MAX_GENERATED_IMAGE_BYTES = 25 * 1024 * 1024;
+export const MAX_INPUT_IMAGE_BYTES = 25 * 1024 * 1024;
 
 export class VaultStore {
   constructor(private readonly adapter: DataAdapter) {}
@@ -88,6 +91,51 @@ export class VaultStore {
     const file = await this.readConversationsFile();
     file.conversations = file.conversations.filter(item => item.id !== id);
     await this.writeConversationsFile(file);
+    const safeConversationId = sanitizeConversationId(id);
+    try {
+      await this.adapter.rmdir(`${INPUT_IMAGES_PATH}/${safeConversationId}`, true);
+    } catch (error) {
+      if (await this.adapter.exists(`${INPUT_IMAGES_PATH}/${safeConversationId}`)) {
+        console.warn('WeSight could not clean up conversation input images.', error);
+      }
+    }
+  }
+
+  async importInputImage(conversationId: string, fileName: string, value: ArrayBuffer): Promise<ChatInputImage> {
+    const bytes = new Uint8Array(value);
+    if (bytes.length <= 0) throw new Error('图片文件为空。');
+    if (bytes.length > MAX_INPUT_IMAGE_BYTES) throw new Error('图片超过 25 MB。');
+    const detected = detectImageFormat(bytes);
+    if (!detected) throw new Error('仅支持 PNG、JPEG、WebP 或 GIF 图片。');
+
+    const safeConversationId = sanitizeConversationId(conversationId);
+    const directory = `${INPUT_IMAGES_PATH}/${safeConversationId}`;
+    await this.ensureDirectory(directory);
+    const normalizedName = sanitizeFileName(fileName, detected.extension);
+    const vaultPath = `${directory}/${Date.now()}-${createId('image')}-${normalizedName}`;
+    await this.adapter.writeBinary(vaultPath, Uint8Array.from(bytes).buffer);
+    return {
+      id: createId('input-image'),
+      vaultPath,
+      mimeType: detected.mimeType,
+      fileName: normalizedName,
+      createdAt: Date.now(),
+      contentHash: createHash('sha256').update(bytes).digest('hex'),
+    };
+  }
+
+  async deleteInputImage(image: ChatInputImage): Promise<void> {
+    const normalizedPath = path.posix.normalize(image.vaultPath.replace(/\\/g, '/'));
+    if (!normalizedPath.startsWith(`${INPUT_IMAGES_PATH}/`)) {
+      throw new Error('拒绝删除 WeSight 图片目录之外的文件。');
+    }
+    try {
+      await this.adapter.remove(normalizedPath);
+    } catch (error) {
+      if (await this.adapter.exists(normalizedPath)) {
+        console.warn('WeSight could not remove an unused input image.', error);
+      }
+    }
   }
 
   async listCommands(): Promise<SlashCommand[]> {
@@ -126,7 +174,7 @@ export class VaultStore {
       throw new Error('Codex image MIME type does not match its file contents.');
     }
 
-    const safeConversationId = conversationId.replace(/[^a-zA-Z0-9_-]/g, '_') || 'conversation';
+    const safeConversationId = sanitizeConversationId(conversationId);
     const directory = `${GENERATED_IMAGES_PATH}/${safeConversationId}`;
     await this.ensureDirectory(directory);
     const filename = `${Date.now()}-${createId('image')}${detected.extension}`;
@@ -220,5 +268,22 @@ function detectImageFormat(bytes: Uint8Array): { mimeType: string; extension: st
     && String.fromCharCode(...bytes.slice(0, 4)) === 'RIFF'
     && String.fromCharCode(...bytes.slice(8, 12)) === 'WEBP'
   ) return { mimeType: 'image/webp', extension: '.webp' };
+  if (
+    bytes.length >= 6
+    && (String.fromCharCode(...bytes.slice(0, 6)) === 'GIF87a'
+      || String.fromCharCode(...bytes.slice(0, 6)) === 'GIF89a')
+  ) return { mimeType: 'image/gif', extension: '.gif' };
   return null;
+}
+
+function sanitizeConversationId(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '_') || 'conversation';
+}
+
+function sanitizeFileName(fileName: string, extension: string): string {
+  const base = path.basename(fileName || `image${extension}`)
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .replace(/^\.+/, '') || `image${extension}`;
+  const stem = base.replace(/\.[^.]+$/, '').slice(0, 80) || 'image';
+  return `${stem}${extension}`;
 }

@@ -90,6 +90,16 @@ export interface ChatImageArtifact {
   revisedPrompt?: string;
 }
 
+export interface ChatInputImage {
+  id: string;
+  vaultPath: string;
+  mimeType: string;
+  fileName: string;
+  createdAt: number;
+  /** Content digest used to avoid adding the same image more than once. */
+  contentHash?: string;
+}
+
 export type ChatArtifact = ChatImageArtifact;
 
 export interface ChatMessageProcessItem {
@@ -106,6 +116,8 @@ export interface ChatMessageProcessItem {
 
 export interface ChatMessageMetadata extends Record<string, unknown> {
   artifacts?: ChatArtifact[];
+  /** Images supplied by the user with this message. */
+  inputImages?: ChatInputImage[];
   /** Total elapsed time of the assistant turn in milliseconds. */
   durationMs?: number;
   /** Intermediate reasoning and tool-call progress shown while streaming and collapsed after completion. */
