@@ -76,7 +76,6 @@ export class WeSightChatView extends ItemView {
   private historyPopoverEl: HTMLElement | null = null;
   private historyTriggerEl: HTMLElement | null = null;
   private sendButtonEl!: HTMLButtonElement;
-  private stopButtonEl!: HTMLButtonElement;
   private pendingInputImages: ChatInputImage[] = [];
   private importingImages = false;
   private suggestEl: HTMLElement | null = null;
@@ -134,11 +133,11 @@ export class WeSightChatView extends ItemView {
   }
 
   override async onOpen(): Promise<void> {
-    if (!this.viewInitialized) {
-      this.agentId = this.deps.getSettings().defaultAgentId;
-      this.planMode = this.deps.getSettings().planModeDefault;
-      this.viewInitialized = true;
-    }
+     if (!this.viewInitialized) {
+       this.agentId = this.deps.getSettings().defaultAgentId;
+       this.planMode = false;
+       this.viewInitialized = true;
+     }
     this.containerEl.addClass('wesight-view-container');
     if (!this.dropdownCloseRegistered) {
       this.registerDomEvent(document, 'click', event => this.closeDropdownsOutside(event));
@@ -573,35 +572,6 @@ export class WeSightChatView extends ItemView {
         return;
       }
       void this.switchConversationMode(knowledgeActive ? 'chat' : 'knowledge');
-    };
-
-    const planToggle = toolbarRight.createDiv({ cls: 'wesight-permission-toggle' });
-    planToggle.toggleClass('is-hidden', this.conversationMode === 'knowledge');
-    const planLabel = planToggle.createSpan({ cls: 'wesight-permission-label', text: 'Plan' });
-    planLabel.toggleClass('plan-active', this.planMode);
-    const planSwitch = planToggle.createDiv({ cls: 'wesight-toggle-switch' });
-    planSwitch.toggleClass('active', this.planMode);
-    // Session-local toggle; the persistent default lives in the settings tab.
-    planToggle.onclick = () => {
-      this.planMode = !this.planMode;
-      inputWrapper.toggleClass('wesight-input-plan-mode', this.planMode);
-      planLabel.toggleClass('plan-active', this.planMode);
-      planSwitch.toggleClass('active', this.planMode);
-    };
-
-    const attachButton = toolbarRight.createEl('button', { cls: 'clickable-icon wesight-toolbar-btn' });
-    setIcon(attachButton, 'paperclip');
-    attachButton.ariaLabel = 'Attach active note';
-    attachButton.onclick = () => this.attachActiveNote();
-
-    this.stopButtonEl = toolbarRight.createEl('button', { cls: 'clickable-icon wesight-toolbar-btn' });
-    setIcon(this.stopButtonEl, 'square');
-    this.stopButtonEl.ariaLabel = 'Stop active run';
-    this.stopButtonEl.disabled = !this.running;
-    this.stopButtonEl.onclick = () => {
-      this.cancelledByUser = true;
-      this.deps.runtimeManager.cancel();
-      this.deps.knowledgeBrain.cancel();
     };
 
     this.sendButtonEl = toolbarRight.createEl('button', { cls: 'clickable-icon wesight-send-btn' });
@@ -2377,9 +2347,6 @@ export class WeSightChatView extends ItemView {
       && !this.deps.knowledgeBrainEntitlement.getCurrentStatus().allowed;
     if (this.sendButtonEl) {
       this.sendButtonEl.disabled = this.running || this.importingImages || knowledgeLocked;
-    }
-    if (this.stopButtonEl) {
-      this.stopButtonEl.disabled = !this.running;
     }
     this.cancelHintEl?.toggleClass('is-visible', this.running);
   }

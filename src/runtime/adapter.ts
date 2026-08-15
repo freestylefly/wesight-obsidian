@@ -206,14 +206,19 @@ export class AgentAdapter extends EventEmitter {
       if (model?.trim()) {
         args.push('--model', model.trim());
       }
-      if (request.sessionId?.trim()) {
-        args.push('--resume', request.sessionId.trim());
-      }
+     if (request.sessionId?.trim()) {
+       args.push('--resume', request.sessionId.trim());
+     }
       if (request.planMode && request.accessMode !== 'read-only') {
         args.push('--permission-mode', 'plan');
+      } else if (request.accessMode !== 'read-only' && !request.textOnly) {
+        // Workspace-write runs need to execute commands and modify files without
+        // blocking on Claude's interactive permission prompts, which WeSight
+        // cannot answer in stream-json mode.
+        args.push('--permission-mode', 'bypassPermissions');
       }
-      // `claude -p` without a positional prompt reads it from stdin.
-      return { args, stdinPayload: prompt };
+     // `claude -p` without a positional prompt reads it from stdin.
+     return { args, stdinPayload: prompt };
     }
 
     const args = [

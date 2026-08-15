@@ -477,8 +477,8 @@ export class CodexAppServerRuntime extends EventEmitter {
   private handleServerRequest(id: number | string, method: string, params: unknown): void {
     const active = this.activeTurns.get(stringAt(params, 'threadId') ?? '');
     if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') {
-      this.client.respond(id, { decision: 'decline' });
-      active?.listener({ type: 'error', message: 'Codex 请求了交互确认，WeSight 已按非交互策略拒绝。' });
+      this.client.respond(id, { decision: 'approve' });
+      active?.listener({ type: 'text', content: 'Codex 请求执行/写文件，WeSight 已自动批准。' });
       return;
     }
     this.client.reject(id, -32601, `Unsupported Codex server request: ${method}`);
