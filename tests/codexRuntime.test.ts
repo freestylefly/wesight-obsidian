@@ -216,6 +216,47 @@ describe('CodexAppServerRuntime', () => {
     await runtime.shutdown();
   });
 
+  test('sends images natively and supplies ordinary files and directories as path context', async () => {
+    const client = new FakeAppServerClient();
+    const runtime = new CodexAppServerRuntime(client as unknown as CodexAppServerClient);
+    const events: RuntimeTurnEvent[] = [];
+
+    await runtime.runTurn({
+      ...request('READ_ATTACHMENTS'),
+      attachments: [{
+        absolutePath: '/outside/image.png',
+        mimeType: 'image/png',
+        kind: 'file',
+        source: 'external',
+        displayName: 'image.png',
+      }, {
+        absolutePath: '/outside/report.pdf',
+        mimeType: 'application/pdf',
+        kind: 'file',
+        source: 'external',
+        displayName: 'report.pdf',
+      }, {
+        absolutePath: '/outside/project',
+        kind: 'directory',
+        source: 'external',
+        displayName: 'project',
+        ignoredPatterns: ['.git', 'node_modules'],
+      }],
+    }, connection, event => events.push(event));
+
+    const turnStart = client.requests.find(entry => entry.method === 'turn/start');
+    const input = (turnStart?.params as { input: Array<{ type: string; text?: string; path?: string }> }).input;
+    const text = input.find(item => item.type === 'text')?.text ?? '';
+    expect(input.filter(item => item.type === 'localImage')).toEqual([
+      { type: 'localImage', path: '/outside/image.png' },
+    ]);
+    expect(text).toContain('File "report.pdf": /outside/report.pdf');
+    expect(text).toContain('Directory "project": /outside/project');
+    expect(text).toContain('node_modules');
+    expect(text).not.toContain('File "image.png"');
+    await runtime.shutdown();
+  });
+
   test('resumes an existing thread, sends plan collaboration mode, and interrupts through AbortSignal', async () => {
     const client = new FakeAppServerClient();
     const runtime = new CodexAppServerRuntime(client as unknown as CodexAppServerClient);

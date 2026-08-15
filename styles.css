@@ -712,27 +712,71 @@ button.wesight-file-chip-remove svg {
   height: 12px;
 }
 
-.wesight-input-image-chip {
+.wesight-input-attachment-chip {
   position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 180px;
-  padding: 3px 24px 3px 3px;
+  max-width: 220px;
+  min-height: 40px;
+  padding: 4px 10px 4px 6px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
   background: var(--background-primary);
+  cursor: pointer;
 }
 
-.wesight-input-image-preview {
-  width: 32px;
-  height: 32px;
+.wesight-context-row .wesight-input-attachment-chip:has(.wesight-input-attachment-remove) {
+  padding-right: 26px;
+}
+
+.wesight-input-attachment-chip:hover {
+  border-color: var(--background-modifier-border-hover);
+  background: var(--background-primary-alt);
+}
+
+.wesight-input-attachment-chip.is-invalid {
+  border-color: var(--text-error);
+  background: rgba(var(--color-red-rgb), 0.08);
+}
+
+.wesight-input-attachment-preview {
+  width: 34px;
+  height: 34px;
   flex: 0 0 auto;
   border-radius: 5px;
   object-fit: cover;
 }
 
-.wesight-input-image-name {
+.wesight-input-attachment-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  border-radius: 6px;
+  background: var(--background-secondary);
+}
+
+.wesight-input-attachment-icon.is-hidden {
+  display: none;
+}
+
+.wesight-input-attachment-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.wesight-input-attachment-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wesight-input-attachment-name {
   min-width: 0;
   overflow: hidden;
   color: var(--text-normal);
@@ -741,7 +785,19 @@ button.wesight-file-chip-remove svg {
   white-space: nowrap;
 }
 
-button.wesight-input-image-remove {
+.wesight-input-attachment-meta {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wesight-input-attachment-chip.is-invalid .wesight-input-attachment-meta {
+  color: var(--text-error);
+}
+
+button.wesight-input-attachment-remove {
   position: absolute;
   top: 2px;
   right: 2px;
@@ -759,14 +815,41 @@ button.wesight-input-image-remove {
   cursor: pointer;
 }
 
-button.wesight-input-image-remove:hover {
+button.wesight-input-attachment-remove:hover {
   color: var(--text-normal);
   background: var(--background-modifier-hover);
 }
 
-button.wesight-input-image-remove svg {
+button.wesight-input-attachment-remove svg {
   width: 12px;
   height: 12px;
+}
+
+.wesight-message-input-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.wesight-attachment-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--interactive-accent);
+  border-radius: 6px;
+  color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--background-primary) 88%, var(--interactive-accent));
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.wesight-input-wrapper.is-attachment-dragover .wesight-attachment-drop-overlay {
+  display: flex;
 }
 
 .wesight-input {
@@ -869,7 +952,7 @@ button.wesight-input-image-remove svg {
   height: 12px;
 }
 
-button.wesight-add-image-btn {
+button.wesight-add-attachment-btn {
   width: 26px;
   height: 26px;
   padding: 4px;
@@ -879,12 +962,12 @@ button.wesight-add-image-btn {
   box-shadow: none;
 }
 
-button.wesight-add-image-btn:hover {
+button.wesight-add-attachment-btn:hover {
   color: var(--text-normal);
   background: var(--background-modifier-hover);
 }
 
-.wesight-hidden-image-picker {
+.wesight-hidden-attachment-picker {
   display: none;
 }
 

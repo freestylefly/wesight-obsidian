@@ -178,6 +178,44 @@ describe('VaultStore generated images', () => {
     await expect(store.deleteInputImage({ ...image, vaultPath: 'notes/important.md' })).rejects.toThrow('拒绝删除');
   });
 
+  test('persists external attachment metadata and never deletes the referenced source', async () => {
+    const adapter = new MemoryAdapter();
+    const store = new VaultStore(adapter as unknown as DataAdapter);
+    const externalPath = path.join(tempDir, 'external source.txt');
+    fs.writeFileSync(externalPath, 'external source must remain');
+
+    await store.replaceConversation({
+      id: 'external-attachment',
+      title: 'external source.txt',
+      agentId: 'codex',
+      createdAt: 1,
+      updatedAt: 1,
+      messages: [{
+        id: 'message-1',
+        role: 'user',
+        content: '',
+        createdAt: 1,
+        metadata: {
+          inputAttachments: [{
+            id: 'attachment-1',
+            kind: 'file',
+            source: 'external',
+            displayName: 'external source.txt',
+            absolutePath: externalPath,
+            mimeType: 'text/plain',
+            size: fs.statSync(externalPath).size,
+            createdAt: 1,
+          }],
+        },
+      }],
+    });
+
+    expect((await store.getConversation('external-attachment'))?.messages[0]?.metadata?.inputAttachments)
+      .toHaveLength(1);
+    await store.deleteConversation('external-attachment');
+    expect(fs.readFileSync(externalPath, 'utf8')).toBe('external source must remain');
+  });
+
   test('persists knowledge mode and separate agent session IDs while accepting legacy conversations', async () => {
     const adapter = new MemoryAdapter();
     const store = new VaultStore(adapter as unknown as DataAdapter);

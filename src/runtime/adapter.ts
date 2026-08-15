@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 
 import type { AgentId, ChatTurnRequest, ProviderProfile, RuntimeTurnEvent } from '../types';
 import { mergeEnvironment } from '../utils/env';
+import { appendAttachmentContext } from './attachmentContext';
 import { prepareProviderProjection } from './providerProjection';
 import {
   parseClaudeStreamLine,
@@ -233,6 +234,7 @@ export class AgentAdapter extends EventEmitter {
       args.push('--model', request.model.trim());
     }
     for (const attachment of request.attachments ?? []) {
+      if (attachment.kind === 'directory') continue;
       args.push('--file', attachment.absolutePath);
     }
     // opencode has no documented stdin prompt mode, so it keeps the argv path.
@@ -324,13 +326,7 @@ function buildEffectivePrompt(request: ChatTurnRequest, agentId: AgentId): strin
     ].join('\n'));
   }
   sections.push(request.prompt);
-  if (agentId === 'claude') {
-    const attachmentPaths = (request.attachments ?? []).map(attachment => `- ${attachment.absolutePath}`);
-    if (attachmentPaths.length > 0) {
-      sections.push(`Attached files (use your file tools to read them):\n${attachmentPaths.join('\n')}`);
-    }
-  }
-  return sections.join('\n\n');
+  return appendAttachmentContext(sections.join('\n\n'), request.attachments);
 }
 
 function appendTail(current: string, addition: string): string {

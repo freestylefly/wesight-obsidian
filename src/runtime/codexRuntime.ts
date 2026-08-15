@@ -9,6 +9,7 @@ import type {
   ToolCallEvent,
 } from '../types';
 import { CodexAppServerClient } from './codexAppServer';
+import { appendAttachmentContext } from './attachmentContext';
 
 export interface CodexRuntimeConnection {
   binaryPath: string;
@@ -225,7 +226,9 @@ export class CodexAppServerRuntime extends EventEmitter {
       this.activeTurns.set(threadId, active);
       request.signal?.addEventListener('abort', abort, { once: true });
 
-      const input: Array<Record<string, unknown>> = [{ type: 'text', text: request.prompt, text_elements: [] }];
+      const pathAttachments = request.attachments?.filter(attachment => !attachment.mimeType?.startsWith('image/'));
+      const prompt = appendAttachmentContext(request.prompt, pathAttachments);
+      const input: Array<Record<string, unknown>> = [{ type: 'text', text: prompt, text_elements: [] }];
       for (const attachment of request.attachments ?? []) {
         if (attachment.mimeType?.startsWith('image/')) {
           input.push({ type: 'localImage', path: attachment.absolutePath });

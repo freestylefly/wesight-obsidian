@@ -100,6 +100,27 @@ export interface ChatInputImage {
   contentHash?: string;
 }
 
+export type ChatInputAttachmentKind = 'image' | 'file' | 'directory';
+
+export type ChatInputAttachmentSource = 'external' | 'vault';
+
+/** A user-selected local path or a Vault-managed clipboard image. */
+export interface ChatInputAttachment {
+  id: string;
+  kind: ChatInputAttachmentKind;
+  source: ChatInputAttachmentSource;
+  displayName: string;
+  absolutePath: string;
+  vaultPath?: string;
+  mimeType?: string;
+  size?: number;
+  createdAt: number;
+  /** Folder entries the agent should ignore while reading a referenced directory. */
+  ignoredPatterns?: string[];
+  /** Content digest retained for Vault-managed clipboard-image deduplication. */
+  contentHash?: string;
+}
+
 export type ChatArtifact = ChatImageArtifact;
 
 export interface ChatMessageProcessItem {
@@ -116,6 +137,8 @@ export interface ChatMessageProcessItem {
 
 export interface ChatMessageMetadata extends Record<string, unknown> {
   artifacts?: ChatArtifact[];
+  /** Files and folders supplied by the user with this message. */
+  inputAttachments?: ChatInputAttachment[];
   /** Images supplied by the user with this message. */
   inputImages?: ChatInputImage[];
   /** Total elapsed time of the assistant turn in milliseconds. */
@@ -152,9 +175,13 @@ export interface ToolCallEvent {
 }
 
 export interface FileAttachment {
-  vaultPath: string;
+  vaultPath?: string;
   absolutePath: string;
   mimeType?: string;
+  kind?: 'file' | 'directory';
+  source?: ChatInputAttachmentSource | 'context';
+  displayName?: string;
+  ignoredPatterns?: string[];
 }
 
 export interface ChatTurnRequest {

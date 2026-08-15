@@ -9,6 +9,7 @@ import { VaultStore } from '../storage/vaultStore';
 import type {
   AgentId,
   ChatImageArtifact,
+  ChatInputAttachment,
   ChatInputImage,
   ChatMessage,
   ChatMessageProcessItem,
@@ -35,6 +36,14 @@ import { RuntimeManager } from '../runtime/runtimeManager';
 import { getClaudeDetectedLocalModel, listLocalModels } from '../runtime/localModels';
 import type { UpdateService, UpdateState } from '../update/updateService';
 import { RuntimeSetupModal } from './runtimeSetupModal';
+import {
+  MAX_TOP_LEVEL_INPUT_ATTACHMENTS,
+  createExternalInputAttachment,
+  deriveSelectedDirectoryPath,
+  getDomFileAbsolutePath,
+  inputAttachmentPathKey,
+  validateInputAttachment,
+} from '../attachments/inputAttachments';
 
 export const WESIGHT_VIEW_TYPE = 'wesight-chat-view';
 
@@ -76,8 +85,10 @@ export class WeSightChatView extends ItemView {
   private historyPopoverEl: HTMLElement | null = null;
   private historyTriggerEl: HTMLElement | null = null;
   private sendButtonEl!: HTMLButtonElement;
-  private pendingInputImages: ChatInputImage[] = [];
-  private importingImages = false;
+  private pendingInputAttachments: ChatInputAttachment[] = [];
+  private importingAttachments = false;
+  private invalidInputAttachmentPaths = new Map<string, string>();
+  private attachmentDragDepth = 0;
   private suggestEl: HTMLElement | null = null;
   private running = false;
   private cancelledByUser = false;
@@ -188,7 +199,7 @@ export class WeSightChatView extends ItemView {
   }
 
   override async onClose(): Promise<void> {
-    await this.discardPendingInputImages();
+    await this.discardPendingInputAttachments();
     // Submenus live on document.body, so they outlive contentEl unless removed here.
     this.hideConfigSubmenu();
     this.hideHistoryPopover();
@@ -346,12 +357,12 @@ export class WeSightChatView extends ItemView {
     if (!this.contextRowEl) return;
     this.contextRowEl.empty();
     if (this.conversationMode === 'chat') {
-      for (const image of this.pendingInputImages) {
-        this.renderPendingInputImage(this.contextRowEl, image);
+      for (const attachment of this.pendingInputAttachments) {
+        this.renderInputAttachmentChip(this.contextRowEl, attachment, true);
       }
     }
     const context = this.getVisibleEditorContext();
-    this.contextRowEl.toggleClass('has-content', Boolean(context) || (this.conversationMode === 'chat' && this.pendingInputImages.length > 0));
+    this.contextRowEl.toggleClass('has-content', Boolean(context) || (this.conversationMode === 'chat' && this.pendingInputAttachments.length > 0));
     if (!context) return;
 
     const hasSelection = Boolean(context.selection.trim());
@@ -380,26 +391,150 @@ export class WeSightChatView extends ItemView {
     };
   }
 
-  private renderPendingInputImage(parent: HTMLElement, image: ChatInputImage): void {
-    const chip = parent.createDiv({ cls: 'wesight-input-image-chip' });
-    const resourcePath = this.deps.vaultStore.getResourcePath(image.vaultPath);
-    chip.createEl('img', {
-      cls: 'wesight-input-image-preview',
-      attr: { src: resourcePath, alt: image.fileName },
-    });
-    chip.createSpan({ cls: 'wesight-input-image-name', text: image.fileName });
+  private renderInputAttachmentChip(parent: HTMLElement, attachment: ChatInputAttachment, removable: boolean): void {
+    const currentVaultPath = attachment.source === 'vault' && attachment.vaultPath
+      ? resolveVaultAbsolutePath(this.app, attachment.vaultPath)
+      : null;
+    const currentAttachment = currentVaultPath && currentVaultPath !== attachment.absolutePath
+      ? { ...attachment, absolutePath: currentVaultPath }
+      : attachment;
+    const pathKey = inputAttachmentPathKey(currentAttachment.absolutePath);
+    const invalidReason = this.invalidInputAttachmentPaths.get(pathKey);
+    const chip = parent.createDiv({ cls: 'wesight-input-attachment-chip' });
+    chip.toggleClass('is-image', currentAttachment.kind === 'image');
+    chip.toggleClass('is-directory', currentAttachment.kind === 'directory');
+    chip.toggleClass('is-invalid', Boolean(invalidReason));
+    chip.setAttribute('title', invalidReason
+      ? `${currentAttachment.absolutePath}\n${invalidReason}`
+      : currentAttachment.absolutePath);
+    chip.onclick = event => {
+      if ((event.target as HTMLElement).closest('button')) return;
+      void this.openInputAttachment(currentAttachment);
+    };
+
+    const icon = chip.createSpan({ cls: 'wesight-input-attachment-icon' });
+    setIcon(icon, attachmentIcon(currentAttachment));
+    if (currentAttachment.kind === 'image') {
+      icon.addClass('is-hidden');
+      const previewUrl = this.inputAttachmentResourceUrl(currentAttachment);
+      const preview = chip.createEl('img', {
+        cls: 'wesight-input-attachment-preview',
+        attr: {
+          ...(previewUrl ? { src: previewUrl } : {}),
+          alt: currentAttachment.displayName,
+        },
+      });
+      if (!previewUrl) {
+        preview.hide();
+        icon.removeClass('is-hidden');
+      }
+      preview.onerror = () => {
+        preview.hide();
+        icon.removeClass('is-hidden');
+      };
+    }
+
+    const details = chip.createDiv({ cls: 'wesight-input-attachment-details' });
+    details.createSpan({ cls: 'wesight-input-attachment-name', text: currentAttachment.displayName });
+    const secondary = invalidReason
+      ?? (currentAttachment.kind === 'directory' ? '文件夹' : formatFileSize(currentAttachment.size));
+    if (secondary) details.createSpan({ cls: 'wesight-input-attachment-meta', text: secondary });
+
+    if (!removable) {
+      void validateInputAttachment(currentAttachment).then(reason => {
+        if (!reason || !chip.isConnected) return;
+        this.invalidInputAttachmentPaths.set(pathKey, reason);
+        chip.addClass('is-invalid');
+        chip.setAttribute('title', `${currentAttachment.absolutePath}\n${reason}`);
+        const meta = details.querySelector<HTMLElement>('.wesight-input-attachment-meta')
+          ?? details.createSpan({ cls: 'wesight-input-attachment-meta' });
+        meta.setText(reason);
+      });
+      return;
+    }
+
     const remove = chip.createEl('button', {
-      cls: 'wesight-input-image-remove',
-      attr: { type: 'button', 'aria-label': `移除 ${image.fileName}` },
+      cls: 'wesight-input-attachment-remove',
+      attr: { type: 'button', 'aria-label': `移除 ${currentAttachment.displayName}` },
     });
     setIcon(remove, 'x');
     remove.onclick = event => {
       event.stopPropagation();
-      this.pendingInputImages = this.pendingInputImages.filter(item => item.id !== image.id);
-      void this.deps.vaultStore.deleteInputImage(image);
+      this.pendingInputAttachments = this.pendingInputAttachments.filter(item => item.id !== attachment.id);
+      this.invalidInputAttachmentPaths.delete(pathKey);
+      void this.deleteManagedInputAttachment(attachment);
       this.renderActiveContextChip();
       this.updateRunControls();
     };
+  }
+
+  private inputAttachmentResourceUrl(attachment: ChatInputAttachment): string {
+    if (attachment.source === 'vault' && attachment.vaultPath) {
+      return this.deps.vaultStore.getResourcePath(attachment.vaultPath);
+    }
+    try {
+      // Browser file:// URLs are blocked by Obsidian's app origin. Electron can
+      // decode the referenced source locally and provide a small display-only
+      // data URL without copying the original image into the Vault.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- Electron is provided by the Obsidian host.
+      const electron = require('electron') as {
+        nativeImage?: {
+          createFromPath: (target: string) => {
+            isEmpty: () => boolean;
+            getSize: () => { width: number; height: number };
+            resize: (options: { width: number; height: number; quality: 'good' }) => {
+              toDataURL: () => string;
+            };
+            toDataURL: () => string;
+          };
+        };
+      };
+      const source = electron.nativeImage?.createFromPath(attachment.absolutePath);
+      if (!source || source.isEmpty()) return '';
+      const { width, height } = source.getSize();
+      const scale = Math.min(1, 96 / Math.max(width, height));
+      if (scale >= 1) return source.toDataURL();
+      return source.resize({
+        width: Math.max(1, Math.round(width * scale)),
+        height: Math.max(1, Math.round(height * scale)),
+        quality: 'good',
+      }).toDataURL();
+    } catch {
+      return '';
+    }
+  }
+
+  private async openInputAttachment(attachment: ChatInputAttachment): Promise<void> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- Electron is provided by the Obsidian host.
+      const electron = require('electron') as {
+        shell?: {
+          openPath: (target: string) => Promise<string>;
+          showItemInFolder: (target: string) => void;
+        };
+      };
+      if (!electron.shell) throw new Error('Electron shell unavailable');
+      if (attachment.kind === 'directory') {
+        const error = await electron.shell.openPath(attachment.absolutePath);
+        if (error) throw new Error(error);
+      } else {
+        electron.shell.showItemInFolder(attachment.absolutePath);
+      }
+    } catch {
+      new Notice('无法打开附件源路径。');
+    }
+  }
+
+  private async deleteManagedInputAttachment(attachment: ChatInputAttachment): Promise<void> {
+    if (attachment.source !== 'vault' || !attachment.vaultPath) return;
+    await this.deps.vaultStore.deleteInputImage({
+      id: attachment.id,
+      vaultPath: attachment.vaultPath,
+      mimeType: attachment.mimeType ?? 'application/octet-stream',
+      fileName: attachment.displayName,
+      createdAt: attachment.createdAt,
+      contentHash: attachment.contentHash,
+    });
   }
 
   private knowledgeComposerPlaceholder(): string {
@@ -490,6 +625,7 @@ export class WeSightChatView extends ItemView {
     const composer = root.createDiv({ cls: 'wesight-input-container' });
     const inputWrapper = composer.createDiv({ cls: 'wesight-input-wrapper' });
     inputWrapper.toggleClass('wesight-input-plan-mode', this.planMode);
+    this.configureAttachmentDropTarget(inputWrapper);
 
     this.contextRowEl = inputWrapper.createDiv({ cls: 'wesight-context-row' });
     this.renderActiveContextChip();
@@ -515,7 +651,7 @@ export class WeSightChatView extends ItemView {
       event.preventDefault();
       const text = event.clipboardData?.getData('text/plain') ?? '';
       if (text) this.insertTextAtCursor(text);
-      void this.addInputImages(files);
+      void this.addClipboardImages(files);
     };
     this.inputEl.onkeydown = event => {
       if (event.key === 'Enter' && !event.shiftKey) {
@@ -539,12 +675,12 @@ export class WeSightChatView extends ItemView {
     this.renderAgentSelector(toolbarLeft);
     this.renderModelSelector(toolbarLeft);
     if (this.conversationMode === 'chat') {
-      const addImageButton = toolbarLeft.createEl('button', {
-        cls: 'clickable-icon wesight-add-image-btn',
-        attr: { type: 'button', 'aria-label': '添加图片', title: '添加图片' },
+      const addAttachmentButton = toolbarLeft.createEl('button', {
+        cls: 'clickable-icon wesight-add-attachment-btn',
+        attr: { type: 'button', 'aria-label': '添加文件或文件夹', title: '添加文件或文件夹' },
       });
-      setIcon(addImageButton, 'plus');
-      addImageButton.onclick = () => this.openImagePicker();
+      setIcon(addAttachmentButton, 'plus');
+      addAttachmentButton.onclick = event => this.openAttachmentMenu(event);
     }
 
     const toolbarRight = toolbar.createDiv({ cls: 'wesight-toolbar-right' });
@@ -1173,7 +1309,7 @@ export class WeSightChatView extends ItemView {
 
   private async openHistoryConversation(conversation: StoredConversation): Promise<void> {
     this.hideHistoryPopover();
-    await this.discardPendingInputImages();
+    await this.discardPendingInputAttachments();
     this.conversation = conversation;
     this.conversationMode = conversation.mode ?? 'chat';
     if (this.agentId !== conversation.agentId) {
@@ -1566,8 +1702,32 @@ export class WeSightChatView extends ItemView {
     } else {
       item.createEl('pre', { cls: 'wesight-message-content', text: message.content });
     }
+    const inputAttachments = message.metadata?.inputAttachments ?? [];
+    if (inputAttachments.length > 0) {
+      const attachmentRow = item.createDiv({ cls: 'wesight-message-input-attachments' });
+      for (const attachment of inputAttachments) {
+        this.renderInputAttachmentChip(attachmentRow, attachment, false);
+      }
+    }
     for (const image of message.metadata?.inputImages ?? []) {
-      this.renderInputImage(item, image);
+      const absolutePath = resolveVaultAbsolutePath(this.app, image.vaultPath);
+      if (absolutePath) {
+        const attachmentRow = item.querySelector<HTMLElement>('.wesight-message-input-attachments')
+          ?? item.createDiv({ cls: 'wesight-message-input-attachments' });
+        this.renderInputAttachmentChip(attachmentRow, {
+          id: image.id,
+          kind: 'image',
+          source: 'vault',
+          displayName: image.fileName,
+          absolutePath,
+          vaultPath: image.vaultPath,
+          mimeType: image.mimeType,
+          createdAt: image.createdAt,
+          contentHash: image.contentHash,
+        }, false);
+      } else {
+        this.renderInputImage(item, image);
+      }
     }
     for (const artifact of message.metadata?.artifacts ?? []) {
       if (artifact.type === 'image') this.renderImageArtifact(item, artifact);
@@ -1848,8 +2008,24 @@ export class WeSightChatView extends ItemView {
     if (this.running) return;
     this.cancelledByUser = false;
     const rawPrompt = this.inputEl.value.trim();
-    const inputImages = this.conversationMode === 'chat' ? [...this.pendingInputImages] : [];
-    if (!rawPrompt && !this.selectedSkill && inputImages.length === 0) return;
+    const inputAttachments = this.conversationMode === 'chat' ? [...this.pendingInputAttachments] : [];
+    if (!rawPrompt && !this.selectedSkill && inputAttachments.length === 0) return;
+    const validation = await Promise.all(inputAttachments.map(async attachment => ({
+      attachment,
+      reason: await validateInputAttachment(attachment),
+    })));
+    const invalid = validation.filter(item => item.reason);
+    if (invalid.length > 0) {
+      for (const item of invalid) {
+        this.invalidInputAttachmentPaths.set(
+          inputAttachmentPathKey(item.attachment.absolutePath),
+          item.reason ?? '源路径不可用',
+        );
+      }
+      this.renderActiveContextChip();
+      new Notice('部分附件的源路径已失效，请移除后重新添加。');
+      return;
+    }
     if (this.conversationMode === 'knowledge' && !(await this.requireKnowledgeAccess())) return;
     const skillPrompt = this.selectedSkill?.insertText ?? '';
     this.ensureConversation();
@@ -1879,30 +2055,37 @@ export class WeSightChatView extends ItemView {
     const runtimePrompt = skillPrompt
       ? `${skillPrompt}\n\n${userPrompt}`
       : userPrompt;
-    const imageAttachments = inputImages.map(image => ({
-      vaultPath: image.vaultPath,
-      absolutePath: resolveVaultAbsolutePath(this.app, image.vaultPath) ?? '',
-      mimeType: image.mimeType,
-    })).filter(attachment => Boolean(attachment.absolutePath));
-    const attachments = mergeAttachments([...resolved.attachments, ...activeContext.attachments, ...imageAttachments]);
+    const selectedAttachments: FileAttachment[] = inputAttachments.map(attachment => ({
+      vaultPath: attachment.vaultPath,
+      absolutePath: attachment.absolutePath,
+      mimeType: attachment.mimeType,
+      kind: attachment.kind === 'directory' ? 'directory' : 'file',
+      source: attachment.source,
+      displayName: attachment.displayName,
+      ignoredPatterns: attachment.ignoredPatterns,
+    }));
+    const attachments = mergeAttachments([...resolved.attachments, ...activeContext.attachments, ...selectedAttachments]);
     const userMessage: ChatMessage = {
       id: createId('msg'),
       role: 'user',
       content: rawPrompt,
       createdAt: Date.now(),
       agentId: this.agentId,
-      metadata: inputImages.length > 0 ? { inputImages } : undefined,
+      metadata: inputAttachments.length > 0 ? { inputAttachments } : undefined,
     };
     if (conversation.messages.length === 0) {
       this.messagesEl.empty();
     }
     conversation.messages.push(userMessage);
     if (!conversation.title || conversation.title === 'New WeSight session') {
-      conversation.title = rawPrompt.replace(/\s+/g, ' ').trim().slice(0, 60) || (inputImages.length > 0 ? '图片对话' : conversation.title);
+      conversation.title = rawPrompt.replace(/\s+/g, ' ').trim().slice(0, 60)
+        || inputAttachments[0]?.displayName.slice(0, 60)
+        || conversation.title;
     }
     this.renderMessage(userMessage);
     this.inputEl.value = '';
-    this.pendingInputImages = [];
+    this.pendingInputAttachments = [];
+    this.invalidInputAttachmentPaths.clear();
     this.renderActiveContextChip();
     this.clearSuggestions();
     this.removeSkill();
@@ -2138,7 +2321,7 @@ export class WeSightChatView extends ItemView {
   }
 
   private async startNewConversation(): Promise<void> {
-    await this.discardPendingInputImages();
+    await this.discardPendingInputAttachments();
     this.ensureConversation(true);
     this.renderMessages();
     this.inputEl.focus();
@@ -2147,7 +2330,7 @@ export class WeSightChatView extends ItemView {
   private async switchConversationMode(mode: ConversationMode): Promise<void> {
     if (this.running || mode === this.conversationMode) return;
     if (mode === 'knowledge' && !(await this.requireKnowledgeAccess())) return;
-    await this.discardPendingInputImages();
+    await this.discardPendingInputAttachments();
     this.conversationMode = mode;
     if (mode === 'knowledge' && this.agentId !== 'claude' && this.agentId !== 'codex') this.agentId = 'claude';
     if (this.conversation?.messages.length) {
@@ -2346,59 +2529,197 @@ export class WeSightChatView extends ItemView {
     const knowledgeLocked = this.conversationMode === 'knowledge'
       && !this.deps.knowledgeBrainEntitlement.getCurrentStatus().allowed;
     if (this.sendButtonEl) {
-      this.sendButtonEl.disabled = this.running || this.importingImages || knowledgeLocked;
+      this.sendButtonEl.disabled = this.running || this.importingAttachments || knowledgeLocked;
     }
     this.cancelHintEl?.toggleClass('is-visible', this.running);
   }
 
-  private openImagePicker(): void {
+  private openAttachmentMenu(event: MouseEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    const menu = new Menu();
+    menu.addItem(item => item
+      .setTitle('上传文件')
+      .setIcon('file-up')
+      .onClick(() => this.openFilePicker()));
+    menu.addItem(item => item
+      .setTitle('上传文件夹')
+      .setIcon('folder-up')
+      .onClick(() => this.openDirectoryPicker()));
+    menu.showAtMouseEvent(event);
+  }
+
+  private openFilePicker(): void {
     const picker = this.containerEl.createEl('input', {
-      cls: 'wesight-hidden-image-picker',
+      cls: 'wesight-hidden-attachment-picker',
       attr: {
         type: 'file',
-        accept: 'image/png,image/jpeg,image/webp,image/gif',
         multiple: '',
       },
     });
     picker.onchange = () => {
       const files = Array.from(picker.files ?? []);
-      if (files.length > 0) void this.addInputImages(files);
+      const paths = files.map(getDomFileAbsolutePath).filter((value): value is string => Boolean(value));
+      if (paths.length > 0) void this.addExternalInputPaths(paths);
+      else if (files.length > 0) new Notice('无法读取所选文件的本地路径。');
       picker.remove();
     };
     picker.oncancel = () => picker.remove();
     picker.click();
   }
 
-  private async addInputImages(files: File[]): Promise<void> {
-    if (this.conversationMode !== 'chat' || files.length === 0) return;
-    this.ensureConversation();
-    if (!this.conversation) return;
-    this.importingImages = true;
+  private openDirectoryPicker(): void {
+    const picker = this.containerEl.createEl('input', {
+      cls: 'wesight-hidden-attachment-picker',
+      attr: {
+        type: 'file',
+        multiple: '',
+        webkitdirectory: '',
+      },
+    });
+    picker.onchange = () => {
+      const files = Array.from(picker.files ?? []);
+      const roots = new Set<string>();
+      for (const file of files) {
+        const absolutePath = getDomFileAbsolutePath(file);
+        if (!absolutePath) continue;
+        const directory = deriveSelectedDirectoryPath(absolutePath, file.webkitRelativePath);
+        if (directory) roots.add(directory);
+      }
+      if (roots.size > 0) void this.addExternalInputPaths([...roots]);
+      else if (files.length > 0) new Notice('无法读取所选文件夹的本地路径。');
+      else new Notice('空文件夹没有可添加的内容。');
+      picker.remove();
+    };
+    picker.oncancel = () => picker.remove();
+    picker.click();
+  }
+
+  private configureAttachmentDropTarget(inputWrapper: HTMLElement): void {
+    this.attachmentDragDepth = 0;
+    inputWrapper.createDiv({
+      cls: 'wesight-attachment-drop-overlay',
+      text: '松开以添加文件或文件夹',
+    });
+    if (this.conversationMode !== 'chat') return;
+
+    inputWrapper.ondragenter = event => {
+      if (!hasFileDrag(event.dataTransfer)) return;
+      event.preventDefault();
+      this.attachmentDragDepth += 1;
+      inputWrapper.addClass('is-attachment-dragover');
+    };
+    inputWrapper.ondragover = event => {
+      if (!hasFileDrag(event.dataTransfer)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    };
+    inputWrapper.ondragleave = event => {
+      if (!hasFileDrag(event.dataTransfer)) return;
+      event.preventDefault();
+      this.attachmentDragDepth = Math.max(0, this.attachmentDragDepth - 1);
+      if (this.attachmentDragDepth === 0) inputWrapper.removeClass('is-attachment-dragover');
+    };
+    inputWrapper.ondrop = event => {
+      if (!hasFileDrag(event.dataTransfer)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.attachmentDragDepth = 0;
+      inputWrapper.removeClass('is-attachment-dragover');
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      const paths = files.map(getDomFileAbsolutePath).filter((value): value is string => Boolean(value));
+      if (paths.length > 0) void this.addExternalInputPaths(paths);
+      else if (files.length > 0) new Notice('无法读取拖入项目的本地路径。');
+    };
+  }
+
+  private async addExternalInputPaths(paths: string[]): Promise<void> {
+    if (this.conversationMode !== 'chat' || paths.length === 0) return;
+    const uniquePaths = [...new Map(paths.map(value => [inputAttachmentPathKey(value), value])).values()];
+    if (this.pendingInputAttachments.length + uniquePaths.length > MAX_TOP_LEVEL_INPUT_ATTACHMENTS) {
+      new Notice(`每条消息最多添加 ${MAX_TOP_LEVEL_INPUT_ATTACHMENTS} 个文件或文件夹。`);
+      return;
+    }
+    this.importingAttachments = true;
     this.updateRunControls();
     let added = 0;
-    for (const file of files) {
-      try {
-        const image = await this.deps.vaultStore.importInputImage(this.conversation.id, file.name || 'clipboard-image.png', await file.arrayBuffer());
-        if (this.pendingInputImages.some(item => item.contentHash === image.contentHash)) {
-          await this.deps.vaultStore.deleteInputImage(image);
-          continue;
+    try {
+      const existing = new Set(this.pendingInputAttachments.map(item => inputAttachmentPathKey(item.absolutePath)));
+      for (const inputPath of uniquePaths) {
+        try {
+          const attachment = await createExternalInputAttachment(inputPath);
+          const key = inputAttachmentPathKey(attachment.absolutePath);
+          if (existing.has(key)) continue;
+          existing.add(key);
+          this.invalidInputAttachmentPaths.delete(key);
+          this.pendingInputAttachments.push(attachment);
+          added += 1;
+        } catch (error) {
+          new Notice(error instanceof Error ? error.message : `无法添加附件：${String(error)}`);
         }
-        this.pendingInputImages.push(image);
-        added += 1;
-      } catch (error) {
-        new Notice(error instanceof Error ? error.message : `无法添加图片：${String(error)}`);
       }
+    } finally {
+      this.importingAttachments = false;
+      this.renderActiveContextChip();
+      this.updateRunControls();
     }
-    this.importingImages = false;
-    this.renderActiveContextChip();
-    this.updateRunControls();
     if (added > 0) this.inputEl.focus();
   }
 
-  private async discardPendingInputImages(): Promise<void> {
-    const images = this.pendingInputImages;
-    this.pendingInputImages = [];
-    await Promise.allSettled(images.map(image => this.deps.vaultStore.deleteInputImage(image)));
+  private async addClipboardImages(files: File[]): Promise<void> {
+    if (this.conversationMode !== 'chat' || files.length === 0) return;
+    if (this.pendingInputAttachments.length + files.length > MAX_TOP_LEVEL_INPUT_ATTACHMENTS) {
+      new Notice(`每条消息最多添加 ${MAX_TOP_LEVEL_INPUT_ATTACHMENTS} 个文件或文件夹。`);
+      return;
+    }
+    this.ensureConversation();
+    if (!this.conversation) return;
+    this.importingAttachments = true;
+    this.updateRunControls();
+    let added = 0;
+    try {
+      for (const file of files) {
+        try {
+          const image = await this.deps.vaultStore.importInputImage(this.conversation.id, file.name || 'clipboard-image.png', await file.arrayBuffer());
+          if (this.pendingInputAttachments.some(item => item.contentHash === image.contentHash)) {
+            await this.deps.vaultStore.deleteInputImage(image);
+            continue;
+          }
+          const absolutePath = resolveVaultAbsolutePath(this.app, image.vaultPath);
+          if (!absolutePath) {
+            await this.deps.vaultStore.deleteInputImage(image);
+            throw new Error('无法解析剪贴板图片的 Vault 路径。');
+          }
+          this.pendingInputAttachments.push({
+            id: image.id,
+            kind: 'image',
+            source: 'vault',
+            displayName: image.fileName,
+            absolutePath,
+            vaultPath: image.vaultPath,
+            mimeType: image.mimeType,
+            size: file.size,
+            createdAt: image.createdAt,
+            contentHash: image.contentHash,
+          });
+          added += 1;
+        } catch (error) {
+          new Notice(error instanceof Error ? error.message : `无法添加图片：${String(error)}`);
+        }
+      }
+    } finally {
+      this.importingAttachments = false;
+      this.renderActiveContextChip();
+      this.updateRunControls();
+    }
+    if (added > 0) this.inputEl.focus();
+  }
+
+  private async discardPendingInputAttachments(): Promise<void> {
+    const attachments = this.pendingInputAttachments;
+    this.pendingInputAttachments = [];
+    this.invalidInputAttachmentPaths.clear();
+    await Promise.allSettled(attachments.map(attachment => this.deleteManagedInputAttachment(attachment)));
   }
 
   private insertTextAtCursor(text: string): void {
@@ -2571,6 +2892,26 @@ function countTextChars(value: string): number {
   return Array.from(value.trim()).length;
 }
 
+function attachmentIcon(attachment: ChatInputAttachment): string {
+  if (attachment.kind === 'directory') return 'folder';
+  const extension = attachment.displayName.split('.').pop()?.toLowerCase() ?? '';
+  if (['zip', 'tar', 'gz', '7z', 'rar'].includes(extension)) return 'file-archive';
+  if (['js', 'jsx', 'ts', 'tsx', 'py', 'rs', 'go', 'java', 'html', 'css', 'json'].includes(extension)) return 'file-code';
+  if (['txt', 'md', 'pdf', 'doc', 'docx', 'rtf', 'csv'].includes(extension)) return 'file-text';
+  return 'file';
+}
+
+function formatFileSize(size?: number): string {
+  if (typeof size !== 'number' || size < 0) return '';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function hasFileDrag(dataTransfer: DataTransfer | null): boolean {
+  return Boolean(dataTransfer && Array.from(dataTransfer.types).includes('Files'));
+}
+
 function truncateText(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
   return `${value.slice(0, maxChars)}\n[truncated]`;
@@ -2580,8 +2921,9 @@ function mergeAttachments(attachments: FileAttachment[]): FileAttachment[] {
   const seen = new Set<string>();
   const merged: FileAttachment[] = [];
   for (const attachment of attachments) {
-    if (seen.has(attachment.vaultPath)) continue;
-    seen.add(attachment.vaultPath);
+    const key = inputAttachmentPathKey(attachment.absolutePath);
+    if (seen.has(key)) continue;
+    seen.add(key);
     merged.push(attachment);
   }
   return merged;

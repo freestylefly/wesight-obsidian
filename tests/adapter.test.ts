@@ -159,4 +159,45 @@ describe('AgentAdapter Claude provider failures', () => {
     expect(args[args.indexOf('--permission-mode') + 1]).toBe('plan');
     expect(args[args.indexOf('--system-prompt') + 1]).toBe('Only inspect supplied evidence.');
   });
+
+  test('passes ordinary files to OpenCode while keeping directories in prompt context only', async () => {
+    const argsPath = path.join(tempDir, 'opencode-args.json');
+    const binaryPath = path.join(tempDir, 'fake-opencode');
+    fs.writeFileSync(binaryPath, [
+      '#!/bin/sh',
+      `printf '%s\n' "$@" > ${JSON.stringify(argsPath)}`,
+    ].join('\n'));
+    fs.chmodSync(binaryPath, 0o755);
+    const adapter = new AgentAdapter({
+      agentId: 'opencode',
+      binaryPath,
+      sharedEnvironmentVariables: '',
+      providerProfile: null,
+    });
+
+    await adapter.run({
+      ...request,
+      agentId: 'opencode',
+      configSource: 'localCli',
+      attachments: [{
+        absolutePath: '/outside/report.pdf',
+        kind: 'file',
+        source: 'external',
+        displayName: 'report.pdf',
+      }, {
+        absolutePath: '/outside/project',
+        kind: 'directory',
+        source: 'external',
+        displayName: 'project',
+        ignoredPatterns: ['.git', 'node_modules'],
+      }],
+    });
+
+    const rawArgs = fs.readFileSync(argsPath, 'utf8').trim();
+    const args = rawArgs.split('\n');
+    expect(args).toContain('/outside/report.pdf');
+    expect(args).not.toContain('/outside/project');
+    expect(rawArgs).toContain('Directory "project": /outside/project');
+    expect(rawArgs).toContain('node_modules');
+  });
 });
