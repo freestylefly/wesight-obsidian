@@ -319,3 +319,38 @@ export function withWeChatSnapshotMetadata(
     themeSourceHash: hashThemeSource(prepared),
   };
 }
+
+export function withWeChatSnapshotCover(
+  snapshot: WeChatPreviewSnapshot,
+  cover: WeChatAssetDraft,
+): WeChatPreviewSnapshot {
+  const assets = snapshot.assets
+    .filter(asset => (
+      asset.token !== snapshot.coverAssetToken
+      || snapshot.markdown.includes(asset.token)
+    ));
+  const matchingIndex = assets.findIndex(asset => asset.token === cover.token);
+  if (matchingIndex >= 0) assets[matchingIndex] = cover;
+  else assets.push(cover);
+
+  const prepared: Omit<WeChatPreviewSnapshot, 'contentHash' | 'themeSourceHash'> = {
+    sourcePath: snapshot.sourcePath,
+    title: snapshot.title,
+    author: snapshot.author,
+    digest: snapshot.digest,
+    contentSourceUrl: snapshot.contentSourceUrl,
+    needOpenComment: snapshot.needOpenComment,
+    onlyFansCanComment: snapshot.onlyFansCanComment,
+    markdown: snapshot.markdown,
+    assets,
+    warnings: snapshot.warnings.filter(warning => warning.code !== 'cover'),
+    thumbMediaId: snapshot.thumbMediaId,
+    coverAssetToken: cover.token,
+    rendererVersion: snapshot.rendererVersion,
+  };
+  return {
+    ...prepared,
+    contentHash: hashSnapshot(prepared),
+    themeSourceHash: hashThemeSource(prepared),
+  };
+}

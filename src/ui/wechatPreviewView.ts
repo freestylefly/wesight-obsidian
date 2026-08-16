@@ -44,8 +44,10 @@ import {
 } from '../wechat/renderer';
 import {
   buildWeChatSnapshot,
+  withWeChatSnapshotCover,
   withWeChatSnapshotMetadata,
 } from '../wechat/snapshot';
+import { persistWeChatCover } from '../wechat/coverPersistence';
 import type {
   WeChatAssetDraft,
   WeChatConnectionState,
@@ -1632,9 +1634,7 @@ export class WeChatPreviewView extends ItemView {
         snapshot: this.preparedSnapshot(),
       });
       if (asset) {
-        this.clearTemporaryCover();
-        this.temporaryCover = asset;
-        this.render();
+        await this.saveCover(asset);
       }
     };
   }
@@ -2384,8 +2384,7 @@ export class WeChatPreviewView extends ItemView {
       const file = input.files?.[0];
       if (!file) return;
       void file.arrayBuffer().then((body) => {
-        this.clearTemporaryCover();
-        this.temporaryCover = {
+        void this.saveCover({
           token: '',
           source: file.name,
           fileName: file.name,
@@ -2393,11 +2392,37 @@ export class WeChatPreviewView extends ItemView {
           contentHash: '',
           body,
           previewUrl: URL.createObjectURL(file),
-        };
-        this.render();
+        });
       });
     };
     input.click();
+  }
+
+  private async saveCover(asset: WeChatAssetDraft): Promise<void> {
+    if (!this.file || !this.snapshot || this.operation) {
+      if (asset.previewUrl.startsWith('blob:')) URL.revokeObjectURL(asset.previewUrl);
+      return;
+    }
+
+    const articleFile = this.file;
+    this.clearTemporaryCover();
+    this.temporaryCover = asset;
+    this.operation = '正在保存文章封面…';
+    this.error = null;
+    this.render();
+    try {
+      const persisted = await persistWeChatCover(this.app, articleFile, asset);
+      if (this.file?.path === articleFile.path && this.snapshot?.sourcePath === articleFile.path) {
+        this.snapshot = withWeChatSnapshotCover(this.snapshot, persisted.asset);
+      }
+      new Notice('文章封面已保存。');
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : '文章封面保存失败');
+    } finally {
+      if (this.temporaryCover === asset) this.clearTemporaryCover();
+      this.operation = null;
+      if (this.contentEl.isConnected) this.render();
+    }
   }
 
   private clearTemporaryCover(): void {
