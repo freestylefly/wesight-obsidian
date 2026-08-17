@@ -8,6 +8,7 @@ import type {
   RuntimeTurnEvent,
   ToolCallEvent,
 } from '../types';
+import { privateUrlProxyBypassHost, withNoProxyHost } from '../utils/env';
 import { CodexAppServerClient } from './codexAppServer';
 import { appendAttachmentContext } from './attachmentContext';
 
@@ -54,6 +55,7 @@ export class CodexAppServerRuntime extends EventEmitter {
   private status: CodexRuntimeStatus = { ...EMPTY_STATUS };
   private connection: CodexRuntimeConnection | null = null;
   private connecting: Promise<void> | null = null;
+  private inferredNoProxyHost: string | null = null;
   private readonly activeTurns = new Map<string, ActiveTurn>();
 
   constructor(private readonly client = new CodexAppServerClient()) {
@@ -81,7 +83,7 @@ export class CodexAppServerRuntime extends EventEmitter {
   }
 
   async refreshStatus(connection: CodexRuntimeConnection): Promise<CodexRuntimeStatus> {
-    this.connection = connection;
+    this.connection = this.prepareConnection(connection);
     this.setStatus({
       ...this.status,
       state: 'connecting',
@@ -99,6 +101,16 @@ export class CodexAppServerRuntime extends EventEmitter {
         this.tryRequest('account/read', { refreshToken: false }),
         this.tryRequest('modelProvider/capabilities/read', {}),
       ]);
+      // GUI apps may route private providers through the OS proxy because they
+      // do not inherit the user's shell NO_PROXY settings.
+      const inferredNoProxyHost = await privateUrlProxyBypassHost(codexProviderBaseUrl(config));
+      this.inferredNoProxyHost = inferredNoProxyHost;
+      const preparedConnection = this.prepareConnection(connection);
+      if (!sameNoProxyEnvironment(this.connection.env, preparedConnection.env)) {
+        this.connection = preparedConnection;
+        await this.client.disconnect();
+        await this.ensureConnected();
+      }
       const currentModelId = stringAt(config, 'config', 'model')
         ?? models.find(model => model.isDefault)?.id
         ?? null;
@@ -138,6 +150,7 @@ export class CodexAppServerRuntime extends EventEmitter {
 
   markUnavailable(error: string): void {
     this.connection = null;
+    this.inferredNoProxyHost = null;
     for (const active of [...this.activeTurns.values()]) {
       this.finishTurn(active, { type: 'error', message: 'Codex CLI 当前不可用。', detail: error });
     }
@@ -150,7 +163,7 @@ export class CodexAppServerRuntime extends EventEmitter {
     connection: CodexRuntimeConnection,
     listener: (event: RuntimeTurnEvent) => void,
   ): Promise<void> {
-    this.connection = connection;
+    this.connection = this.prepareConnection(connection);
     if (request.signal?.aborted) {
       listener({ type: 'done' });
       return;
@@ -302,6 +315,7 @@ export class CodexAppServerRuntime extends EventEmitter {
     await this.client.disconnect();
     await cancellation;
     this.connection = null;
+    this.inferredNoProxyHost = null;
     this.setStatus({ ...EMPTY_STATUS });
   }
 
@@ -319,6 +333,11 @@ export class CodexAppServerRuntime extends EventEmitter {
       });
     }
     await this.connecting;
+  }
+
+  private prepareConnection(connection: CodexRuntimeConnection): CodexRuntimeConnection {
+    const env = withNoProxyHost(connection.env, this.inferredNoProxyHost);
+    return env === connection.env ? connection : { ...connection, env };
   }
 
   private async readAllModels(): Promise<CodexModelDescriptor[]> {
@@ -581,6 +600,16 @@ function readCapability(value: unknown, key: string): boolean | null {
   const nested = valueAt(value, 'capabilities', key, 'supported');
   if (typeof nested === 'boolean') return nested;
   return null;
+}
+
+function codexProviderBaseUrl(value: unknown): string | null {
+  const config = recordAt(value, 'config');
+  const providerId = stringAt(config, 'model_provider');
+  return providerId ? stringAt(config, 'model_providers', providerId, 'base_url') : null;
+}
+
+function sameNoProxyEnvironment(a: NodeJS.ProcessEnv, b: NodeJS.ProcessEnv): boolean {
+  return a.NO_PROXY === b.NO_PROXY && a.no_proxy === b.no_proxy;
 }
 
 function recordAt(value: unknown, ...path: string[]): Record<string, unknown> | null {
