@@ -47,6 +47,9 @@ import {
 
 export const WESIGHT_VIEW_TYPE = 'wesight-chat-view';
 
+const WESIGHT_TUTORIAL_URL =
+  'https://my.feishu.cn/docx/Vy7wdUzhkoZpPhxgix4cYHELnie?from=from_copylink';
+
 export interface ChatViewDeps {
   getSettings: () => WeSightObsidianSettings;
   saveSettings: () => Promise<void>;
@@ -845,6 +848,11 @@ export class WeSightChatView extends ItemView {
       .setTitle('会员与积分')
       .setIcon('wallet-cards')
       .onClick(() => this.deps.auth.openBilling()));
+    menu.addItem(item => item
+      .setTitle('使用教程')
+      .setIcon('book-open')
+      .onClick(() => window.open(WESIGHT_TUTORIAL_URL, '_blank', 'noopener,noreferrer')));
+    menu.addSeparator();
     menu.addItem(item => item
       .setTitle('退出登录')
       .setIcon('log-out')
