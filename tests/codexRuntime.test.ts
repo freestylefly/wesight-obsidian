@@ -8,12 +8,15 @@ import type { ChatTurnRequest, RuntimeTurnEvent } from '../src/types';
 class FakeAppServerClient extends EventEmitter {
   isReady = false;
   connectedExecutablePath: string | null = null;
+  connections: Array<{ executablePath: string; env?: NodeJS.ProcessEnv }> = [];
   requests: Array<{ method: string; params: unknown }> = [];
   imageGeneration = true;
   emitWarning = false;
+  providerBaseUrl: string | null = null;
   private threadNumber = 0;
 
-  async connect(options: { executablePath: string }): Promise<void> {
+  async connect(options: { executablePath: string; env?: NodeJS.ProcessEnv }): Promise<void> {
+    this.connections.push(options);
     this.isReady = true;
     this.connectedExecutablePath = options.executablePath;
   }
@@ -38,7 +41,21 @@ class FakeAppServerClient extends EventEmitter {
         nextCursor: 'page-2',
       };
     }
-    if (method === 'config/read') return { config: { model: 'model-a' } };
+    if (method === 'config/read') {
+      return {
+        config: {
+          model: 'model-a',
+          ...(this.providerBaseUrl
+            ? {
+                model_provider: 'custom',
+                model_providers: {
+                  custom: { base_url: this.providerBaseUrl },
+                },
+              }
+            : {}),
+        },
+      };
+    }
     if (method === 'account/read') return { account: { type: 'chatgpt' }, authMode: 'chatgpt' };
     if (method === 'modelProvider/capabilities/read') return { imageGeneration: this.imageGeneration, webSearch: false };
     if (method === 'thread/start') {
@@ -151,6 +168,42 @@ describe('CodexAppServerRuntime', () => {
     expect(status.authenticated).toBe(true);
     expect(status.imageGeneration).toBe(true);
     expect(status.webSearch).toBe(false);
+    await runtime.shutdown();
+  });
+
+  test('restarts the App Server with a private provider host excluded from proxies', async () => {
+    const client = new FakeAppServerClient();
+    client.providerBaseUrl = 'http://10.23.4.5/v1';
+    const runtime = new CodexAppServerRuntime(client as unknown as CodexAppServerClient);
+
+    const status = await runtime.refreshStatus({
+      ...connection,
+      env: { NO_PROXY: 'localhost' },
+    });
+
+    expect(status.state).toBe('ready');
+    expect(client.connections).toHaveLength(2);
+    expect(client.connections[1]?.env).toMatchObject({
+      NO_PROXY: 'localhost,10.23.4.5',
+      no_proxy: '10.23.4.5',
+    });
+    await runtime.shutdown();
+  });
+
+  test('keeps proxy routing unchanged for a non-private provider', async () => {
+    const client = new FakeAppServerClient();
+    client.providerBaseUrl = 'https://203.0.113.10/v1';
+    const runtime = new CodexAppServerRuntime(client as unknown as CodexAppServerClient);
+
+    await runtime.refreshStatus({
+      ...connection,
+      env: { HTTPS_PROXY: 'http://127.0.0.1:7890' },
+    });
+
+    expect(client.connections).toHaveLength(1);
+    expect(client.connections[0]?.env).toEqual({
+      HTTPS_PROXY: 'http://127.0.0.1:7890',
+    });
     await runtime.shutdown();
   });
 
