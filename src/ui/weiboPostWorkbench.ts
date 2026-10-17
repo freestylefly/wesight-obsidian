@@ -2,17 +2,12 @@ import { App, Notice, setIcon } from 'obsidian';
 
 import wesightLogo from '../../assets/wesight-logo.png';
 import type { MultiPublishBridge } from '../multiPublish/bridge';
-import {
-  CHROME_EXTENSION_DOWNLOAD_URL,
-  CHROME_EXTENSIONS_URL,
-  CHROME_INSTALL_STEPS,
-} from '../multiPublish/installGuide';
+import { requireBrowserConnection } from '../multiPublish/connection';
 import type { MultiPublishSnapshot, MultiPublishTaskState } from '../multiPublish/types';
 import {
   quickTransformSourceImages,
   readSnapshotAssetReference,
 } from '../quickTransform/images';
-import { MULTI_PUBLISH_LOGIN_PROMPT } from '../multiPublish/access';
 import type { CloudAuthService } from '../share/cloudAuth';
 import type { VaultStore } from '../storage/vaultStore';
 import type { WeSightObsidianSettings } from '../types';
@@ -39,6 +34,7 @@ import type {
   WeiboPostImage,
   WeiboPostTone,
 } from '../weiboPost/types';
+import { requireMemberFeature } from './memberFeatureGate';
 
 export type ContentWorkbenchSection = 'copy' | 'images' | 'review';
 
@@ -69,6 +65,7 @@ export interface WeiboPostWorkbenchOptions {
   getXiaohongshuImages: () => XhsGeneratedPage[];
   showSection: (section: ContentWorkbenchSection) => void;
   requestRender: () => void;
+  openBrowserConnector: () => void;
 }
 
 export class WeiboPostWorkbench {
@@ -80,10 +77,10 @@ export class WeiboPostWorkbench {
   private publishTask: MultiPublishTaskState | null = null;
   private publishBusy = false;
   private publishLoginPending = false;
-  private publishInstallGuideDismissed = false;
   private error = '';
   private saveTimer: number | null = null;
   private generationController: AbortController | null = null;
+  private lifecycleVersion = 0;
 
   constructor(private readonly options: WeiboPostWorkbenchOptions) {}
 
@@ -117,6 +114,7 @@ export class WeiboPostWorkbench {
   }
 
   dispose(): void {
+    this.lifecycleVersion += 1;
     this.generationController?.abort();
     if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
     this.saveTimer = null;
@@ -530,7 +528,7 @@ export class WeiboPostWorkbench {
       setIcon(icon, 'log-in');
       const copy = heading.createDiv();
       copy.createEl('strong', { text: '登录后使用微博发布助手' });
-      copy.createSpan({ text: '普通用户也可使用微博单平台发布。' });
+      copy.createSpan({ text: '微博发布助手为 WeSight 会员功能，请登录并开通会员后使用。' });
       const login = gate.createEl('button', {
         cls: 'wesight-xhs-primary-button',
         text: this.publishLoginPending ? '等待登录完成' : '请先登录 WeSight',
@@ -549,7 +547,7 @@ export class WeiboPostWorkbench {
     const extensionNeedsUpdate = connection.connected
       && connection.supportedPlatforms !== null
       && !connection.supportedPlatforms.includes('weibo-post');
-    if (!connection.paired && !this.publishInstallGuideDismissed) {
+    if (!connection.connected) {
       this.renderInstallGuide(parent);
       return;
     }
@@ -573,7 +571,7 @@ export class WeiboPostWorkbench {
     if (extensionNeedsUpdate) {
       const update = connectionRow.createEl('button', {
         cls: 'wesight-xhs-subtle-button',
-        text: '打开扩展管理页',
+        text: '连接设置',
         attr: { type: 'button' },
       });
       update.onclick = () => void this.openChromeExtensions();
@@ -604,46 +602,11 @@ export class WeiboPostWorkbench {
   }
 
   private renderInstallGuide(parent: HTMLElement): void {
-    const guide = parent.createDiv({ cls: 'wesight-multi-install-guide wesight-xhs-publish-install' });
-    const heading = guide.createDiv({ cls: 'wesight-multi-install-heading' });
-    const icon = heading.createSpan();
-    setIcon(icon, 'puzzle');
-    const copy = heading.createDiv();
-    copy.createEl('strong', { text: '首次使用，先安装 WeSight 发布助手' });
-    copy.createSpan({ text: '安装一次即可复用浏览器中的微博登录状态。' });
-    const steps = guide.createDiv({ cls: 'wesight-multi-install-steps' });
-    CHROME_INSTALL_STEPS.forEach((step, index) => {
-      const row = steps.createDiv({ cls: 'wesight-multi-install-step' });
-      row.createSpan({ cls: 'wesight-multi-install-number', text: String(index + 1) });
-      const stepCopy = row.createDiv({ cls: 'wesight-multi-install-copy' });
-      stepCopy.createEl('strong', { text: step.title });
-      stepCopy.createSpan({ text: step.description });
-      if (index === 0) {
-        const download = row.createEl('button', {
-          cls: 'wesight-multi-install-action',
-          text: '下载插件',
-          attr: { type: 'button' },
-        });
-        download.onclick = () => window.open(CHROME_EXTENSION_DOWNLOAD_URL, '_blank', 'noopener,noreferrer');
-      }
-      if (index === 2) {
-        const open = row.createEl('button', {
-          cls: 'wesight-multi-install-action',
-          text: '打开安装页',
-          attr: { type: 'button' },
-        });
-        open.onclick = () => void this.openChromeExtensions();
-      }
-    });
-    const continueButton = guide.createEl('button', {
-      cls: 'wesight-xhs-primary-button',
-      text: '我已安装，继续发布',
-      attr: { type: 'button' },
-    });
-    continueButton.onclick = () => {
-      this.publishInstallGuideDismissed = true;
-      this.options.requestRender();
-    };
+    const card = parent.createDiv({ cls: 'wesight-multi-install-guide' });
+    card.createEl('strong', { text: '连接浏览器发布助手' });
+    card.createEl('p', { text: '请在设置 → 连接器中完成安装与连接，当前内容会保留。' });
+    const button = card.createEl('button', { text: '前往连接设置', cls: 'wesight-xhs-primary-button', attr: { type: 'button' } });
+    button.onclick = this.options.openBrowserConnector;
   }
 
   private renderPublishTask(parent: HTMLElement, extensionNeedsUpdate: boolean): void {
@@ -667,11 +630,12 @@ export class WeiboPostWorkbench {
     const actions = card.createDiv();
     if (state.status === 'ready' || state.status === 'login_required') {
       const open = actions.createEl('button', { text: '打开编辑页', attr: { type: 'button' } });
+      open.disabled = this.publishBusy;
       open.onclick = () => void this.openTask();
     }
     if (['queued', 'opening', 'failed', 'login_required'].includes(state.status)) {
       const retry = actions.createEl('button', { text: '重试', attr: { type: 'button' } });
-      retry.disabled = extensionNeedsUpdate;
+      retry.disabled = extensionNeedsUpdate || this.publishBusy;
       retry.onclick = () => void this.retryTask();
     }
     const restart = actions.createEl('button', { text: '重新准备', attr: { type: 'button' } });
@@ -811,13 +775,18 @@ export class WeiboPostWorkbench {
     this.operation = 'copy';
     this.error = '';
     this.options.requestRender();
+    const lifecycleVersion = this.lifecycleVersion;
     try {
-      this.copy = await this.options.generationService.generateWeiboPostCopy(
+      if (!await requireMemberFeature(this.options.app, this.options.auth, '转为图文')) return;
+      if (lifecycleVersion !== this.lifecycleVersion || this.generationController.signal.aborted) return;
+      const copy = await this.options.generationService.generateWeiboPostCopy(
         this.snapshot,
         this.copy.tone,
         this.customPrompt,
         this.generationController.signal,
       );
+      if (lifecycleVersion !== this.lifecycleVersion || this.generationController.signal.aborted) return;
+      this.copy = copy;
       await this.save();
       new Notice('微博文案已生成，可继续手动调整。');
     } catch (error) {
@@ -831,30 +800,28 @@ export class WeiboPostWorkbench {
 
   private async startPublish(forcePair: boolean): Promise<void> {
     if (!this.snapshot || this.publishBusy) return;
-    const validationErrors = validateWeiboPostPublishInput(this.copy, this.images);
-    if (validationErrors.length) {
-      new Notice(validationErrors[0]);
-      return;
-    }
     this.publishBusy = true;
     this.error = '';
     this.options.requestRender();
+    const lifecycleVersion = this.lifecycleVersion;
     try {
-      const user = await this.options.auth.restoreSession();
-      if (!user) {
-        new Notice(MULTI_PUBLISH_LOGIN_PROMPT);
-        this.options.auth.startLogin();
-        this.publishLoginPending = true;
+      if (!await requireMemberFeature(this.options.app, this.options.auth, '浏览器发布助手')) return;
+      if (lifecycleVersion !== this.lifecycleVersion) return;
+      if (!requireBrowserConnection(this.options.bridge, this.options.openBrowserConnector, forcePair)) return;
+      const validationErrors = validateWeiboPostPublishInput(this.copy, this.images);
+      if (validationErrors.length) {
+        new Notice(validationErrors[0]);
         return;
       }
       await this.save();
+      if (lifecycleVersion !== this.lifecycleVersion) return;
       const publishSnapshot = await buildWeiboPostPublishSnapshot({
         source: this.snapshot,
         copy: this.copy,
         images: this.images,
         readBinary: reference => this.readImageBinary(reference),
       });
-      if (forcePair) await this.options.bridge.clearPairing();
+      if (lifecycleVersion !== this.lifecycleVersion) return;
       const result = this.options.bridge.createTask(publishSnapshot, ['weibo-post'], forcePair);
       this.publishTask = result.task;
       window.open(result.handoffUrl, '_blank', 'noopener,noreferrer');
@@ -868,36 +835,44 @@ export class WeiboPostWorkbench {
   }
 
   private async retryTask(): Promise<void> {
-    if (!this.publishTask) return;
+    if (!this.publishTask || this.publishBusy) return;
+    this.publishBusy = true;
+    this.options.requestRender();
+    const lifecycleVersion = this.lifecycleVersion;
     try {
+      if (!await requireMemberFeature(this.options.app, this.options.auth, '浏览器发布助手')) return;
+      if (lifecycleVersion !== this.lifecycleVersion) return;
+      if (!requireBrowserConnection(this.options.bridge, this.options.openBrowserConnector)) return;
       const url = this.options.bridge.createRetryUrl(this.publishTask.taskId, 'weibo-post');
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch (error) {
       this.error = error instanceof Error ? error.message : '重试微博发布任务失败';
+    } finally {
+      this.publishBusy = false;
       this.options.requestRender();
     }
   }
 
   private async openTask(): Promise<void> {
-    if (!this.publishTask) return;
+    if (!this.publishTask || this.publishBusy) return;
+    this.publishBusy = true;
+    this.options.requestRender();
+    const lifecycleVersion = this.lifecycleVersion;
     try {
+      if (!await requireMemberFeature(this.options.app, this.options.auth, '浏览器发布助手')) return;
+      if (lifecycleVersion !== this.lifecycleVersion) return;
+      if (!requireBrowserConnection(this.options.bridge, this.options.openBrowserConnector)) return;
       const url = this.options.bridge.createOpenUrl(this.publishTask.taskId, 'weibo-post');
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch (error) {
       this.error = error instanceof Error ? error.message : '打开微博编辑页失败';
+    } finally {
+      this.publishBusy = false;
       this.options.requestRender();
     }
   }
 
-  private async openChromeExtensions(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(CHROME_EXTENSIONS_URL);
-    } catch {
-      // Direct navigation may still work when clipboard access is unavailable.
-    }
-    window.open(CHROME_EXTENSIONS_URL, '_blank', 'noopener,noreferrer');
-    new Notice('已尝试打开扩展程序管理页面；如果没有跳转，请粘贴已复制的地址。');
-  }
+  private openChromeExtensions(): void { this.options.openBrowserConnector(); }
 
   private scheduleSave(): void {
     if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);

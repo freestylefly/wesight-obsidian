@@ -1,5 +1,6 @@
 import type { ChatImageArtifact } from '../types';
 import type { QuickTransformPlatformId } from '../quickTransform/selection';
+import type { XPostCopyDraft } from '../xPost/types';
 
 export const XHS_VISUAL_CATEGORY_IDS = [
   'typography',
@@ -99,6 +100,7 @@ export interface XhsDraftRecord {
     copyMode: 'shared' | 'platform';
     selectedImageIds: string[];
     previewPlatform: QuickTransformPlatformId;
+    xPostCopy?: XPostCopyDraft;
   };
 }
 

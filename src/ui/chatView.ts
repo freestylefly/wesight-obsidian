@@ -80,6 +80,7 @@ export interface ChatViewDeps {
   openSettings: () => void;
   openWeChatPreview: (file?: TFile) => Promise<void>;
   openImageTextWorkbench: (file: TFile) => Promise<void>;
+  openMultiPublish: (file: TFile, anchor?: HTMLElement | null) => void;
   openSharePopover: (file: TFile, anchor?: HTMLElement | null) => void;
   knowledgeBrain: KnowledgeBrain;
   knowledgeBrainEntitlement: KnowledgeBrainEntitlementService;
@@ -670,6 +671,15 @@ export class WeSightChatView extends ItemView {
     brand.createEl('h4', { text: 'WeSight', cls: 'wesight-title-text' });
 
     const headerActions = header.createDiv({ cls: 'wesight-header-actions' });
+
+    const multiPublishButton = headerActions.createEl('button', {
+      cls: 'wesight-multi-publish-btn',
+      attr: { type: 'button', 'aria-label': '将当前笔记发送到多平台发布中心', title: '多平台发布' },
+    });
+    const multiPublishIcon = multiPublishButton.createSpan({ cls: 'wesight-multi-publish-icon' });
+    setIcon(multiPublishIcon, 'send');
+    multiPublishButton.createSpan({ cls: 'wesight-multi-publish-label', text: '多平台' });
+    multiPublishButton.onclick = () => this.openMultiPublish(multiPublishButton);
 
     const transformButton = headerActions.createEl('button', {
       cls: 'wesight-transform-btn',
@@ -2967,6 +2977,22 @@ export class WeSightChatView extends ItemView {
       new Notice('Image attachment added.');
     } else {
       new Notice('Note attachment added.');
+    }
+  }
+
+  private openMultiPublish(anchor: HTMLElement): void {
+    this.updateEditorContextFromWorkspace();
+    const file = this.getVisibleEditorContext()?.file
+      ?? this.activeEditorContext?.file
+      ?? this.app.workspace.getActiveFile();
+    if (!(file instanceof TFile) || file.extension !== 'md') {
+      new Notice('请先打开一篇笔记，再发送到多平台。');
+      return;
+    }
+    try {
+      this.deps.openMultiPublish(file, anchor);
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : '打开多平台发布中心失败，请重试。');
     }
   }
 

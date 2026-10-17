@@ -1,22 +1,11 @@
 import { App, Notice, setIcon, TFile } from 'obsidian';
 
 import { MultiPublishBridge } from '../multiPublish/bridge';
-import {
-  MULTI_PUBLISH_FREE_LIMIT_NOTICE,
-  MULTI_PUBLISH_LOGIN_PROMPT,
-  normalizeMultiPublishSelection,
-  resolveMultiPublishAccess,
-  validateMultiPublishTargetCount,
-} from '../multiPublish/access';
-import {
-  CHROME_EXTENSION_DOWNLOAD_URL,
-  CHROME_EXTENSIONS_URL,
-  CHROME_INSTALL_STEPS,
-} from '../multiPublish/installGuide';
+import { requireBrowserConnection } from '../multiPublish/connection';
+import { resolveMultiPublishAccess } from '../multiPublish/access';
 import { buildMultiPublishSnapshot } from '../multiPublish/snapshot';
 import {
   MULTI_PLATFORM_IDS,
-  type MultiPlatformId,
   type MultiPublishSelectablePlatformId,
   type MultiPlatformTaskState,
   type MultiPublishSnapshot,
@@ -24,15 +13,19 @@ import {
 } from '../multiPublish/types';
 import type { CloudAuthService } from '../share/cloudAuth';
 import type { WeSightObsidianSettings } from '../types';
+import { requireMemberFeature } from './memberFeatureGate';
 
-const PLATFORM_COPY: Record<MultiPublishSelectablePlatformId, { label: string; description: string; titleLimit: number; url: string }> = {
-  zhihu: { label: '知乎', description: '专栏富文本草稿', titleLimit: 100, url: 'https://zhuanlan.zhihu.com/write' },
-  csdn: { label: 'CSDN', description: '博客编辑器草稿', titleLimit: 100, url: 'https://mp.csdn.net/mp_blog/creation/editor' },
-  juejin: { label: '掘金', description: 'Markdown 文章草稿', titleLimit: 80, url: 'https://juejin.cn/editor/drafts/new?v=2' },
-  'bilibili-article': { label: 'B站专栏', description: '专栏编辑页草稿', titleLimit: 40, url: 'https://member.bilibili.com/article-text/home?newEditor=-1' },
-  toutiao: { label: '今日头条', description: '图文编辑页草稿', titleLimit: 30, url: 'https://mp.toutiao.com/profile_v4/graphic/publish' },
-  'weibo-article': { label: '微博头条文章', description: '头条文章草稿', titleLimit: 32, url: 'https://card.weibo.com/article/v5/editor' },
+const PLATFORM_LABEL: Record<MultiPublishSelectablePlatformId, string> = {
+  zhihu: '知乎',
+  csdn: 'CSDN',
+  juejin: '掘金',
+  'bilibili-article': 'B站专栏',
+  toutiao: '今日头条',
+  'weibo-article': '微博头条文章',
+  'x-article': 'X 文章',
 };
+
+const HANDOFF_STEPS = ['文章带入浏览器发布中心', '勾选平台，检查标题、封面与正文', '在各平台编辑页确认发布'] as const;
 
 const STATUS_COPY: Record<MultiPlatformTaskState['status'], string> = {
   queued: '等待中',
@@ -53,6 +46,7 @@ interface MultiPublishPanelOptions {
   saveSettings: () => Promise<void>;
   requestRender: () => void;
   requestPosition: () => void;
+  openBrowserConnector: () => void;
 }
 
 export class MultiPublishPanel {
@@ -61,51 +55,67 @@ export class MultiPublishPanel {
   private loading = false;
   private busy = false;
   private authLoading = false;
-  private authChecked = false;
   private loginPending = false;
   private error = '';
   private loadVersion = 0;
-  private installGuideDismissed = false;
+  private lifecycleVersion = 0;
+  private autoLaunched = false;
   private unsubscribe: (() => void) | null = null;
-  private selected = new Set<MultiPublishSelectablePlatformId>();
-  private selectionLimitNotified = false;
 
-  constructor(private readonly options: MultiPublishPanelOptions) {
-    const saved = options.getSettings().multiPublishPlatforms;
-    this.selected = new Set(MULTI_PLATFORM_IDS.filter(platformId => saved.includes(platformId)));
-  }
+  constructor(private readonly options: MultiPublishPanelOptions) {}
 
-  activate(force = false): void {
-    if (!this.unsubscribe) {
-      this.unsubscribe = this.options.bridge.onChange(() => {
-        if (this.task) this.task = this.options.bridge.getTask(this.task.taskId) ?? this.task;
-        this.options.requestRender();
-      });
-    }
-    if (!this.task) {
-      const latest = this.options.bridge.getLatestTask();
-      if (latest?.targets.every(platformId => MULTI_PLATFORM_IDS.includes(platformId as MultiPublishSelectablePlatformId))) {
-        this.task = latest;
+  async activate(force = false): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.authLoading = true;
+    this.options.requestRender();
+    const lifecycleVersion = this.lifecycleVersion;
+    let available = false;
+    try {
+      if (!await requireMemberFeature(this.options.app, this.options.auth, '浏览器发布助手')) return;
+      if (lifecycleVersion !== this.lifecycleVersion) return;
+      if (!requireBrowserConnection(this.options.bridge, this.options.openBrowserConnector)) return;
+      available = true;
+      this.loginPending = false;
+      if (!this.unsubscribe) {
+        this.unsubscribe = this.options.bridge.onChange(() => {
+          if (this.task) this.task = this.options.bridge.getTask(this.task.taskId) ?? this.task;
+          this.options.requestRender();
+        });
       }
-    }
-    if (force || !this.snapshot) void this.load();
-    if (!this.authChecked || !this.options.auth.getCurrentUser() || !this.options.auth.getBillingSummary()) {
-      void this.refreshAccess();
+      if (!this.task) {
+        // Reopening the panel for a note that is already in the publish center must
+        // not re-import it, or edits made in the browser would be replaced.
+        this.task = this.options.bridge.getLatestComposeTask(this.options.file.path);
+        if (this.task) this.autoLaunched = true;
+      }
+      if (force || !this.snapshot) void this.load();
+    } finally {
+      this.busy = false;
+      this.authLoading = false;
+      this.options.requestRender();
+      this.options.requestPosition();
+      if (available && lifecycleVersion === this.lifecycleVersion) this.maybeAutoLaunch();
     }
   }
 
   dispose(): void {
+    this.lifecycleVersion += 1;
     this.loadVersion += 1;
     this.unsubscribe?.();
     this.unsubscribe = null;
   }
 
   render(parent: HTMLElement): void {
+    if (this.authLoading && !this.snapshot) {
+      this.renderAuthLoading(parent);
+      return;
+    }
     if (this.loading) {
       const loading = parent.createDiv({ cls: 'wesight-multi-loading' });
       const icon = loading.createSpan();
       setIcon(icon, 'loader-circle');
-      loading.createSpan({ text: '正在准备多平台快照…' });
+      loading.createSpan({ text: '正在准备文章内容…' });
       return;
     }
     if (this.error && !this.snapshot) {
@@ -127,14 +137,15 @@ export class MultiPublishPanel {
       return;
     }
     const connection = this.options.bridge.getConnectionState();
-    if (!connection.paired && !this.installGuideDismissed) {
+    if (!connection.connected) {
       this.renderInstallGuide(parent);
       if (this.error) this.renderError(parent);
       return;
     }
     this.renderConnection(parent);
-    if (this.task) this.renderTask(parent, this.task);
-    else this.renderSelection(parent, this.snapshot);
+    this.renderHandoff(parent);
+    if (this.task) this.renderProgress(parent, this.task);
+    this.renderPreflight(parent, this.snapshot);
     if (this.error) this.renderError(parent);
   }
 
@@ -148,12 +159,13 @@ export class MultiPublishPanel {
       if (version !== this.loadVersion) return;
       this.snapshot = snapshot;
     } catch (error) {
-      if (version === this.loadVersion) this.error = error instanceof Error ? error.message : '多平台快照生成失败';
+      if (version === this.loadVersion) this.error = error instanceof Error ? error.message : '文章内容准备失败';
     } finally {
       if (version === this.loadVersion) {
         this.loading = false;
         this.options.requestRender();
         this.options.requestPosition();
+        this.maybeAutoLaunch();
       }
     }
   }
@@ -181,7 +193,7 @@ export class MultiPublishPanel {
     setIcon(headingIcon, 'log-in');
     const copy = heading.createDiv();
     copy.createEl('strong', { text: '登录后使用平台同步' });
-    copy.createSpan({ text: '普通用户可同步 1 个平台，WeSight 会员可一次同步多个平台。' });
+    copy.createSpan({ text: '平台同步为 WeSight 会员功能，请登录并开通会员后使用。' });
     const login = gate.createEl('button', {
       cls: 'wesight-share-primary-button is-multi',
       text: this.loginPending ? '等待登录完成' : '请先登录 WeSight',
@@ -199,110 +211,20 @@ export class MultiPublishPanel {
     privacy.createSpan({ text: '登录仅用于确认账号与会员状态，文章仍通过本机临时通道传输。' });
   }
 
-  private async refreshAccess(): Promise<void> {
-    if (this.authLoading) return;
-    this.authLoading = true;
-    this.options.requestRender();
-    try {
-      const user = await this.options.auth.restoreSession();
-      if (user) {
-        await this.options.auth.refreshBillingSummary(false).catch(() => null);
-      }
-      if (user) this.loginPending = false;
-      await this.enforceSelectionLimit();
-    } finally {
-      this.authChecked = true;
-      this.authLoading = false;
-      this.options.requestRender();
-      this.options.requestPosition();
-    }
-  }
-
-  private async enforceSelectionLimit(): Promise<void> {
-    const access = resolveMultiPublishAccess(
-      this.options.auth.getCurrentUser(),
-      this.options.auth.getBillingSummary(),
-    );
-    const ordered = MULTI_PLATFORM_IDS.filter(platformId => this.selected.has(platformId));
-    const normalized = normalizeMultiPublishSelection(access, ordered);
-    if (!normalized.limited) return;
-    this.selected = new Set(normalized.platforms.filter(
-      (platformId): platformId is MultiPublishSelectablePlatformId => platformId !== 'xiaohongshu',
-    ));
-    await this.persistSelection();
-    if (!this.selectionLimitNotified) {
-      this.selectionLimitNotified = true;
-      new Notice(MULTI_PUBLISH_FREE_LIMIT_NOTICE);
-    }
+  /** Opening the multi-platform tab goes straight to the browser once nothing needs the user here. */
+  private maybeAutoLaunch(): void {
+    if (this.autoLaunched || this.busy || this.loading || this.authLoading || !this.snapshot) return;
+    if (!this.options.auth.getCurrentUser()) return;
+    this.autoLaunched = true;
+    void this.start(false);
   }
 
   private renderInstallGuide(parent: HTMLElement): void {
-    const guide = parent.createDiv({ cls: 'wesight-multi-install-guide' });
-    const heading = guide.createDiv({ cls: 'wesight-multi-install-heading' });
-    const headingIcon = heading.createSpan();
-    setIcon(headingIcon, 'puzzle');
-    const headingCopy = heading.createDiv();
-    headingCopy.createEl('strong', { text: '首次使用，先安装浏览器插件' });
-    headingCopy.createSpan({ text: '只需安装一次，扩展会复用浏览器中已有的平台登录状态。' });
-
-    const steps = guide.createDiv({ cls: 'wesight-multi-install-steps' });
-    CHROME_INSTALL_STEPS.forEach((step, index) => {
-      const row = steps.createDiv({ cls: 'wesight-multi-install-step' });
-      row.createSpan({ cls: 'wesight-multi-install-number', text: String(index + 1) });
-      const copy = row.createDiv({ cls: 'wesight-multi-install-copy' });
-      copy.createEl('strong', { text: step.title });
-      copy.createSpan({ text: step.description });
-      if (index === 0) {
-        const download = row.createEl('button', {
-          cls: 'wesight-multi-install-action',
-          text: '下载插件',
-          attr: { type: 'button' },
-        });
-        const icon = download.createSpan();
-        setIcon(icon, 'download');
-        download.prepend(icon);
-        download.onclick = () => window.open(CHROME_EXTENSION_DOWNLOAD_URL, '_blank', 'noopener,noreferrer');
-      }
-      if (index === 2) {
-        const open = row.createEl('button', {
-          cls: 'wesight-multi-install-action',
-          text: '打开安装页',
-          attr: { type: 'button' },
-        });
-        const icon = open.createSpan();
-        setIcon(icon, 'external-link');
-        open.prepend(icon);
-        open.onclick = () => void this.openChromeExtensions();
-      }
-    });
-
-    const continueButton = guide.createEl('button', {
-      cls: 'wesight-share-primary-button is-multi wesight-multi-install-continue',
-      text: '我已安装，继续选择平台',
-      attr: { type: 'button' },
-    });
-    const continueIcon = continueButton.createSpan();
-    setIcon(continueIcon, 'circle-check');
-    continueButton.prepend(continueIcon);
-    continueButton.onclick = () => {
-      this.installGuideDismissed = true;
-      this.options.requestRender();
-      this.options.requestPosition();
-    };
-    guide.createSpan({
-      cls: 'wesight-multi-install-footnote',
-      text: '安装完成后，首次发布任务会自动完成本机配对。',
-    });
-  }
-
-  private async openChromeExtensions(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(CHROME_EXTENSIONS_URL);
-    } catch {
-      // Direct navigation may still work when clipboard access is unavailable.
-    }
-    window.open(CHROME_EXTENSIONS_URL, '_blank', 'noopener,noreferrer');
-    new Notice('已尝试打开扩展程序管理页面；如果没有跳转，请粘贴已复制的地址。');
+    const card = parent.createDiv({ cls: 'wesight-multi-install-guide' });
+    card.createEl('strong', { text: '连接浏览器发布助手' });
+    card.createEl('p', { text: '请在设置 → 连接器中完成安装与连接，当前内容会保留。' });
+    const button = card.createEl('button', { text: '前往连接设置', cls: 'wesight-xhs-primary-button', attr: { type: 'button' } });
+    button.onclick = this.options.openBrowserConnector;
   }
 
   private renderConnection(parent: HTMLElement): void {
@@ -312,13 +234,13 @@ export class MultiPublishPanel {
     setIcon(icon, state.connected ? 'link' : state.paired ? 'radio' : 'plug-zap');
     const copy = row.createDiv();
     copy.createEl('strong', {
-      text: state.connected ? '浏览器扩展已连接' : state.paired ? '扩展已配对，等待连接' : '首次任务将完成扩展配对',
+      text: state.connected ? '浏览器扩展已连接' : state.paired ? '扩展已配对，等待连接' : '首次打开发布中心将完成扩展配对',
     });
     copy.createSpan({ text: '正文与图片只通过 127.0.0.1 临时通道传输' });
-    if (state.paired && !this.task) {
+    if (state.paired) {
       const repair = row.createEl('button', {
         cls: 'wesight-multi-link-button',
-        text: '重新配对',
+        text: '连接设置',
         attr: { type: 'button' },
       });
       repair.disabled = this.busy;
@@ -326,126 +248,87 @@ export class MultiPublishPanel {
     }
   }
 
-  private renderSelection(parent: HTMLElement, snapshot: MultiPublishSnapshot): void {
-    const heading = parent.createDiv({ cls: 'wesight-multi-section-heading' });
-    const headingCopy = heading.createDiv({ cls: 'wesight-multi-section-title' });
-    headingCopy.createEl('strong', { text: '选择发布平台' });
+  private renderHandoff(parent: HTMLElement): void {
     const access = resolveMultiPublishAccess(
       this.options.auth.getCurrentUser(),
       this.options.auth.getBillingSummary(),
     );
-    headingCopy.createSpan({
-      text: access.state === 'multi-platform' ? 'WeSight 会员 · 支持多选' : '普通用户 · 最多 1 个平台',
+    const card = parent.createDiv({ cls: `wesight-multi-handoff${this.task ? ' is-sent' : ''}` });
+    const heading = card.createDiv({ cls: 'wesight-multi-handoff-heading' });
+    const icon = heading.createSpan();
+    setIcon(icon, this.busy ? 'loader-circle' : this.task ? 'circle-check' : 'send');
+    const copy = heading.createDiv();
+    copy.createEl('strong', {
+      text: this.busy ? '正在打开 WeSight 发布中心…' : this.task ? '已在浏览器打开发布中心' : '在浏览器中选择发布平台',
     });
-    const allSelected = this.selected.size === MULTI_PLATFORM_IDS.length;
-    const selectAll = heading.createEl('button', {
-      cls: 'wesight-multi-link-button',
-      text: allSelected ? '取消全选' : '全选',
-      attr: { type: 'button' },
+    copy.createSpan({
+      text: access.state === 'multi-platform' ? 'WeSight 会员 · 不限平台数' : '平台同步需开通 WeSight 会员',
     });
-    selectAll.onclick = () => {
-      if (!allSelected) {
-        const accessError = validateMultiPublishTargetCount(access, MULTI_PLATFORM_IDS.length);
-        if (accessError) {
-          new Notice(accessError);
-          return;
-        }
-      }
-      this.selected = allSelected ? new Set() : new Set(MULTI_PLATFORM_IDS);
-      void this.persistSelection();
-      this.options.requestRender();
-    };
 
-    const grid = parent.createDiv({ cls: 'wesight-multi-platform-grid' });
-    for (const platformId of MULTI_PLATFORM_IDS) {
-      const selected = this.selected.has(platformId);
-      const card = grid.createEl('label', { cls: `wesight-multi-platform${selected ? ' is-selected' : ''}` });
-      const checkbox = card.createEl('input', { attr: { type: 'checkbox' } });
-      checkbox.checked = selected;
-      checkbox.onchange = () => {
-        if (checkbox.checked) {
-          const proposedCount = selected ? this.selected.size : this.selected.size + 1;
-          const accessError = validateMultiPublishTargetCount(access, proposedCount);
-          if (accessError) {
-            checkbox.checked = false;
-            new Notice(accessError);
-            return;
-          }
-          this.selected.add(platformId);
-        } else {
-          this.selected.delete(platformId);
-        }
-        void this.persistSelection();
-        this.options.requestRender();
-      };
-      const check = card.createSpan({ cls: 'wesight-multi-checkbox' });
-      setIcon(check, selected ? 'check' : 'circle');
-      const copy = card.createDiv();
-      copy.createEl('strong', { text: PLATFORM_COPY[platformId].label });
-      copy.createSpan({ text: PLATFORM_COPY[platformId].description });
-    }
+    const steps = card.createEl('ol', { cls: 'wesight-multi-handoff-steps' });
+    for (const step of HANDOFF_STEPS) steps.createEl('li', { text: step });
 
-    const warnings = this.preflightWarnings(snapshot);
-    if (access.state !== 'multi-platform' && this.selected.size > 1) {
-      warnings.unshift(MULTI_PUBLISH_FREE_LIMIT_NOTICE);
+    const actions = card.createDiv({ cls: 'wesight-multi-handoff-actions' });
+    if (this.task) {
+      const reopen = actions.createEl('button', {
+        cls: 'wesight-share-primary-button is-multi',
+        text: '回到发布中心',
+        attr: { type: 'button' },
+      });
+      const reopenIcon = reopen.createSpan();
+      setIcon(reopenIcon, 'external-link');
+      reopen.prepend(reopenIcon);
+      reopen.disabled = this.busy;
+      reopen.onclick = () => void this.reopen();
+      const reimport = actions.createEl('button', {
+        cls: 'wesight-share-secondary-button',
+        text: '重新导入当前文章',
+        attr: { type: 'button' },
+      });
+      reimport.disabled = this.busy;
+      reimport.onclick = () => void this.reimport();
+      return;
     }
-    if (warnings.length) {
-      const note = parent.createDiv({ cls: 'wesight-multi-preflight' });
-      const icon = note.createSpan();
-      setIcon(icon, 'triangle-alert');
-      const copy = note.createDiv();
-      copy.createEl('strong', { text: `启动前提示 · ${warnings.length} 项` });
-      for (const warning of warnings.slice(0, 3)) copy.createSpan({ text: warning });
-      if (warnings.length > 3) copy.createSpan({ text: `另有 ${warnings.length - 3} 项提示` });
-    }
-
-    const start = parent.createEl('button', {
+    const start = actions.createEl('button', {
       cls: 'wesight-share-primary-button is-multi',
-      text: this.busy ? '正在启动…' : `准备到 ${this.selected.size} 个平台`,
+      text: this.busy ? '正在打开…' : '多平台发布',
       attr: { type: 'button' },
     });
-    const icon = start.createSpan();
-    setIcon(icon, 'send');
-    start.prepend(icon);
-    start.disabled = this.busy || this.selected.size === 0;
+    const startIcon = start.createSpan();
+    setIcon(startIcon, 'send');
+    start.prepend(startIcon);
+    start.disabled = this.busy;
     start.onclick = () => void this.start(false);
   }
 
-  private renderTask(parent: HTMLElement, task: MultiPublishTaskState): void {
+  private renderProgress(parent: HTMLElement, task: MultiPublishTaskState): void {
+    const started = MULTI_PLATFORM_IDS.filter(platformId => !['queued', 'cancelled'].includes(task.platforms[platformId].status));
+    if (!started.length) return;
     const heading = parent.createDiv({ cls: 'wesight-multi-section-heading' });
-    heading.createEl('strong', { text: '发布准备进度' });
-    const ready = task.targets.filter(platformId => task.platforms[platformId].status === 'ready').length;
-    heading.createSpan({ text: `${ready}/${task.targets.length}` });
+    heading.createEl('strong', { text: '同步进度' });
+    const ready = started.filter(platformId => task.platforms[platformId].status === 'ready').length;
+    heading.createSpan({ text: `${ready}/${started.length}` });
     const list = parent.createDiv({ cls: 'wesight-multi-task-list' });
-    for (const platformId of task.targets) {
-      if (!MULTI_PLATFORM_IDS.includes(platformId as MultiPublishSelectablePlatformId)) continue;
-      const platform = platformId as MultiPublishSelectablePlatformId;
+    for (const platformId of started) {
       const state = task.platforms[platformId];
       const row = list.createDiv({ cls: `wesight-multi-task-row is-${state.status}` });
       const icon = row.createSpan({ cls: 'wesight-multi-task-icon' });
       setIcon(icon, state.status === 'ready' ? 'circle-check' : state.status === 'failed' || state.status === 'login_required' ? 'circle-alert' : 'loader-circle');
       const copy = row.createDiv({ cls: 'wesight-multi-task-copy' });
-      copy.createEl('strong', { text: PLATFORM_COPY[platform].label });
+      copy.createEl('strong', { text: PLATFORM_LABEL[platformId] });
       copy.createSpan({ text: state.message || STATUS_COPY[state.status] });
-      const actions = row.createDiv({ cls: 'wesight-multi-task-actions' });
-      if (state.status === 'ready' || state.status === 'login_required') {
-        const open = actions.createEl('button', { text: '打开', attr: { type: 'button' } });
-        open.onclick = () => void this.open(platformId);
-      }
-      if (state.status === 'failed' || state.status === 'login_required') {
-        const retry = actions.createEl('button', { text: '重试', attr: { type: 'button' } });
-        retry.onclick = () => void this.retry(platformId);
-      }
     }
-    const restart = parent.createEl('button', {
-      cls: 'wesight-share-secondary-button wesight-multi-new-task',
-      text: '重新选择平台',
-      attr: { type: 'button' },
-    });
-    restart.onclick = () => {
-      this.task = null;
-      void this.load();
-    };
+  }
+
+  private renderPreflight(parent: HTMLElement, snapshot: MultiPublishSnapshot): void {
+    if (!snapshot.warnings.length) return;
+    const note = parent.createDiv({ cls: 'wesight-multi-preflight' });
+    const icon = note.createSpan();
+    setIcon(icon, 'triangle-alert');
+    const copy = note.createDiv();
+    copy.createEl('strong', { text: `导入提示 · ${snapshot.warnings.length} 项` });
+    for (const warning of snapshot.warnings.slice(0, 3)) copy.createSpan({ text: warning });
+    if (snapshot.warnings.length > 3) copy.createSpan({ text: `另有 ${snapshot.warnings.length - 3} 项提示` });
   }
 
   private renderError(parent: HTMLElement): void {
@@ -455,57 +338,30 @@ export class MultiPublishPanel {
     note.createSpan({ text: this.error || '操作失败，请稍后重试。' });
   }
 
-  private preflightWarnings(snapshot: MultiPublishSnapshot): string[] {
-    const warnings = [...snapshot.warnings];
-    const titleLength = Array.from(snapshot.title).length;
-    for (const platformId of this.selected) {
-      const platform = PLATFORM_COPY[platformId];
-      if (titleLength > platform.titleLimit) {
-        warnings.push(`${platform.label}标题最多 ${platform.titleLimit} 个字符，扩展会截断填充`);
-      }
-    }
-    return Array.from(new Set(warnings));
-  }
-
-  private async persistSelection(): Promise<void> {
-    this.options.getSettings().multiPublishPlatforms = MULTI_PLATFORM_IDS.filter(platformId => this.selected.has(platformId));
-    await this.options.saveSettings();
-  }
-
-  private async start(forcePair: boolean): Promise<void> {
-    if (!this.snapshot || this.busy || this.selected.size === 0) return;
+  private async start(forcePair: boolean, reload = false): Promise<void> {
+    if (!this.snapshot || this.busy) return;
     this.busy = true;
     this.error = '';
     this.options.requestRender();
+    const lifecycleVersion = this.lifecycleVersion;
     try {
-      const user = await this.options.auth.restoreSession();
-      if (!user) {
-        new Notice(MULTI_PUBLISH_LOGIN_PROMPT);
-        return;
+      if (!await requireMemberFeature(this.options.app, this.options.auth, '浏览器发布助手')) return;
+      if (lifecycleVersion !== this.lifecycleVersion) return;
+      if (!requireBrowserConnection(this.options.bridge, this.options.openBrowserConnector, forcePair)) return;
+      if (reload) {
+        this.task = null;
+        await this.load();
+        if (lifecycleVersion !== this.lifecycleVersion) return;
       }
-      let billing = this.options.auth.getBillingSummary();
-      if (this.selected.size > 1) {
-        try {
-          billing = await this.options.auth.refreshBillingSummary(false);
-        } catch {
-          this.error = '暂时无法验证会员状态，请稍后重试。';
-          return;
-        }
-      }
-      const access = resolveMultiPublishAccess(user, billing);
-      const accessError = validateMultiPublishTargetCount(access, this.selected.size);
-      if (accessError) {
-        new Notice(accessError);
-        return;
-      }
-      if (forcePair) await this.options.bridge.clearPairing();
-      await this.persistSelection();
-      const result = this.options.bridge.createTask(this.snapshot, Array.from(this.selected), forcePair);
+      const user = this.options.auth.getCurrentUser();
+      if (!user || !this.snapshot) return;
+      const access = resolveMultiPublishAccess(user, this.options.auth.getBillingSummary());
+      const result = this.options.bridge.createComposeTask(this.snapshot, access, forcePair);
       this.task = result.task;
       window.open(result.handoffUrl, '_blank', 'noopener,noreferrer');
-      new Notice('已打开浏览器交接页，扩展正在准备多平台草稿。');
+      new Notice('已打开 WeSight 发布中心，请在浏览器中选择平台。');
     } catch (error) {
-      this.error = error instanceof Error ? error.message : '多平台任务启动失败';
+      this.error = error instanceof Error ? error.message : '打开发布中心失败';
     } finally {
       this.busy = false;
       this.options.requestRender();
@@ -513,25 +369,28 @@ export class MultiPublishPanel {
     }
   }
 
-  private async retry(platformId: MultiPlatformId): Promise<void> {
-    if (!this.task) return;
+  private async reopen(): Promise<void> {
+    if (!this.task || this.busy) return;
+    this.busy = true;
+    this.options.requestRender();
+    const lifecycleVersion = this.lifecycleVersion;
+    let expired = false;
     try {
-      const url = this.options.bridge.createRetryUrl(this.task.taskId, platformId);
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } catch (error) {
-      this.error = error instanceof Error ? error.message : '重试失败';
+      if (!await requireMemberFeature(this.options.app, this.options.auth, '浏览器发布助手')) return;
+      if (lifecycleVersion !== this.lifecycleVersion) return;
+      if (!requireBrowserConnection(this.options.bridge, this.options.openBrowserConnector)) return;
+      window.open(this.options.bridge.createOpenTaskUrl(this.task.taskId), '_blank', 'noopener,noreferrer');
+    } catch {
+      // The handoff expired; a fresh import brings the article back.
+      expired = true;
+    } finally {
+      this.busy = false;
       this.options.requestRender();
     }
+    if (expired && lifecycleVersion === this.lifecycleVersion) await this.reimport();
   }
 
-  private async open(platformId: MultiPlatformId): Promise<void> {
-    if (!this.task) return;
-    try {
-      const url = this.options.bridge.createOpenUrl(this.task.taskId, platformId);
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } catch (error) {
-      this.error = error instanceof Error ? error.message : '打开平台草稿失败';
-      this.options.requestRender();
-    }
+  private async reimport(): Promise<void> {
+    await this.start(false, true);
   }
 }

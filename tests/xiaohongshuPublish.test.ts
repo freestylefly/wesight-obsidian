@@ -81,4 +81,17 @@ describe('xiaohongshu publish snapshot', () => {
       readBinary: async () => { throw new Error('missing'); },
     })).rejects.toThrow('第 1 张图片读取失败');
   });
+
+  test('counts Unicode text, topic markers, spaces and blank lines against the 1000-character limit', async () => {
+    // Two blank lines, #AI, one space and #效率 use nine characters.
+    const atLimit = { ...copy, body: '😀'.repeat(991), tags: ['AI', '效率'] };
+    expect(validateXiaohongshuPublishInput(atLimit, 1, [page(1)])).toEqual([]);
+    const tooLong = { ...atLimit, body: `${atLimit.body}字` };
+    expect(validateXiaohongshuPublishInput(tooLong, 1, [page(1)]).join(' ')).toContain('正文和话题合计不能超过 1000 字');
+    const readBinary = vi.fn(async () => new Uint8Array([1]).buffer);
+    await expect(buildXiaohongshuPublishSnapshot({ source, copy: tooLong, pageCount: 1, pages: [page(1)], readBinary }))
+      .rejects.toThrow('正文和话题合计不能超过 1000 字');
+    expect(readBinary).not.toHaveBeenCalled();
+    expect(tooLong.body).toBe(`${atLimit.body}字`);
+  });
 });

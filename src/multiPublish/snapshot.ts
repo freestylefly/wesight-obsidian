@@ -1,7 +1,7 @@
 import type { App, TFile } from 'obsidian';
 
 import { buildWeChatSnapshot } from '../wechat/snapshot';
-import { markdownToPlatformHtml } from './content';
+import { markdownToPlatformHtml, stripLeadingPublishDecoration } from './content';
 import type { MultiPublishSnapshot } from './types';
 
 const MAX_ASSET_BYTES = 10 * 1024 * 1024;
@@ -38,7 +38,10 @@ export async function buildMultiPublishSnapshot(app: App, file: TFile): Promise<
   const source = await buildWeChatSnapshot(app, file);
   const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
   const warnings = source.warnings.map(warning => warning.message);
-  const assets = source.assets.map(asset => ({
+  // Different paths or URLs can contain identical bytes. The bridge identifies
+  // assets by their hash, so send each binary once and keep every body reference.
+  const uniqueAssets = new Map(source.assets.map(asset => [asset.contentHash, asset]));
+  const assets = Array.from(uniqueAssets.values()).map(asset => ({
     id: asset.contentHash,
     fileName: asset.fileName,
     mimeType: asset.mimeType,
@@ -52,15 +55,15 @@ export async function buildMultiPublishSnapshot(app: App, file: TFile): Promise<
   if (oversize) warnings.push(`图片“${oversize.fileName}”超过 10 MB，无法加入任务`);
   const totalBytes = assets.reduce((total, asset) => total + asset.size, 0);
   if (totalBytes > MAX_TASK_BYTES) warnings.push('任务图片总大小超过 100 MB，无法启动');
-  if (!source.coverAssetToken) warnings.push('文章未设置封面，部分平台需要在编辑页手动补充');
 
-  let markdown = source.markdown;
+  let markdown = stripLeadingPublishDecoration(source.markdown);
   for (const asset of source.assets) {
     markdown = markdown.split(asset.token).join(publishAssetToken(asset.contentHash));
   }
   const coverHash = source.coverAssetToken
     ? source.assets.find(asset => asset.token === source.coverAssetToken)?.contentHash ?? null
-    : null;
+    : /!\[[^\]]*\]\(wesight-asset:\/\/([^\s)]+)\)/.exec(markdown)?.[1] ?? null;
+  if (!coverHash) warnings.push('正文没有可用图片，部分平台需要在编辑页手动补充封面');
 
   return {
     sourcePath: source.sourcePath,

@@ -7,8 +7,10 @@ import type {
 } from './types';
 
 export const XHS_TITLE_LIMIT = 20;
+export const XHS_BODY_LIMIT = 1000;
 export const XHS_MAX_TAGS = 8;
 export const XHS_PAGE_TEXT_LIMIT = 100;
+const XHS_TAG_LIMIT = 20;
 
 export function toXhsPlainText(value: string): string {
   return value
@@ -48,15 +50,45 @@ export function normalizeXhsTags(values: string[]): string[] {
   return result;
 }
 
+/** The exact text sent to the Xiaohongshu body editor, including topic markers. */
+export function buildXhsPostText(body: string, tags: string[]): string {
+  const topics = tags.map(tag => tag.replace(/^#+|#+$/g, '').trim())
+    .filter(Boolean).map(tag => `#${tag}`).join(' ');
+  return [body.trim(), topics].filter(Boolean).join('\n\n');
+}
+
+/** Keep generated copy within the platform limit even when the model ignores it. */
+export function clampXhsCopy(copy: XhsCopyDraft): XhsCopyDraft {
+  const tags = normalizeXhsTags(normalizeXhsTags(copy.tags)
+    .map(tag => Array.from(tag).slice(0, XHS_TAG_LIMIT).join('')));
+  const tagLength = Array.from(buildXhsPostText('', tags)).length;
+  const bodyBudget = XHS_BODY_LIMIT - tagLength - (tags.length ? 2 : 0);
+  const body = clampXhsBody(copy.body.trim(), bodyBudget);
+  return { ...copy, title: clampXhsTitle(copy.title), body, tags };
+}
+
+function clampXhsBody(body: string, budget: number): string {
+  const characters = Array.from(body);
+  if (characters.length <= budget) return body;
+  const prefix = characters.slice(0, budget - 1).join('').trimEnd();
+  const minimumBoundary = Math.floor(budget * 0.6);
+  const boundaries = [
+    ...Array.from(prefix.matchAll(/\n\s*\n/g), match => match.index),
+    ...Array.from(prefix.matchAll(/[。！？!?](?:[”’」』）)\]]*)/g), match => match.index + match[0].length),
+  ];
+  const boundary = boundaries.filter(index => Array.from(prefix.slice(0, index)).length >= minimumBoundary)
+    .sort((a, b) => b - a)[0];
+  return boundary === undefined ? `${prefix}…` : prefix.slice(0, boundary).trimEnd();
+}
+
 export function createInitialXhsCopy(snapshot: MultiPublishSnapshot): XhsCopyDraft {
   const plain = toXhsPlainText(snapshot.markdown);
-  const body = plain.length > 900 ? `${plain.slice(0, 900).trim()}…` : plain;
   const tags = normalizeXhsTags(snapshot.tags.length ? snapshot.tags : inferTags(snapshot.markdown));
-  return {
+  return clampXhsCopy({
     title: clampXhsTitle(snapshot.title),
-    body,
+    body: plain,
     tags,
-  };
+  });
 }
 
 function inferTags(markdown: string): string[] {
@@ -77,10 +109,12 @@ export function buildXhsCopyPrompt(snapshot: MultiPublishSnapshot, requirement: 
     '要求：',
     '- 标题必须不超过 20 个 Unicode 字符。',
     '- 正文保留原文事实与核心观点，语言自然、具体、适合小红书阅读。',
+    '- 正文建议 600 到 900 字，内容较少时保持简洁，不为凑字数扩写。',
     '- 正文分段清楚，可使用少量自然的符号增强节奏。',
-    '- 标签 3 到 8 个，不要带 #。',
+    '- 标签 3 到 8 个，每个不超过 20 个 Unicode 字符，不要带 #。',
     '- 不虚构原文没有的数据、经历或结论。',
     requirement.trim() ? `用户自定义要求：${requirement.trim()}` : '',
+    `硬性限制：正文与话题拼接后的总字数必须不超过 ${XHS_BODY_LIMIT} 个 Unicode 字符；话题的 #、空格及正文与话题之间的两个换行也计入字数。此限制优先于用户自定义要求。`,
     '===== 原文 START =====',
     article,
     '===== 原文 END =====',
@@ -96,7 +130,7 @@ export function parseXhsCopyOutput(output: string): XhsCopyDraft | null {
     ? normalizeXhsTags(parsed.tags.filter((value): value is string => typeof value === 'string'))
     : [];
   if (!title || !body) return null;
-  return { title, body, tags };
+  return clampXhsCopy({ title, body, tags });
 }
 
 function parseJsonObject(output: string): Record<string, unknown> | null {

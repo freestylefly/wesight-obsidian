@@ -4,12 +4,17 @@ import feishuLogoUrl from '../../assets/feishu-logo.png';
 import { LarkCliError, type LarkCliService } from '../feishu/larkCli';
 import type { FeishuAuthProgress, FeishuConnectionState } from '../feishu/types';
 import { confirmShareAction } from './shareConfirm';
+import type { MultiPublishBridge } from '../multiPublish/bridge';
+import type { CloudAuthService } from '../share/cloudAuth';
+import { BrowserConnectorSettings } from './browserConnectorSettings';
 
 const LARK_CLI_INSTALL_URL = 'https://github.com/larksuite/cli#installation';
 
 interface ConnectorsSettingsOptions {
   app: App;
+  auth: CloudAuthService;
   larkCli: LarkCliService;
+  multiPublishBridge: MultiPublishBridge;
 }
 
 function formatAuthorizedAt(value: string | null): string {
@@ -24,8 +29,7 @@ function formatAuthorizedAt(value: string | null): string {
 }
 
 /**
- * 通用设置中的「连接器」区。目前只有飞书：授权一次后由插件后台保活，
- * 分享时直接复用，不需要每次重新扫码。
+ * 通用设置中的连接器，集中管理浏览器发布与飞书授权。
  */
 export class ConnectorsSettings {
   private container: HTMLElement | null = null;
@@ -35,8 +39,11 @@ export class ConnectorsSettings {
   private busy: string | null = null;
   private error: string | null = null;
   private unsubscribe: (() => void) | null = null;
+  private readonly browserConnector: BrowserConnectorSettings;
 
-  constructor(private readonly options: ConnectorsSettingsOptions) {}
+  constructor(private readonly options: ConnectorsSettingsOptions) {
+    this.browserConnector = new BrowserConnectorSettings({ app: options.app, auth: options.auth, bridge: options.multiPublishBridge });
+  }
 
   render(parent: HTMLElement): void {
     const section = parent.createDiv({ cls: 'wesight-settings-section wesight-connectors-settings' });
@@ -47,9 +54,11 @@ export class ConnectorsSettings {
     });
     this.container = section.createDiv({ cls: 'wesight-connector-card' });
     this.renderFeishu();
+    this.browserConnector.render(section);
   }
 
   activate(): void {
+    this.browserConnector.activate();
     if (!this.unsubscribe) {
       this.unsubscribe = this.options.larkCli.onProgress(progress => {
         if (!this.authProgress) return;
@@ -61,6 +70,7 @@ export class ConnectorsSettings {
   }
 
   dispose(): void {
+    this.browserConnector.dispose();
     this.unsubscribe?.();
     this.unsubscribe = null;
     if (this.authProgress) {
@@ -68,6 +78,10 @@ export class ConnectorsSettings {
       this.authProgress = null;
     }
     this.container = null;
+  }
+
+  focusBrowserConnector(): void {
+    this.browserConnector.focus();
   }
 
   private async refresh(): Promise<void> {

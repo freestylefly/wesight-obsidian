@@ -11,6 +11,7 @@ import { summarizeGitDiffs, type GitCommitDiff } from './commitMessage';
 import {
   DEFAULT_GIT_SYNC_SETTINGS,
   isSyncPathExcluded,
+  isAutomaticOfflineHistory,
   parseGitChanges,
   type GitSyncResult,
   type GitSyncSettings,
@@ -26,13 +27,26 @@ interface GitSyncDeps {
   env?: NodeJS.ProcessEnv;
   now?: () => number;
   notify?: (message: string) => void;
+  isOnline?: () => boolean;
   generateCommitMessage?: (diffs: GitCommitDiff[], signal: AbortSignal) => Promise<string>;
 }
 
 class GitCommandError extends Error {
-  constructor(readonly detail: string, readonly code?: string | number | null) {
+  constructor(readonly detail: string, readonly code?: string | number | null,
+    readonly remoteOperation = false, readonly timedOut = false) {
     super('Git 命令执行失败');
   }
+}
+
+class GitOfflineError extends Error {
+  constructor() { super('当前离线，请联网后再同步。'); }
+}
+
+function remoteNetworkError(error: unknown): boolean {
+  if (!(error instanceof GitCommandError) || !error.remoteOperation) return false;
+  const detail = error.detail.toLowerCase();
+  if (/authentication|permission denied|could not read username|terminal prompts disabled|invalid username|repository not found|certificate|ssl certificate|tls certificate|proxy authentication|returned error: (?:401|403|407)|pre-receive|hook declined/.test(detail)) return false;
+  return error.timedOut || /could not resolve|couldn't resolve|resolve host|resolve proxy|name or service not known|temporary failure in name resolution|network is unreachable|network is down|no route to host|failed to connect|couldn't connect|connection (?:refused|reset|closed|timed out)|operation timed out|connection timeout|econnrefused|econnreset|enetunreach|enotfound|etimedout|empty reply from server/.test(detail);
 }
 
 function friendlyError(error: unknown): string {
@@ -42,7 +56,7 @@ function friendlyError(error: unknown): string {
   if (/authentication|could not read username|permission denied|terminal prompts disabled|invalid username|repository not found/.test(detail)) {
     return 'GitHub 认证失败或无仓库权限，请检查本机 Git 登录凭据。';
   }
-  if (/resolve host|unable to access|could not resolve|network|connection|timed out|timeout/.test(detail)) {
+  if (remoteNetworkError(error)) {
     return '无法连接远程仓库，请检查网络；自动同步将在下次检查时重试。';
   }
   if (/index.lock|another git process/.test(detail)) return '仓库正被其他 Git 操作使用，请稍后重试。';
@@ -116,7 +130,11 @@ export class GitSyncService {
       if (record.settings) this.settings = this.normalizeSettings(record.settings);
       if (Array.isArray(record.history)) {
         this.state.history = record.history.filter(entry => typeof entry?.message === 'string'
-          && typeof entry?.at === 'number' && typeof entry?.action === 'string' && typeof entry?.ok === 'boolean').slice(0, 30);
+          && typeof entry?.at === 'number' && typeof entry?.action === 'string' && typeof entry?.ok === 'boolean')
+          .filter(entry => !isAutomaticOfflineHistory(entry)).slice(0, 30);
+        if (this.state.history.length !== record.history.length) {
+          try { this.persist(); } catch { /* Filtering the visible history still works in a read-only settings directory. */ }
+        }
       }
     }
     await this.refresh();
@@ -297,7 +315,7 @@ export class GitSyncService {
   }
 
   async tick(): Promise<void> {
-    if (this.disposed || this.running) return;
+    if (this.disposed || this.running || !this.online()) return;
     if (this.now() - this.lastLocalCheckAt >= 30_000) await this.refresh();
     if (this.disposed || this.running) return;
     const settings = this.settings;
@@ -313,19 +331,22 @@ export class GitSyncService {
 
   private async automate(onOpen: boolean, idle = false): Promise<void> {
     this.lastAutomaticAt = this.now();
+    if (!this.online()) return;
     const result = await this.perform('自动同步', async () => {
       await this.inspect();
       this.requireRepository();
       this.requireAutomaticTarget();
       this.requireNoConflict();
-      if (!onOpen && this.settings.autoCommit && idle) await this.commitChanges();
+      if (!this.online()) throw new GitOfflineError();
       if (onOpen || this.settings.autoPull || this.settings.autoPush) {
         // Fetch even for push-only mode so remote changes cannot be silently overwritten.
         await this.fetch();
         await this.inspect();
         this.requireAutomaticTarget();
-        if (onOpen || this.settings.autoPull) await this.mergeRemote();
       }
+      if (!this.online()) throw new GitOfflineError();
+      if (!onOpen && this.settings.autoCommit && idle) await this.commitChanges();
+      if (onOpen || this.settings.autoPull) await this.mergeRemote();
       if (!onOpen && this.settings.autoPush) {
         await this.inspect();
         this.requireAutomaticTarget();
@@ -335,6 +356,7 @@ export class GitSyncService {
       }
       return '自动同步完成。';
     }, true, true);
+    if (result.skipped) return;
     if (!result.ok && result.message !== this.lastAutoError && !this.disposed) {
       this.deps.notify?.(`仓库同步：${result.message}`);
       this.lastAutoError = result.message;
@@ -352,13 +374,17 @@ export class GitSyncService {
       try {
         result = { ok: true, message: await work() };
       } catch (error) {
-        result = { ok: false, message: friendlyError(error) };
-        if (!this.disposed) {
-          try { await this.inspect(); } catch { /* Keep the last known snapshot. */ }
-          this.state.error = result.message;
+        if (automatic && (error instanceof GitOfflineError || remoteNetworkError(error))) {
+          result = { ok: true, skipped: true, message: '当前离线，已跳过自动同步。' };
+        } else {
+          result = { ok: false, message: friendlyError(error) };
+          if (!this.disposed) {
+            try { await this.inspect(); } catch { /* Keep the last known snapshot. */ }
+            this.state.error = result.message;
+          }
         }
       }
-      if (!this.disposed && record) {
+      if (!this.disposed && record && !result.skipped) {
         // Routine automatic successes with no changes do not fill the history.
         if (!automatic || !result.ok || this.state.history[0]?.action !== action) {
           this.state.history.unshift({ at: this.now(), action, ...result });
@@ -381,16 +407,22 @@ export class GitSyncService {
   private async git(args: string[], cwd = this.state.root ?? this.vaultPath): Promise<string> {
     if (!cwd) throw new Error('Git 同步仅支持桌面端本地知识库。');
     if (this.disposed) throw new Error('Git 同步已停止。');
+    const remoteOperation = ['fetch', 'push', 'ls-remote'].includes(args[0]);
+    if (remoteOperation && !this.online()) throw new GitOfflineError();
     return new Promise((resolve, reject) => {
       execFile(this.deps.gitPath ?? 'git', ['--literal-pathspecs', '-c', 'core.quotePath=false', ...args], {
         cwd, env: this.env, encoding: 'utf8', timeout: 60_000, maxBuffer: 16 * 1024 * 1024,
         windowsHide: true, shell: false, signal: this.abort.signal,
       }, (error, stdout, stderr) => {
-        if (error) reject(new GitCommandError(`${stderr}\n${stdout}\n${error.message}`, error.code));
+        if (error) reject(new GitCommandError(`${stderr}\n${stdout}\n${error.message}`, error.code,
+          remoteOperation, error.killed === true && error.signal === 'SIGTERM'
+            && error.code !== 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' && !this.abort.signal.aborted));
         else resolve(stdout);
       });
     });
   }
+
+  private online(): boolean { return this.deps.isOnline?.() !== false; }
 
   private async inspect(): Promise<void> {
     this.lastLocalCheckAt = this.now();

@@ -6,6 +6,7 @@ import {
   clampJikePostBody,
   createInitialJikePostCopy,
   JIKE_POST_BODY_LIMIT,
+  JIKE_POST_GENERATED_COPY_LIMIT,
   normalizeJikeTopics,
   parseJikePostCopyOutput,
 } from '../src/jikePost/copy';
@@ -38,6 +39,9 @@ describe('jike post copy', () => {
     expect(prompt).toContain('一句判断、两个依据、一个开放问题');
     expect(prompt).toContain('保留三个具体场景');
     expect(prompt).toContain(snapshot.markdown);
+    expect(prompt).toContain('600 到 900 字');
+    expect(prompt).toContain('空格和空行合计不超过 1000');
+    expect(prompt).toContain('用户自定义要求不能放宽字数限制');
   });
 
   test('parses JSON and clamps body, topics, and circle', () => {
@@ -48,10 +52,34 @@ describe('jike post copy', () => {
     });
     const parsed = parseJikePostCopyOutput(output, 'casual');
     expect(Array.from(buildJikePostText(parsed?.body ?? '', parsed?.topics ?? [])).length)
-      .toBeLessThanOrEqual(JIKE_POST_BODY_LIMIT);
+      .toBeLessThanOrEqual(JIKE_POST_GENERATED_COPY_LIMIT);
     expect(parsed?.topics).toEqual(['AI', '互动娱乐']);
     expect(Array.from(parsed?.circle ?? '').length).toBeLessThanOrEqual(30);
     expect(parsed?.tone).toBe('casual');
+  });
+
+  test('preserves an exact 1000-character result and a short result', () => {
+    const exactBody = '甲'.repeat(JIKE_POST_GENERATED_COPY_LIMIT);
+    expect(parseJikePostCopyOutput(JSON.stringify({ body: exactBody, topics: [] }), 'experience'))
+      .toEqual({ body: exactBody, topics: [], tone: 'experience', circle: 'AI 探索站' });
+    expect(parseJikePostCopyOutput(JSON.stringify({ body: '第一段\n\n第二段', topics: ['AI'] }), 'casual'))
+      .toEqual({ body: '第一段\n\n第二段', topics: ['AI'], tone: 'casual', circle: 'AI 探索站' });
+  });
+
+  test('counts emoji once and reserves the rendered topic and separator budget', () => {
+    const parsed = parseJikePostCopyOutput(JSON.stringify({
+      body: '😀'.repeat(JIKE_POST_GENERATED_COPY_LIMIT + 10),
+      topics: ['AI', '效率'],
+    }), 'opinion');
+    const text = buildJikePostText(parsed?.body ?? '', parsed?.topics ?? []);
+    expect(Array.from(text)).toHaveLength(JIKE_POST_GENERATED_COPY_LIMIT);
+    expect(text.endsWith('\n\n#AI# #效率#')).toBe(true);
+    expect(Array.from(parsed?.body ?? '').every(character => character === '😀')).toBe(true);
+  });
+
+  test('retains the manual 2000-character editor limit', () => {
+    expect(JIKE_POST_BODY_LIMIT).toBe(2000);
+    expect(Array.from(clampJikePostBody('甲'.repeat(2001)))).toHaveLength(2000);
   });
 
   test('preserves intentional line breaks and renders topics', () => {

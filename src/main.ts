@@ -36,6 +36,8 @@ import { CloudAuthService } from './share/cloudAuth';
 import { ShareCloudApi } from './share/cloudApi';
 import { LarkCliService } from './feishu/larkCli';
 import { SharePopoverController } from './ui/sharePopover';
+import { resolveMultiPublishAccess } from './multiPublish/access';
+import { requireMemberFeature } from './ui/memberFeatureGate';
 import { MultiPublishBridge } from './multiPublish/bridge';
 import { MULTI_PLATFORM_IDS } from './multiPublish/types';
 import { XiaohongshuGenerationService } from './xiaohongshu/generationService';
@@ -121,6 +123,7 @@ export default class WeSightPlugin extends Plugin {
     this.gitSync = new GitSyncService({
       vaultPath: getVaultBasePath(this.app),
       configDir: this.app.vault.configDir,
+      isOnline: () => navigator.onLine,
       notify: message => { new Notice(message, 10_000); },
       generateCommitMessage: (diffs, signal) => generateAiCommitMessage(this.runtimeManager, this.settings, diffs, signal),
     });
@@ -169,6 +172,30 @@ export default class WeSightPlugin extends Plugin {
       getSettings: () => this.settings,
     });
     this.multiPublishBridge = new MultiPublishBridge({
+      getUser: () => this.cloudAuth.getCurrentUser(),
+      getBilling: () => {
+        const billing = this.cloudAuth.getCurrentUser() ? this.cloudAuth.getBillingSummary() : null;
+        return billing ? {
+          active: billing.membership.active,
+          credits: billing.totalCreditsRemaining,
+          planName: billing.membership.planName,
+          expiresAt: billing.membership.expiresAt,
+        } : null;
+      },
+      getAccess: async () => {
+        const user = await this.cloudAuth.restoreSession();
+        if (!user) return resolveMultiPublishAccess(null, null);
+        try {
+          const billing = await this.cloudAuth.refreshBillingSummary(false);
+          if (this.cloudAuth.getCurrentUser()?.userId !== user.userId) {
+            throw new Error('WeSight 账号已变更，请重试。');
+          }
+          return resolveMultiPublishAccess(user, billing);
+        } catch (error) {
+          if (!this.cloudAuth.getCurrentUser()) return resolveMultiPublishAccess(null, null);
+          throw error;
+        }
+      },
       getPairing: () => this.settings.multiPublishPairing,
       savePairing: async (pairing) => {
         this.settings.multiPublishPairing = pairing;
@@ -188,6 +215,7 @@ export default class WeSightPlugin extends Plugin {
       () => this.openSettings('general'),
       (file) => this.activateWeChatPreview(file),
       (file) => this.activateWeChatArticleStats(file),
+      () => this.openSettings('browserConnector'),
     );
     this.knowledgeBrain = new KnowledgeBrain({
       getRuntimeConfig: agentId => this.settings.configSources[agentId] === 'wesightManaged'
@@ -223,6 +251,9 @@ export default class WeSightPlugin extends Plugin {
         claudeInstaller: this.claudeInstaller,
         openSettings: () => this.openSettings(),
         openImageTextWorkbench: (file: TFile) => this.activateXiaohongshuWorkbench(file),
+        openMultiPublish: (file: TFile, anchor?: HTMLElement | null) => {
+          this.sharePopover.open(file, anchor ?? null, 'multi-platform');
+        },
         openWeChatPreview: (file?: TFile) => {
           if (!file) {
             new Notice('没有打开的笔记，无法预览公众号。');
@@ -262,6 +293,7 @@ export default class WeSightPlugin extends Plugin {
         jikePostDraftStore: this.jikePostDraftStore,
         vaultStore: this.vaultStore,
         openSettings: () => this.openSettings('general'),
+        openBrowserConnector: () => this.openSettings('browserConnector'),
       }),
     );
    this.registerView(
@@ -488,6 +520,7 @@ export default class WeSightPlugin extends Plugin {
       knowledgeBrainEntitlement: this.knowledgeBrainEntitlement,
       larkCli: this.larkCli,
       gitSync: this.gitSync,
+      multiPublishBridge: this.multiPublishBridge,
     });
     this.addSettingTab(this.settingTab);
   }
@@ -579,6 +612,7 @@ export default class WeSightPlugin extends Plugin {
   }
 
   async activateXiaohongshuWorkbench(file: TFile): Promise<void> {
+    if (!await requireMemberFeature(this.app, this.cloudAuth, '转为图文')) return;
     let leaf: WorkspaceLeaf | null =
       this.app.workspace.getLeavesOfType(WESIGHT_XIAOHONGSHU_VIEW_TYPE)[0] ?? null;
     if (!leaf) {
@@ -686,12 +720,13 @@ export default class WeSightPlugin extends Plugin {
     ).open();
     return false;
   }
-  private openSettings(tab?: 'general' | 'gitSync'): void {
+  private openSettings(tab?: 'general' | 'gitSync' | 'browserConnector'): void {
     const setting = (this.app as AppWithSettings).setting;
     if (setting) {
       setting.open();
       setting.openTabById(this.manifest.id);
-      if (tab) this.settingTab?.openTab(tab);
+      if (tab === 'browserConnector') this.settingTab?.openBrowserConnector();
+      else if (tab) this.settingTab?.openTab(tab);
     } else {
       new Notice('Open settings and choose WeSight.');
     }

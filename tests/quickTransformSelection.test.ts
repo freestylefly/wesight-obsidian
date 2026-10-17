@@ -10,8 +10,8 @@ import {
 } from '../src/quickTransform/selection';
 
 describe('quick transform selection', () => {
-  test('defines the three short-form platforms in the intended order', () => {
-    expect(QUICK_TRANSFORM_PLATFORM_IDS).toEqual(['xiaohongshu', 'weibo-post', 'jike-post']);
+  test('defines all four short-form platforms in the intended order', () => {
+    expect(QUICK_TRANSFORM_PLATFORM_IDS).toEqual(['xiaohongshu', 'weibo-post', 'jike-post', 'x-post']);
   });
 
   test('restores a saved three-platform choice while login details are still loading', () => {
@@ -27,7 +27,7 @@ describe('quick transform selection', () => {
       'single-platform',
     )).toEqual(['xiaohongshu']);
     expect(restoreQuickTransformPlatformIds(undefined, 'multi-platform'))
-      .toEqual(['xiaohongshu', 'weibo-post', 'jike-post']);
+      .toEqual(['xiaohongshu', 'weibo-post', 'jike-post', 'x-post']);
   });
 
   test('removes unsupported and duplicate saved platform ids', () => {

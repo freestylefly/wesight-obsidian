@@ -9,6 +9,7 @@ import {
 } from '../weiboPost/copy';
 import type { WeiboPostCopyDraft } from '../weiboPost/types';
 import type { XhsCopyDraft } from '../xiaohongshu/types';
+import { XHS_BODY_LIMIT } from '../xiaohongshu/copy';
 
 export const QUICK_TRANSFORM_COPY_MODES = ['shared', 'platform'] as const;
 
@@ -26,9 +27,10 @@ export function sharedCopyToWeibo(
   shared: XhsCopyDraft,
   current: WeiboPostCopyDraft,
 ): WeiboPostCopyDraft {
+  const topics = normalizeWeiboTopics(shared.tags);
   return {
-    body: clampWeiboPostBody(shared.body),
-    topics: normalizeWeiboTopics(shared.tags),
+    body: clampSharedBody(clampWeiboPostBody(shared.body), topics),
+    topics,
     tone: current.tone,
   };
 }
@@ -37,12 +39,19 @@ export function sharedCopyToJike(
   shared: XhsCopyDraft,
   current: JikePostCopyDraft,
 ): JikePostCopyDraft {
+  const topics = normalizeJikeTopics(shared.tags);
   return {
-    body: clampJikePostBody(shared.body),
-    topics: normalizeJikeTopics(shared.tags),
+    body: clampSharedBody(clampJikePostBody(shared.body), topics),
+    topics,
     tone: current.tone,
     circle: current.circle,
   };
+}
+
+function clampSharedBody(body: string, topics: string[]): string {
+  const suffix = topics.map(topic => `#${topic}#`).join(' ');
+  const budget = XHS_BODY_LIMIT - (suffix ? Array.from(suffix).length + 2 : 0);
+  return Array.from(body).slice(0, Math.max(0, budget)).join('').trim();
 }
 
 export function parseQuickTopics(value: string): string[] {

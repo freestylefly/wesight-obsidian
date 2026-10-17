@@ -13,9 +13,9 @@ WeSight detects existing executables from the configured path, the system path, 
 
 ## Features
 
-### 1.3.0 release
+### 1.4.0 release
 
-The [1.3.0 update](docs/releases/1.3.0.md) adds GitHub collaboration, selectable manual commits, local and AI-generated commit messages, Feishu connector settings and session refresh, and first-install sidebar opening. Use **版本更新说明** in the avatar menu or general settings to read this release and recent version changes offline.
+The [1.4.0 update](docs/releases/1.4.0.md) adds the browser dynamic publishing center, X posts in quick conversion, centralized browser connector settings, and membership checks for conversion and browser handoff. It also improves generated copy limits and skips automatic Git sync while offline. Update the [browser publishing assistant to 1.1.0](https://github.com/freestylefly/wesight-chrome/releases/tag/v1.1.0) alongside the plugin. Use **版本更新说明** in the avatar menu or general settings to read this release and recent version changes offline.
 
 ### GitHub team collaboration
 
@@ -23,19 +23,25 @@ The WeSight avatar menu provides current-repository status, **立即拉取**, **
 
 ### Article-to-social workbench (1.0.0)
 
-Use **转为图文** in the WeSight header, note toolbar, file menu, or command palette to open the right-side workbench while keeping the original note visible. **快速转** prepares Xiaohongshu, Weibo image posts, and Jike posts with shared or platform-specific copy. Review copy in place, select/reorder original article images, or open a platform tab for detailed editing.
+**转为图文** and connecting the browser publishing assistant require an active WeSight membership. Free and expired accounts receive a membership prompt with a link to recharge. Membership is refreshed before generation, connecting, and publishing; existing paired connections and task links also require membership when handing off content.
+
+Use **转为图文** in the WeSight header, note toolbar, file menu, or command palette to open the right-side workbench while keeping the original note visible. **快速转** prepares Xiaohongshu, Weibo image posts, Jike posts, and X posts with shared or platform-specific copy. X gets complete short sentences within its 280 weighted-character limit, including topics; Chinese characters usually count as two. Its first four supported PNG/JPEG/WebP images are sent, up to 5 MB each, with skipped images reported and other platforms left intact. Review and edit copy in place and select/reorder original article images. The one-click publishing action opens the browser extension's **动态** composer with each platform's copy, images, and Jike circle preserved; start syncing there when ready. The extension also supports creating dynamics directly with text, images, or a video, without connecting Obsidian.
+
+Generated social copy targets 600–900 characters and stays within 1,000 characters including topics, spaces, and line breaks. The Xiaohongshu editor shows the combined count and blocks syncing overlong manual edits so the text can be shortened before sending.
+
+Connect the browser publishing assistant in **Settings → WeSight → General → Connectors**. Installation instructions, connection status, reconnecting, and updates are available there. Sending content with no active connection opens this settings card and keeps the generated copy and images. Connecting pairs the extension without sending a note or creating a publishing task.
 
 The Xiaohongshu image workspace offers local typography templates and a separate AI-image gallery with style selection, reference images, aspect ratios, single-image regeneration, and ordering. Generation uses your configured compatible agent/provider; AI image generation requires image-generation support. Inputs may be sent to that provider according to its configuration. Local drafts and generated assets are stored under `.wesight/` in the vault.
 
-Signed-in free users can convert and prepare one platform at a time. Active members can select multiple platforms. Attempting a second free-user selection shows an inline membership notice without losing edited text or images; initial entry has no membership prompt.
+An active membership is required for both single-platform and multi-platform conversion and browser handoff. Free and expired accounts see a prompt with **去充值会员**, which opens the existing membership checkout. Edited text, images, and saved tasks stay available for use after renewal.
 
 ### Browser-assisted platform drafts (1.0.0)
 
-**分享 → 多平台** supports Zhihu, CSDN, Juejin, Bilibili articles, Toutiao, and Weibo articles. The social workbench additionally prepares Xiaohongshu image posts, Weibo image posts, and Jike posts.
+**分享 → 多平台** opens the browser's **WeSight publish center** with the current note already imported. In the publish center you can adjust the title, summary, cover, and Markdown body, then tick Zhihu, CSDN, Juejin, Bilibili articles, Toutiao, Weibo articles, or X Articles and start syncing. The publish center also imports local `.md` files (select the images alongside them) and article links. The social workbench additionally prepares Xiaohongshu image posts, Weibo image posts, and Jike posts.
 
-Install [WeSight Publish Assistant 1.0.0 or later](https://github.com/freestylefly/wesight-chrome/releases) in Chrome, Edge, or Arc and follow the one-time local pairing flow. The plugin starts a temporary HTTP service bound only to `127.0.0.1`; task access expires after ten minutes. Article and image transfer to the extension does not use WeSight Cloud. The extension then uploads to the platforms you chose using the browser's existing signed-in session. Keep Obsidian open until preparation completes.
+Install the latest [WeSight Publish Assistant](https://github.com/freestylefly/wesight-chrome/releases) in Chrome, Edge, or Arc and follow the one-time local pairing flow; older extension versions are asked to update. The plugin starts a temporary HTTP service bound only to `127.0.0.1`. The article handoff expires after ten minutes, and sync progress is reported back to Obsidian for two hours. Article and image transfer to the extension does not use WeSight Cloud. The extension keeps the current publish-center draft in its local browser storage and uploads to the platforms you choose using the browser's existing signed-in session. The extension uses the same WeSight account system and displays the verified profile in its header. Free users sync one platform at a time; members can select several. The extension restores your previous platform choices, uses the first body image as the default cover, previews with the Canghe green theme, and checks X’s 15-image limit only when X is selected. Leading publication badges are removed from the publishing copy.
 
-The task panel supports status, editor links, login recovery, and retries. All workflows stop at an editable draft: **you perform the final Publish action**. The existing WeChat draft service continues separately.
+The publish center shows per-platform status, editor links, login recovery, and retries. All workflows stop at an editable draft: **you perform the final Publish action**. The existing WeChat draft service continues separately.
 
 ### 词元API and grouped model selection
 

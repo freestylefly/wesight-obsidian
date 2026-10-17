@@ -1,7 +1,7 @@
 import { App, Menu, MenuItem, Modal, Notice, Setting, type TextAreaComponent } from 'obsidian';
 
 import type { GitSyncService } from '../gitSync/service';
-import { gitSyncSummary, type GitSyncResult } from '../gitSync/types';
+import { gitSyncSummary, isAutomaticOfflineHistory, type GitSyncResult } from '../gitSync/types';
 
 export async function runGitSyncAction(action: () => Promise<GitSyncResult>): Promise<void> {
   const progress = new Notice('正在执行仓库同步…', 0);
@@ -268,7 +268,7 @@ export class GitSyncCommitModal extends Modal {
 
 function renderGitHistory(container: HTMLElement, service: GitSyncService): void {
   container.empty();
-  const history = service.getState().history;
+  const history = service.getState().history.filter(entry => !isAutomaticOfflineHistory(entry));
   if (!history.length) container.createDiv({ cls: 'wesight-git-detail', text: '尚无同步记录。' });
   for (const entry of history) {
     const row = container.createDiv({ cls: 'wesight-git-history-entry' });

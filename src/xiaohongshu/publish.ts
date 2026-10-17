@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import path from 'path';
 
 import type { MultiPublishSnapshot } from '../multiPublish/types';
-import { XHS_TITLE_LIMIT } from './copy';
+import { buildXhsPostText, XHS_BODY_LIMIT, XHS_TITLE_LIMIT } from './copy';
 import type { XhsCopyDraft, XhsGeneratedPage } from './types';
 
 const MAX_ASSET_BYTES = 10 * 1024 * 1024;
@@ -27,6 +27,9 @@ export function validateXiaohongshuPublishInput(
     errors.push(`小红书标题不能超过 ${XHS_TITLE_LIMIT} 个字符`);
   }
   if (!copy.body.trim()) errors.push('请先填写小红书正文');
+  if (Array.from(buildXhsPostText(copy.body, copy.tags)).length > XHS_BODY_LIMIT) {
+    errors.push(`小红书正文和话题合计不能超过 ${XHS_BODY_LIMIT} 字，请精简后再同步`);
+  }
   if (pages.length !== pageCount) errors.push(`请先生成完整图片（当前 ${pages.length}/${pageCount} 张）`);
   const pageNumbers = new Set(pages.map(page => page.pageNumber));
   for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {

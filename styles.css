@@ -45,6 +45,7 @@ body.theme-light .wesight-view {
   position: relative;
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 8px;
   padding: 0 12px 12px;
 }
@@ -53,7 +54,7 @@ body.theme-light .wesight-view {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1;
+  flex: 1 0 auto;
   min-width: 0;
 }
 
@@ -69,11 +70,13 @@ body.theme-light .wesight-view {
   font-size: 14px;
   line-height: 1.2;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .wesight-header-actions {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 8px;
   flex: 0 0 auto;
   margin-inline-start: auto;
@@ -86,46 +89,118 @@ body.theme-light .wesight-view {
   margin-inline: 2px;
 }
 
+button.wesight-multi-publish-btn,
 button.wesight-transform-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 28px;
+  justify-content: center;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  gap: 5px;
+  box-shadow: none;
+  cursor: pointer;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+button.wesight-multi-publish-btn {
+  height: 30px;
   padding: 0 10px;
   border: 1px solid #d97757;
   border-radius: 7px;
   background: #d97757;
   color: #fff;
-  box-shadow: none;
-  cursor: pointer;
   font-size: 13px;
   font-weight: 600;
-  white-space: nowrap;
 }
 
-button.wesight-transform-btn:hover { background: #c56547; border-color: #c56547; }
-button.wesight-transform-btn:focus-visible { outline: 2px solid var(--text-normal); outline-offset: 2px; }
-.wesight-transform-icon { display: flex; flex: 0 0 auto; }
-.wesight-transform-icon svg { width: 16px; height: 16px; stroke-width: 1.75px; }
+button.wesight-multi-publish-btn:hover { background: #c56547; border-color: #c56547; }
+button.wesight-multi-publish-btn:disabled { opacity: 0.65; cursor: progress; }
+button.wesight-transform-btn {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+button.wesight-transform-btn:hover {
+  border-color: var(--background-modifier-border-hover);
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.wesight-header button:focus-visible { outline: 2px solid var(--text-normal); outline-offset: 2px; }
+.wesight-multi-publish-icon,
+.wesight-transform-icon { display: flex; align-items: center; flex: 0 0 auto; }
+.wesight-multi-publish-icon svg { width: 16px; height: 16px; stroke-width: 1.75px; }
+.wesight-transform-icon svg { width: 14px; height: 14px; stroke-width: 1.75px; }
+.wesight-multi-publish-label { white-space: nowrap; }
 .wesight-header button.wesight-wechat-publish-btn,
 .wesight-header button.wesight-share-btn { border-radius: 7px; white-space: nowrap; }
 
-@container wesight-chat (max-width: 540px) {
+@container wesight-chat (max-width: 700px) {
+  .wesight-header-actions { gap: 6px; }
   .wesight-header .wesight-wechat-publish-label,
   .wesight-header .wesight-share-btn-label { display: none; }
   .wesight-header button.wesight-wechat-publish-btn,
   .wesight-header button.wesight-share-btn { padding-inline: 6px; }
 }
 
-@container wesight-chat (max-width: 380px) {
-  .wesight-header .wesight-title-text { display: none; }
-  .wesight-header-actions { gap: 6px; }
-  .wesight-header { padding-inline: 8px; }
+@container wesight-chat (max-width: 600px) {
+  .wesight-header:has(.wesight-login-button) .wesight-title-text,
+  .wesight-header:has(.wesight-header-update-button) .wesight-title-text { display: none; }
 }
 
-@container wesight-chat (max-width: 320px) {
-  .wesight-transform-label { display: none; }
-  button.wesight-transform-btn { padding-inline: 6px; }
+@container wesight-chat (max-width: 500px) {
+  .wesight-header-actions { gap: 4px; }
+  .wesight-header { padding-inline: 8px; }
+  .wesight-header .wesight-account-slot { gap: 3px; }
+  .wesight-header button.wesight-login-button,
+  .wesight-header button.wesight-header-update-button { padding-inline: 4px; }
+}
+
+@container wesight-chat (max-width: 450px) {
+  .wesight-header .wesight-transform-label { display: none; }
+  .wesight-header button.wesight-transform-btn { padding-inline: 5px; }
+}
+
+@container wesight-chat (max-width: 420px) {
+  .wesight-header .wesight-title-text { display: none; }
+  .wesight-header-actions { gap: 4px; }
+  .wesight-header { padding-inline: 8px; }
+  .wesight-header button.wesight-multi-publish-btn { padding-inline: 8px; }
+  .wesight-header button.wesight-wechat-publish-btn,
+  .wesight-header button.wesight-share-btn { padding-inline: 4px; }
+  .wesight-header-action-divider { margin-inline: 0; }
+  .wesight-header .wesight-account-slot { gap: 3px; }
+  .wesight-header button.wesight-login-button,
+  .wesight-header button.wesight-header-update-button { padding-inline: 4px; }
+}
+
+@container wesight-chat (max-width: 380px) {
+  .wesight-header { gap: 4px; }
+  .wesight-header-actions { gap: 3px; }
+  .wesight-header-action-divider { display: none; }
+  .wesight-header button.wesight-multi-publish-btn { padding-inline: 7px; }
+  .wesight-header button.wesight-transform-btn { padding-inline: 4px; }
+  .wesight-header button.wesight-wechat-publish-btn,
+  .wesight-header button.wesight-share-btn { padding-inline: 3px; }
+}
+
+@container wesight-chat (max-width: 360px) {
+  .wesight-header .wesight-title-slot { display: none; }
+  .wesight-header { gap: 0; padding-inline: 6px; }
+  .wesight-header-actions { gap: 2px; margin-inline-start: 0; }
+  .wesight-header button.wesight-multi-publish-btn { padding-inline: 6px; font-size: 12px; }
+  .wesight-header button.wesight-transform-btn { padding-inline: 3px; }
+  .wesight-header button.wesight-wechat-publish-btn,
+  .wesight-header button.wesight-share-btn { padding-inline: 3px; }
+  .wesight-header button.wesight-login-button,
+  .wesight-header button.wesight-header-update-button { padding-inline: 2px; font-size: 11px; }
 }
 
 .wesight-runtime-status {
@@ -3822,6 +3897,7 @@ button.wesight-quick-image.is-selected .wesight-quick-image-check {
 
 .wesight-quick-copy-tabs {
   display: flex;
+  overflow-x: auto;
   align-items: flex-end;
   gap: 6px;
   margin-top: 3px;
@@ -3830,6 +3906,7 @@ button.wesight-quick-image.is-selected .wesight-quick-image-check {
 .wesight-quick-copy-tabs > button {
   position: relative;
   display: inline-flex;
+  flex-shrink: 0;
   min-width: 96px;
   min-height: 34px;
   align-items: center;
@@ -3951,6 +4028,11 @@ button.wesight-quick-image.is-selected .wesight-quick-image-check {
   font-size: 9px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.wesight-quick-copy-meta > span.is-over-limit,
+.wesight-xhs-field-label > span.is-over-limit {
+  color: var(--text-error);
 }
 
 .wesight-quick-copy-hint {
@@ -9911,6 +9993,54 @@ button.wesight-picker-manage { flex-shrink: 0; margin-top: 8px; padding: 8px 4px
   gap: 10px;
 }
 
+.wesight-connectors-settings > .wesight-connector-card + .wesight-connector-card {
+  margin-top: 12px;
+}
+
+.wesight-browser-connector:focus {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 3px;
+}
+
+.wesight-browser-install-guide {
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 10px;
+}
+
+.wesight-browser-install-guide summary {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--font-ui-small);
+}
+
+.wesight-browser-install-guide ol {
+  padding-left: 22px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.wesight-browser-install-guide li + li {
+  margin-top: 7px;
+}
+
+.wesight-browser-install-guide > .wesight-connector-note {
+  margin-top: 10px;
+}
+
+@media (max-width: 620px) {
+  .wesight-browser-connector .wesight-connector-header {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .wesight-browser-connector .wesight-connector-header > .wesight-connector-actions {
+    grid-column: 2;
+  }
+
+  .wesight-browser-connector .wesight-connector-title {
+    flex-wrap: wrap;
+  }
+}
+
 /* Current-vault Git collaboration, shared by settings and the avatar menu. */
 .wesight-git-menu-repo {
   display: flex;
@@ -9976,3 +10106,74 @@ button.wesight-picker-manage { flex-shrink: 0; margin-top: 8px; padding: 8px 4px
 .wesight-release-notes select { max-width: 100%; }
 .wesight-release-notes-body { overflow-wrap: anywhere; }
 .wesight-release-notes-body h1 { font-size: var(--h2-size); }
+
+.wesight-multi-handoff {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(217, 119, 87, 0.3);
+  border-radius: 11px;
+  background: linear-gradient(135deg, rgba(217, 119, 87, 0.09), rgba(217, 119, 87, 0.02));
+}
+
+.wesight-multi-handoff.is-sent {
+  border-color: rgba(46, 167, 101, 0.28);
+  background: linear-gradient(135deg, rgba(46, 167, 101, 0.08), rgba(46, 167, 101, 0.02));
+}
+
+.wesight-multi-handoff-heading {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  align-items: center;
+  gap: 9px;
+}
+
+.wesight-multi-handoff-heading > span {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(217, 119, 87, 0.14);
+  color: #d97757;
+}
+
+.wesight-multi-handoff.is-sent .wesight-multi-handoff-heading > span {
+  background: rgba(46, 167, 101, 0.14);
+  color: #278151;
+}
+
+.wesight-multi-handoff-heading > span svg {
+  width: 17px;
+}
+
+.wesight-multi-handoff-heading > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.wesight-multi-handoff-heading strong {
+  font-size: 13px;
+}
+
+.wesight-multi-handoff-heading > div span {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.wesight-multi-handoff-steps {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.wesight-multi-handoff-actions {
+  display: grid;
+  gap: 6px;
+}

@@ -45,6 +45,7 @@ export class SharePopoverController {
     private readonly openWeChatSettings: () => void,
     private readonly openWeChatPreview: (file: TFile) => Promise<void>,
     private readonly openWeChatArticleStats: (file: TFile) => Promise<void>,
+    private readonly openBrowserConnector: () => void,
   ) {}
 
   open(
@@ -52,6 +53,11 @@ export class SharePopoverController {
     anchor?: HTMLElement | null,
     initialTab: SharePopoverTab = 'internet',
   ): void {
+    if (initialTab === 'multi-platform' && !this.multiPublishBridge.getConnectionState().connected) {
+      this.current?.close();
+      this.openBrowserConnector();
+      return;
+    }
     this.current?.close();
     this.current = new SharePopover(
       this.app,
@@ -65,6 +71,7 @@ export class SharePopoverController {
       this.openWeChatSettings,
       this.openWeChatPreview,
       this.openWeChatArticleStats,
+      this.openBrowserConnector,
       file,
       anchor ?? null,
       initialTab,
@@ -115,6 +122,7 @@ class SharePopover {
     openWeChatSettings: () => void,
     openWeChatPreview: (file: TFile) => Promise<void>,
     openWeChatArticleStats: (file: TFile) => Promise<void>,
+    openBrowserConnector: () => void,
     private readonly file: TFile,
     private readonly anchor: HTMLElement | null,
     private activeTab: SharePopoverTab,
@@ -150,6 +158,7 @@ class SharePopover {
       app,
       auth,
       bridge: multiPublishBridge,
+      openBrowserConnector: () => { this.close(); openBrowserConnector(); },
       file,
       getSettings,
       saveSettings,
@@ -180,7 +189,7 @@ class SharePopover {
       } else if (this.activeTab === 'internet') {
         void this.load();
       } else if (this.activeTab === 'multi-platform') {
-        this.multiPublishPanel.activate(true);
+        void this.multiPublishPanel.activate(true);
         this.render();
       }
     });
@@ -191,7 +200,7 @@ class SharePopover {
     } else if (this.activeTab === 'wechat') {
       this.wechatPanel.activate();
     } else if (this.activeTab === 'multi-platform') {
-      this.multiPublishPanel.activate();
+      void this.multiPublishPanel.activate();
     } else {
       void this.load();
     }
@@ -331,7 +340,7 @@ class SharePopover {
         } else if (option.id === 'wechat') {
           this.wechatPanel.activate();
         } else if (option.id === 'multi-platform') {
-          this.multiPublishPanel.activate();
+          void this.multiPublishPanel.activate();
         } else if (!this.snapshot && !this.loading) {
           void this.load();
         }

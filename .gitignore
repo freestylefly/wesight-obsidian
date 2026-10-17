@@ -21,6 +21,8 @@ AGENTS.md
 meta_short_drama/
 
 # Design QA and agent run artifacts
+output/
+shots/
 design-qa*.md
 design-qa*.png
 design-qa*.jpeg

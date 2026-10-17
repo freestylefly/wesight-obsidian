@@ -64,10 +64,10 @@ describe('quick transform inline membership prompt', () => {
     expect(view.quickCompleted).toBe(1);
   });
 
-  test('allows members to select all three platforms without a prompt', () => {
+  test('allows members to select all four platforms without a prompt', () => {
     const { view } = fixture(true);
-    view.toggleQuickTarget('weibo-post'); view.toggleQuickTarget('jike-post');
-    expect(view.quickTargets.size).toBe(3);
+    view.toggleQuickTarget('weibo-post'); view.toggleQuickTarget('jike-post'); view.toggleQuickTarget('x-post');
+    expect(view.quickTargets.size).toBe(4);
     expect(view.quickMembershipNotice).toBe(false);
   });
 
@@ -101,7 +101,7 @@ describe('quick transform inline membership prompt', () => {
     const root = new ElementStub();
     view.renderQuickMembershipNotice(root as unknown as HTMLElement);
     expect(root.children[0].options.attr).toMatchObject({ role: 'status', 'aria-live': 'polite' });
-    root.all().find(el => el.options.text === '继续单平台')!.onclick!();
+    root.all().find(el => el.options.text === '稍后再说')!.onclick!();
     expect(view.quickMembershipNotice).toBe(false);
     expect(root.children[0].removed).toBe(true);
     expect(view.render).not.toHaveBeenCalled();
@@ -114,7 +114,7 @@ describe('quick transform inline membership prompt', () => {
     const { view, auth } = fixture();
     const root = new ElementStub();
     view.renderQuickMembershipNotice(root as unknown as HTMLElement);
-    root.all().find(el => el.options.text === '了解会员')!.onclick!();
+    root.all().find(el => el.options.text === '去充值会员')!.onclick!();
     expect(auth.openBilling).toHaveBeenCalledOnce();
     expect(view.quickTargetsExplicit).toBe(true);
     expect(view.quickMembershipReturnPending).toBe(true);

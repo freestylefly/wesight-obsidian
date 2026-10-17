@@ -3,6 +3,7 @@ import { toXhsPlainText } from '../xiaohongshu/copy';
 import type { JikePostCopyDraft, JikePostTone } from './types';
 
 export const JIKE_POST_BODY_LIMIT = 2000;
+export const JIKE_POST_GENERATED_COPY_LIMIT = 1000;
 export const JIKE_POST_PREVIEW_LIMIT = 520;
 export const JIKE_POST_MAX_TOPICS = 6;
 export const JIKE_POST_TOPIC_LIMIT = 20;
@@ -69,7 +70,9 @@ export function buildJikePostCopyPrompt(
     '仅返回 JSON，不要使用 Markdown 代码围栏。',
     'JSON 格式：{"body":"动态正文","topics":["话题1","话题2"],"circle":"推荐圈子"}',
     '要求：',
-    `- 正文不超过 ${JIKE_POST_BODY_LIMIT} 个 Unicode 字符。`,
+    '- 文案建议保持在 600 到 900 字，表达简洁，避免为了凑字数扩写。',
+    `- 正文、最终话题及其间空格和空行合计不超过 ${JIKE_POST_GENERATED_COPY_LIMIT} 个 Unicode 字符。`,
+    '- 用户自定义要求不能放宽字数限制。',
     `- 当前表达方式：${TONE_INSTRUCTIONS[tone]}`,
     '- 优先使用“一句判断、两个依据、一个开放问题”的结构，结构不适合原文时可自然调整。',
     '- 开头直接进入观点或具体体验，不复述文章标题。',
@@ -100,7 +103,7 @@ export function parseJikePostCopyOutput(
       ? normalizeJikeTopics(record.topics.filter((item): item is string => typeof item === 'string'))
       : [];
     const topicText = topics.map(topic => `#${topic}#`).join(' ');
-    const bodyLimit = Math.max(0, JIKE_POST_BODY_LIMIT - Array.from(topicText).length - (topicText ? 2 : 0));
+    const bodyLimit = Math.max(0, JIKE_POST_GENERATED_COPY_LIMIT - Array.from(topicText).length - (topicText ? 2 : 0));
     const body = typeof record.body === 'string'
       ? Array.from(record.body).slice(0, bodyLimit).join('')
       : '';

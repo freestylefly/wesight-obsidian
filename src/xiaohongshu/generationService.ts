@@ -19,6 +19,8 @@ import {
   parseJikePostCopyOutput,
 } from '../jikePost/copy';
 import type { JikePostCopyDraft, JikePostTone } from '../jikePost/types';
+import { buildXPostCopyPrompt, parseXPostCopyOutput } from '../xPost/copy';
+import type { XPostCopyDraft } from '../xPost/types';
 import {
   buildXhsCopyPrompt,
   buildXhsPageContentsPrompt,
@@ -123,6 +125,23 @@ export class XiaohongshuGenerationService {
     const copy = parseJikePostCopyOutput(output, tone);
     if (!copy) throw new Error('当前引擎没有返回可用的即刻动态文案');
     return copy;
+  }
+
+  async generateXPostCopy(
+    snapshot: MultiPublishSnapshot,
+    customPrompt: string,
+    signal: AbortSignal,
+  ): Promise<XPostCopyDraft> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (signal.aborted) throw new DOMException('已停止生成', 'AbortError');
+      const requirement = [customPrompt, attempt ? '上次返回格式无效或超出 X 字符限制，请重新组织完整短句；减少话题，中文正文控制在 100 字以内。' : '']
+        .filter(Boolean).join('\n');
+      const output = await this.runText('x-post-copy', buildXPostCopyPrompt(snapshot, requirement), signal);
+      if (signal.aborted) throw new DOMException('已停止生成', 'AbortError');
+      const copy = parseXPostCopyOutput(output);
+      if (copy) return copy;
+    }
+    throw new Error('当前引擎未返回符合 X 280 字符限制的完整文案，请重试或调整要求');
   }
 
   async generatePageContents(

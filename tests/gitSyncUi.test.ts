@@ -3,7 +3,7 @@ import { beforeEach, afterEach, describe, expect, test, vi } from 'vitest';
 import { Menu, type App } from 'obsidian';
 import type { GitSyncService } from '../src/gitSync/service';
 import { DEFAULT_GIT_SYNC_SETTINGS, type GitSyncState, type GitSyncSettings } from '../src/gitSync/types';
-import { addGitSyncMenuItems, GitSyncSettingsPanel, GitSyncCommitModal } from '../src/ui/gitSyncSettings';
+import { addGitSyncMenuItems, GitSyncSettingsPanel, GitSyncCommitModal, GitSyncHistoryModal } from '../src/ui/gitSyncSettings';
 
 const fake = vi.hoisted(() => {
   class Element {
@@ -114,6 +114,44 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('avatar Git menu and repository settings', () => {
+  test('omits stored automatic offline failures from both history views and shows the empty state', () => {
+    const s = serviceStub();
+    const offlineMessage = '无法连接远程仓库，请检查网络；自动同步将在下次检查时重试。';
+    s.state.history = [offlineMessage, '无法连接远程仓库，请检查网络', '当前离线，已跳过自动同步。']
+      .map((message, index) => ({ at: 100 - index, action: '自动同步', ok: false, message }));
+    const modal = new GitSyncHistoryModal({} as App, s.service); modal.onOpen();
+    const content = modal.contentEl as unknown as InstanceType<typeof fake.Element>;
+    const el = new fake.Element(); const panel = new GitSyncSettingsPanel(s.service, {} as App);
+    panel.render(el as unknown as HTMLElement);
+    expect(content.find(offlineMessage)).toBeUndefined();
+    expect(content.find('尚无同步记录。')).toBeDefined();
+    expect(el.find(offlineMessage)).toBeUndefined();
+    expect(el.find('尚无同步记录。')).toBeDefined();
+    // Rendering does not mutate service state or discard its diagnostics.
+    expect(s.state.history).toHaveLength(3);
+    panel.dispose(); modal.onClose(); expect(s.listeners.size).toBe(0);
+  });
+
+  test('keeps manual network failures, real Git errors and successful history visible when live updates arrive', () => {
+    const s = serviceStub();
+    const modal = new GitSyncHistoryModal({} as App, s.service); modal.onOpen();
+    const content = modal.contentEl as unknown as InstanceType<typeof fake.Element>;
+    const offlineMessage = '无法连接远程仓库，请检查网络；自动同步将在下次检查时重试。';
+    const visible = [
+      { at: 90, action: '拉取团队更新', ok: false, message: offlineMessage },
+      { at: 80, action: '自动同步', ok: false, message: 'GitHub 认证失败或无仓库权限，请检查本机 Git 登录凭据。' },
+      { at: 70, action: '自动同步', ok: false, message: '存在合并冲突，自动同步已暂停。请处理冲突并完成提交后重试。' },
+      { at: 60, action: '自动同步', ok: false, message: 'Git 操作失败。请检查本机 Git 凭据、仓库权限和 Git 日志后重试。' },
+      { at: 50, action: '自动同步', ok: true, message: '自动同步完成。' },
+    ];
+    s.state.history = [{ at: 100, action: '自动同步', ok: false, message: offlineMessage }, ...visible];
+    s.emit();
+    for (const entry of visible) expect(content.find(entry.message)).toBeDefined();
+    expect(content.children[0].children).toHaveLength(visible.length);
+    expect(content.find('尚无同步记录。')).toBeUndefined();
+    modal.onClose(); expect(s.listeners.size).toBe(0);
+  });
+
   test('shows the current branch and counts, invokes pull/push and releases menu listeners', async () => {
     const s = serviceStub(); const menu = new Menu(); const settings = vi.fn(); const history = vi.fn();
     const unsubscribe = addGitSyncMenuItems(menu, s.service, settings, history, {} as App);

@@ -2,6 +2,7 @@ export const QUICK_TRANSFORM_PLATFORM_IDS = [
   'xiaohongshu',
   'weibo-post',
   'jike-post',
+  'x-post',
 ] as const;
 
 export type QuickTransformPlatformId = (typeof QUICK_TRANSFORM_PLATFORM_IDS)[number];

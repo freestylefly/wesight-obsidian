@@ -5,6 +5,7 @@ export const MULTI_PLATFORM_IDS = [
   'bilibili-article',
   'toutiao',
   'weibo-article',
+  'x-article',
 ] as const;
 
 export const PUBLISH_PLATFORM_IDS = [
@@ -12,6 +13,7 @@ export const PUBLISH_PLATFORM_IDS = [
   'xiaohongshu',
   'weibo-post',
   'jike-post',
+  'x-post',
 ] as const;
 
 export type MultiPlatformId = (typeof PUBLISH_PLATFORM_IDS)[number];
@@ -50,6 +52,9 @@ export interface MultiPublishArticleV1 {
 }
 
 export interface MultiPublishTargetOptions {
+  xPost?: {
+    includeTitle: boolean;
+  };
   jikePost?: {
     circle: string;
   };
@@ -97,6 +102,12 @@ export interface PublishTaskV1 {
     sha256: string;
   }>;
   targets: MultiPlatformId[];
+  /** Present when the extension's publish center should let the user pick platforms. */
+  compose?: {
+    /** Omitted by earlier article handoffs. */
+    kind?: 'article' | 'dynamic';
+    maxTargets: number | null;
+  };
   behavior: {
     finalAction: 'manual';
     groupTabs: true;
@@ -115,6 +126,8 @@ export interface MultiPlatformTaskState {
 
 export interface MultiPublishTaskState {
   taskId: string;
+  compose?: boolean;
+  sourcePath?: string;
   title: string;
   createdAt: string;
   expiresAt: string;

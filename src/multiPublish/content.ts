@@ -128,3 +128,18 @@ export function markdownToPlatformHtml(markdown: string): string {
   flushQuote();
   return output.join('\n');
 }
+
+/** Remove only the article's leading publication decoration, keeping HTML examples in the body. */
+export function stripLeadingPublishDecoration(markdown: string): string {
+  let result = markdown.replace(/^\uFEFF/, '').trimStart();
+  const badge = /^(?:<center\b[^>]*>[\s\S]*?<\/center>|<p\b[^>]*(?:text-align\s*:\s*center|align=["']?center)[^>]*>[\s\S]*?<\/p>|<span\b[^>]*style=["'][^"']*background[^"']*["'][^>]*>[\s\S]*?<\/span>)\s*/i;
+  while (true) {
+    const match = badge.exec(result);
+    if (!match) break;
+    const plain = match[0].replace(/<[^>]+>/g, '').trim();
+    const styled = /<span\b[^>]*style=["'][^"']*background/i.test(match[0]);
+    if (!/第\s*\d+\s*篇.*原创/.test(plain) && !(styled && plain.length <= 120)) break;
+    result = result.slice(match[0].length).trimStart();
+  }
+  return result;
+}

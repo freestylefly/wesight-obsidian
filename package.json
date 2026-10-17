@@ -1,6 +1,6 @@
 {
   "name": "wesight-obsidian",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "WeSight Obsidian plugin for local agent runtimes.",
   "type": "module",
   "main": "main.js",
@@ -26,6 +26,7 @@
     "@eslint/js": "^9.39.1",
     "@types/node": "^24.10.1",
     "@types/qrcode": "^1.5.6",
+    "@types/twitter-text": "3.1.10",
     "esbuild": "^0.28.1",
     "eslint": "^9.39.1",
     "eslint-plugin-obsidianmd": "^0.4.1",
@@ -37,6 +38,7 @@
   "dependencies": {
     "@codemirror/state": "^6.5.0",
     "@codemirror/view": "^6.38.6",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "twitter-text": "3.1.0"
   }
 }

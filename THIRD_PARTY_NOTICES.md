@@ -84,3 +84,11 @@ at `vendor/gzh-design-skill/UPSTREAM.md`.
 WeSight source releases through version 0.1.7 were made available under the
 MIT License. The previous license notice remains available at
 `LICENSES/MIT.txt`.
+
+## twitter-text
+
+X post length validation uses twitter-text 3.1.0, Copyright 2011 Twitter, Inc.,
+under Apache License 2.0. Its bundled runtime dependencies include
+twemoji-parser (MIT), core-js (MIT), punycode (MIT), and @babel/runtime (MIT).
+Their copyright notices and license texts are preserved in
+`LICENSES/twitter-text-and-dependencies.txt`. All character counting runs locally.

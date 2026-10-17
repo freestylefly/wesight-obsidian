@@ -21,21 +21,21 @@ import {
   resolveMultiPublishAccess,
   validateMultiPublishTargetCount,
 } from '../multiPublish/access';
-import type { MultiPublishBridge } from '../multiPublish/bridge';
-import {
-  CHROME_EXTENSION_DOWNLOAD_URL,
-  CHROME_EXTENSIONS_URL,
-  CHROME_INSTALL_STEPS,
-} from '../multiPublish/installGuide';
+import { DYNAMIC_COMPOSE_CAPABILITY, type MultiPublishBridge } from '../multiPublish/bridge';
+import { requireBrowserConnection } from '../multiPublish/connection';
 import { buildMultiPublishSnapshot } from '../multiPublish/snapshot';
 import type { MultiPlatformTaskState, MultiPublishSnapshot, MultiPublishTaskState } from '../multiPublish/types';
 import type { CloudAuthService } from '../share/cloudAuth';
+import { hasActiveMembership, requireMemberFeature } from './memberFeatureGate';
 import type { VaultStore } from '../storage/vaultStore';
 import type { WeSightObsidianSettings } from '../types';
 import type { WeiboPostDraftStore } from '../weiboPost/store';
 import type { WeiboPostImage } from '../weiboPost/types';
 import type { JikePostDraftStore } from '../jikePost/store';
 import type { JikePostImage } from '../jikePost/types';
+import { buildXPostText, normalizeXPostTopics, validateXPostCopy, xPostWeightedLength, X_POST_TEXT_LIMIT } from '../xPost/copy';
+import { buildXPostPublishSnapshot, selectXPostImages } from '../xPost/publish';
+import type { XPostCopyDraft } from '../xPost/types';
 import {
   hasExplicitQuickTransformPlatformSelection,
   QUICK_TRANSFORM_PLATFORM_IDS,
@@ -67,12 +67,14 @@ import {
 } from './weiboPostWorkbench';
 import { JikePostWorkbench } from './jikePostWorkbench';
 import {
+  buildXhsPostText,
   clampXhsTitle,
   createInitialXhsCopy,
   createDefaultXhsPageContents,
   normalizeXhsTags,
   reconcileXhsPageContents,
   XHS_PAGE_TEXT_LIMIT,
+  XHS_BODY_LIMIT,
   XHS_TITLE_LIMIT,
 } from '../xiaohongshu/copy';
 import type {
@@ -109,7 +111,7 @@ import {
 export const WESIGHT_XIAOHONGSHU_VIEW_TYPE = 'wesight-xiaohongshu-workbench';
 
 type XhsWorkbenchSection = ContentWorkbenchSection;
-type DetailPlatformId = QuickTransformPlatformId;
+type DetailPlatformId = Exclude<QuickTransformPlatformId, 'x-post'>;
 type ContentPlatformId = 'quick' | DetailPlatformId;
 
 interface QuickTransformImage {
@@ -127,6 +129,7 @@ const QUICK_PLATFORM_COPY: Record<QuickTransformPlatformId, { label: string; ico
   xiaohongshu: { label: '小红书', icon: 'notebook-pen' },
   'weibo-post': { label: '微博', icon: 'radio-tower' },
   'jike-post': { label: '即刻', icon: 'circle-dot' },
+  'x-post': { label: 'X', icon: 'send' },
 };
 
 const CATEGORY_THUMBNAILS: Record<XhsVisualCategoryId, string> = {
@@ -158,6 +161,7 @@ export interface XiaohongshuWorkbenchViewOptions {
   jikePostDraftStore: JikePostDraftStore;
   vaultStore: VaultStore;
   openSettings: () => void;
+  openBrowserConnector: () => void;
 }
 
 export class XiaohongshuWorkbenchView extends ItemView {
@@ -173,6 +177,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
   private quickMembershipNotice = false;
   private quickMembershipReturnPending = false;
   private quickCopyMode: QuickTransformCopyMode = 'platform';
+  private quickXPostCopy: XPostCopyDraft = { body: '', topics: [] };
   private quickPreviewPlatform: QuickTransformPlatformId = 'xiaohongshu';
   private quickPlatformStatus: Partial<Record<QuickTransformPlatformId, 'generating' | 'ready' | 'failed'>> = {};
   private quickSelectedImageIds: string[] = [];
@@ -203,8 +208,8 @@ export class XiaohongshuWorkbenchView extends ItemView {
   private publishBusy = false;
   private publishAuthLoading = false;
   private publishLoginPending = false;
-  private publishInstallGuideDismissed = false;
   private imageProgress: XhsImageGenerationProgress | null = null;
+  private memberAccessEpoch = 0;
   private fileSwitchRequestId = 0;
   private fileSwitchTimer: number | null = null;
   private requestId = 0;
@@ -232,6 +237,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
       draftStore: this.options.weiboPostDraftStore,
       vaultStore: this.options.vaultStore,
       getXiaohongshuImages: () => this.generatedPages,
+      openBrowserConnector: this.options.openBrowserConnector,
       showSection: section => this.showSection(section),
       requestRender: () => this.render(),
     });
@@ -245,6 +251,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
       vaultStore: this.options.vaultStore,
       getXiaohongshuImages: () => this.generatedPages,
       openSettings: this.options.openSettings,
+      openBrowserConnector: this.options.openBrowserConnector,
       showSection: section => this.showSection(section),
       requestRender: () => this.render(),
     });
@@ -331,6 +338,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
   }
 
   override async onClose(): Promise<void> {
+    this.memberAccessEpoch += 1;
     this.fileSwitchRequestId += 1;
     this.requestId += 1;
     this.generationController?.abort();
@@ -392,6 +400,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
     this.quickTargetsExplicit = false;
     this.quickMembershipNotice = false;
     this.quickCopyMode = 'platform';
+    this.quickXPostCopy = { body: '', topics: [] };
     this.quickPreviewPlatform = 'xiaohongshu';
     this.quickPlatformStatus = {};
     this.quickImageScrollLeft.clear();
@@ -491,11 +500,33 @@ export class XiaohongshuWorkbenchView extends ItemView {
     }
   }
 
+  private async requireMembership(feature: string): Promise<boolean> {
+    const epoch = this.memberAccessEpoch;
+    const allowed = await requireMemberFeature(this.app, this.options.auth, feature);
+    return allowed && epoch === this.memberAccessEpoch;
+  }
+
   private render(): void {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass('wesight-xhs-workbench');
     this.renderHeader(contentEl);
+    if (!hasActiveMembership(this.options.auth)) {
+      const card = contentEl.createDiv({ cls: 'wesight-quick-membership-notice' });
+      const copy = card.createDiv({ cls: 'wesight-quick-membership-copy' });
+      copy.createEl('strong', { text: '转为图文，会员专享' });
+      copy.createEl('p', { text: '开通或续费会员后，即可生成图文并发布到多个平台。' });
+      const actions = card.createDiv({ cls: 'wesight-quick-membership-actions' });
+      const button = actions.createEl('button', {
+        cls: 'mod-cta', text: '去充值会员', attr: { type: 'button' },
+      });
+      button.onclick = () => {
+        void this.requireMembership('转为图文').then(allowed => {
+          if (allowed) this.render();
+        });
+      };
+      return;
+    }
     if (this.activePlatform !== 'quick') this.renderWorkflow(contentEl);
 
     const body = contentEl.createDiv({ cls: 'wesight-xhs-body' });
@@ -555,14 +586,17 @@ export class XiaohongshuWorkbenchView extends ItemView {
       button.onclick = () => this.switchPlatform(platform.id);
     }
     const addPlatform = actions.createEl('button', {
-      cls: 'wesight-xhs-subtle-button',
-      text: '添加平台',
-      attr: { type: 'button' },
+      cls: 'wesight-xhs-platform-badge',
+      text: 'X',
+      attr: { type: 'button', 'aria-label': 'X 图文动态' },
     });
     const addIcon = addPlatform.createSpan();
-    setIcon(addIcon, 'plus');
+    setIcon(addIcon, 'send');
     addPlatform.prepend(addIcon);
-    addPlatform.onclick = () => new Notice('推特和其他图文动态平台会从这里继续扩展。');
+    addPlatform.onclick = () => {
+      if (!this.quickTargets.has('x-post')) this.toggleQuickTarget('x-post');
+      this.openQuickPlatform('x-post');
+    };
   }
 
   private renderWorkflow(parent: HTMLElement): void {
@@ -715,21 +749,24 @@ export class XiaohongshuWorkbenchView extends ItemView {
       connection.supportedPlatforms !== null
         && Array.from(this.quickTargets).some(platformId => !connection.supportedPlatforms!.includes(platformId))
       || connection.capabilities !== null
-        && !connection.capabilities.includes(QUICK_PUBLISH_CAPABILITY)
+        && [QUICK_PUBLISH_CAPABILITY, 'compose-v1', DYNAMIC_COMPOSE_CAPABILITY]
+          .some(capability => !connection.capabilities!.includes(capability))
     );
     if (this.quickPublishBusy) {
-      status.createEl('strong', { text: `正在打开 ${this.quickTargets.size} 个平台` });
-      status.createSpan({ text: '发布助手会把平台页面放进同一个标签组' });
+      status.createEl('strong', { text: '正在打开动态发布中心' });
+      status.createSpan({ text: `正在带入 ${this.quickTargets.size} 套平台文案和图片` });
     } else if (this.quickPublishTask) {
       const states = this.quickPublishTask.targets.map(platformId => this.quickPublishTask!.platforms[platformId]);
       const readyCount = states.filter(state => state.status === 'ready').length;
       const failedCount = states.filter(state => state.status === 'failed').length;
       const loginCount = states.filter(state => state.status === 'login_required').length;
-      status.createEl('strong', { text: `已打开 ${states.length} 个平台 · ${readyCount} 个等待检查` });
+      status.createEl('strong', { text: readyCount
+        ? `${readyCount} 个平台等待检查`
+        : `已交给动态发布中心 · ${states.length} 套平台文案` });
       status.createSpan({
         text: failedCount
           ? `${failedCount} 个失败，进入对应平台后可重试`
-          : loginCount ? `${loginCount} 个平台需要登录` : '最终发送或发布仍由你手动确认',
+          : loginCount ? `${loginCount} 个平台需要登录` : '可在浏览器中继续编辑、选择平台并同步',
       });
     } else if (extensionNeedsUpdate && generated) {
       status.createEl('strong', { text: '发布助手版本过旧' });
@@ -749,7 +786,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
           ? `统一文案已同步到 ${this.quickCompleted} 个平台`
           : `已生成 ${this.quickCompleted} 套平台文案`,
       });
-      status.createSpan({ text: '可直接一键打开发布助手，也可进入平台继续编辑' });
+      status.createSpan({ text: '点击后进入浏览器动态发布中心，继续编辑并选择同步平台' });
     } else {
       status.createSpan({
         text: this.quickCopyMode === 'shared'
@@ -760,11 +797,11 @@ export class XiaohongshuWorkbenchView extends ItemView {
     const generate = footer.createEl('button', {
       cls: 'wesight-xhs-primary-button wesight-quick-generate',
       text: this.quickPublishBusy
-        ? `正在打开 ${this.quickTargets.size} 个平台…`
+        ? '正在打开动态发布中心…'
         : this.quickPublishTask
           ? previousPublishReady
-            ? `重新发布到 ${this.quickPublishTask.targets.length} 个平台`
-            : `打开 ${this.quickPublishTask.targets.length} 个平台`
+            ? '重新发送到动态发布中心'
+            : '打开动态发布中心'
           : this.quickOperation
             ? `正在生成 ${this.quickCompleted}/${this.quickTargets.size}`
             : generated
@@ -815,7 +852,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
     row.createSpan({
       cls: 'wesight-quick-copy-mode-note',
       text: this.quickCopyMode === 'shared'
-        ? '统一生成后，各平台仍可单独调整'
+        ? this.quickTargets.has('x-post') ? '统一生成后可单独调整；X 另生成 280 字符以内的精简文案' : '统一生成后，各平台仍可单独调整'
         : '按平台风格分别生成，可在下方快速检查',
     });
   }
@@ -937,7 +974,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
     const detailIcon = detail.createSpan();
     setIcon(detailIcon, 'arrow-right');
     detail.append(detailIcon);
-    detail.onclick = () => this.switchPlatform(this.quickPreviewPlatform);
+    detail.onclick = () => this.openQuickPlatform(this.quickPreviewPlatform);
 
     const tabs = section.createDiv({ cls: 'wesight-quick-copy-tabs' });
     for (const platformId of targets) {
@@ -984,11 +1021,21 @@ export class XiaohongshuWorkbenchView extends ItemView {
       });
       const edit = button.createSpan({ cls: 'wesight-quick-destination-edit' });
       setIcon(edit, 'pencil');
-      button.onclick = () => this.switchPlatform(platformId);
+      button.onclick = () => this.openQuickPlatform(platformId);
     }
   }
 
   private renderQuickCopyFields(parent: HTMLElement, platformId: QuickTransformPlatformId): void {
+    if (platformId === 'x-post') {
+      this.renderQuickBodyAndTopics(parent, this.quickXPostCopy.body, this.quickXPostCopy.topics, X_POST_TEXT_LIMIT, (body, topics) => {
+        this.quickXPostCopy = { body, topics: normalizeXPostTopics(topics) };
+        this.onQuickCopyEdited();
+        this.scheduleDraftSave();
+      }, buildXPostText, xPostWeightedLength);
+      const selected = selectXPostImages(this.quickSelectedImages());
+      parent.createSpan({ cls: 'wesight-quick-copy-hint', text: `X 中文通常计 2 字符，链接计 23；使用前 ${selected.images.length} 张 PNG/JPEG/WebP，每张不超过 5 MB。${selected.warnings.join('；')}` });
+      return;
+    }
     if (platformId === 'xiaohongshu') {
       const titleRow = parent.createDiv({ cls: 'wesight-quick-copy-title-row' });
       const title = titleRow.createEl('input', {
@@ -1007,12 +1054,12 @@ export class XiaohongshuWorkbenchView extends ItemView {
         this.onQuickCopyEdited();
         this.scheduleDraftSave();
       };
-      this.renderQuickBodyAndTopics(parent, this.copy.body, this.copy.tags, undefined, (body, topics) => {
+      this.renderQuickBodyAndTopics(parent, this.copy.body, this.copy.tags, XHS_BODY_LIMIT, (body, topics) => {
         this.copy.body = body;
         this.copy.tags = normalizeXhsTags(topics);
         this.onQuickCopyEdited();
         this.scheduleDraftSave();
-      });
+      }, buildXhsPostText);
       return;
     }
     if (platformId === 'weibo-post') {
@@ -1036,6 +1083,8 @@ export class XiaohongshuWorkbenchView extends ItemView {
     initialTopics: string[],
     bodyLimit: number | undefined,
     onChange: (body: string, topics: string[]) => void,
+    formatText?: (body: string, topics: string[]) => string,
+    measureText: (text: string) => number = text => Array.from(text).length,
   ): void {
     let currentBody = initialBody;
     let currentTopics = [...initialTopics];
@@ -1045,7 +1094,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
         rows: '5',
         placeholder: '生成后可在这里直接修改文案',
         'aria-label': '平台正文',
-        ...(bodyLimit ? { maxlength: String(bodyLimit) } : {}),
+        ...(bodyLimit && !formatText ? { maxlength: String(bodyLimit) } : {}),
       },
     });
     body.value = initialBody;
@@ -1060,8 +1109,10 @@ export class XiaohongshuWorkbenchView extends ItemView {
     topics.value = initialTopics.map(topic => `#${topic}`).join(' ');
     const count = meta.createSpan();
     const updateCount = (): void => {
-      const length = Array.from(currentBody).length;
-      count.setText(bodyLimit ? `${length}/${bodyLimit}` : `${length} 字`);
+      const length = measureText(formatText ? formatText(currentBody, currentTopics) : currentBody);
+      count.setText(bodyLimit ? `${length}/${bodyLimit}${formatText ? ' 字符（含话题）' : ''}` : `${length} 字`);
+      count.classList.toggle('is-over-limit', Boolean(bodyLimit && length > bodyLimit));
+      body.setAttribute('aria-invalid', String(Boolean(bodyLimit && length > bodyLimit)));
     };
     updateCount();
     body.oninput = () => {
@@ -1071,6 +1122,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
     };
     topics.oninput = () => {
       currentTopics = parseQuickTopics(topics.value);
+      updateCount();
       onChange(currentBody, currentTopics);
     };
   }
@@ -1081,6 +1133,17 @@ export class XiaohongshuWorkbenchView extends ItemView {
     this.resetQuickGeneration();
     this.scheduleDraftSave();
     this.render();
+  }
+
+  private openQuickPlatform(platformId: QuickTransformPlatformId): void {
+    if (platformId === 'x-post') {
+      this.quickPreviewPlatform = platformId;
+      this.activePlatform = 'quick';
+      this.render();
+      this.contentEl.querySelector<HTMLTextAreaElement>('.wesight-quick-copy-body')?.focus();
+      return;
+    }
+    this.switchPlatform(platformId);
   }
 
   private onQuickCopyEdited(): void {
@@ -1132,14 +1195,21 @@ export class XiaohongshuWorkbenchView extends ItemView {
     const bodyField = fields.createDiv({ cls: 'wesight-xhs-field' });
     const bodyLabel = bodyField.createDiv({ cls: 'wesight-xhs-field-label' });
     bodyLabel.createEl('label', { text: '正文' });
-    const bodyCounter = bodyLabel.createSpan({ text: `${this.copy.body.length} 字` });
+    const bodyCounter = bodyLabel.createSpan();
     const body = bodyField.createEl('textarea', {
       attr: { rows: '14', placeholder: '输入适合小红书阅读的正文' },
     });
     body.value = this.copy.body;
+    const updateBodyCount = (): void => {
+      const length = Array.from(buildXhsPostText(this.copy.body, this.copy.tags)).length;
+      bodyCounter.setText(`${length}/${XHS_BODY_LIMIT} 字（含话题）`);
+      bodyCounter.classList.toggle('is-over-limit', length > XHS_BODY_LIMIT);
+      body.setAttribute('aria-invalid', String(length > XHS_BODY_LIMIT));
+    };
+    updateBodyCount();
     body.oninput = () => {
       this.copy.body = body.value;
-      bodyCounter.setText(`${this.copy.body.length} 字`);
+      updateBodyCount();
       this.scheduleDraftSave();
     };
 
@@ -1905,7 +1975,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
       setIcon(headingIcon, 'log-in');
       const copy = heading.createDiv();
       copy.createEl('strong', { text: '登录后使用小红书发布助手' });
-      copy.createSpan({ text: '普通用户也可使用小红书单平台发布。' });
+      copy.createSpan({ text: '开通或续费会员后，即可使用浏览器发布助手。' });
       const login = gate.createEl('button', {
         cls: 'wesight-xhs-primary-button',
         text: this.publishLoginPending ? '等待登录完成' : '请先登录 WeSight',
@@ -1924,7 +1994,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
     const extensionNeedsUpdate = connection.connected
       && connection.supportedPlatforms !== null
       && !connection.supportedPlatforms.includes('xiaohongshu');
-    if (!connection.paired && !this.publishInstallGuideDismissed) {
+    if (!connection.connected) {
       this.renderPublishInstallGuide(parent);
       return;
     }
@@ -1948,7 +2018,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
     if (extensionNeedsUpdate) {
       const update = connectionRow.createEl('button', {
         cls: 'wesight-xhs-subtle-button',
-        text: '打开扩展管理页',
+        text: '连接设置',
         attr: { type: 'button' },
       });
       update.onclick = () => void this.openChromeExtensions();
@@ -1956,7 +2026,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
     if (connection.paired && !this.publishTask) {
       const repair = connectionRow.createEl('button', {
         cls: 'wesight-xhs-subtle-button',
-        text: '重新配对',
+        text: '连接设置',
         attr: { type: 'button' },
       });
       repair.disabled = this.publishBusy || validationErrors.length > 0;
@@ -1988,58 +2058,11 @@ export class XiaohongshuWorkbenchView extends ItemView {
   }
 
   private renderPublishInstallGuide(parent: HTMLElement): void {
-    const guide = parent.createDiv({ cls: 'wesight-multi-install-guide wesight-xhs-publish-install' });
-    const heading = guide.createDiv({ cls: 'wesight-multi-install-heading' });
-    const headingIcon = heading.createSpan();
-    setIcon(headingIcon, 'puzzle');
-    const headingCopy = heading.createDiv();
-    headingCopy.createEl('strong', { text: '首次使用，先安装 WeSight 发布助手' });
-    headingCopy.createSpan({ text: '安装一次即可复用浏览器中的小红书登录状态。' });
-
-    const steps = guide.createDiv({ cls: 'wesight-multi-install-steps' });
-    CHROME_INSTALL_STEPS.forEach((step, index) => {
-      const row = steps.createDiv({ cls: 'wesight-multi-install-step' });
-      row.createSpan({ cls: 'wesight-multi-install-number', text: String(index + 1) });
-      const copy = row.createDiv({ cls: 'wesight-multi-install-copy' });
-      copy.createEl('strong', { text: step.title });
-      copy.createSpan({ text: step.description });
-      if (index === 0) {
-        const download = row.createEl('button', {
-          cls: 'wesight-multi-install-action',
-          text: '下载插件',
-          attr: { type: 'button' },
-        });
-        const icon = download.createSpan();
-        setIcon(icon, 'download');
-        download.prepend(icon);
-        download.onclick = () => window.open(CHROME_EXTENSION_DOWNLOAD_URL, '_blank', 'noopener,noreferrer');
-      }
-      if (index === 2) {
-        const open = row.createEl('button', {
-          cls: 'wesight-multi-install-action',
-          text: '打开安装页',
-          attr: { type: 'button' },
-        });
-        const icon = open.createSpan();
-        setIcon(icon, 'external-link');
-        open.prepend(icon);
-        open.onclick = () => void this.openChromeExtensions();
-      }
-    });
-
-    const continueButton = guide.createEl('button', {
-      cls: 'wesight-xhs-primary-button',
-      text: '我已安装，继续发布',
-      attr: { type: 'button' },
-    });
-    continueButton.onclick = () => {
-      this.publishInstallGuideDismissed = true;
-      this.render();
-    };
-    guide.createSpan({
-      cls: 'wesight-multi-install-footnote',
-      text: '首次启动任务时会自动完成本机配对。',
-    });
+    const card = parent.createDiv({ cls: 'wesight-multi-install-guide' });
+    card.createEl('strong', { text: '连接浏览器发布助手' });
+    card.createEl('p', { text: '请在设置 → 连接器中完成安装与连接，当前内容会保留。' });
+    const button = card.createEl('button', { text: '前往连接设置', cls: 'wesight-xhs-primary-button', attr: { type: 'button' } });
+    button.onclick = this.options.openBrowserConnector;
   }
 
   private renderPublishTask(parent: HTMLElement, task: MultiPublishTaskState, extensionNeedsUpdate: boolean): void {
@@ -2215,6 +2238,21 @@ export class XiaohongshuWorkbenchView extends ItemView {
 
   private async refineRecommendation(silent: boolean): Promise<void> {
     if (!this.snapshot || this.recommendationRunning || this.operation) return;
+    const epoch = this.memberAccessEpoch;
+    if (silent) {
+      // Restored workspaces must not start paid AI work or show a recharge dialog.
+      if (!hasActiveMembership(this.options.auth)) return;
+      const userId = this.options.auth.getCurrentUser()?.userId;
+      try {
+        await this.options.auth.refreshBillingSummary(false);
+      } catch {
+        return;
+      }
+      if (epoch !== this.memberAccessEpoch || this.options.auth.getCurrentUser()?.userId !== userId
+        || !hasActiveMembership(this.options.auth)) return;
+    } else if (!await this.requireMembership('转为图文')) {
+      return;
+    }
     this.recommendationController?.abort();
     this.recommendationController = new AbortController();
     this.recommendationRunning = true;
@@ -2254,11 +2292,11 @@ export class XiaohongshuWorkbenchView extends ItemView {
     const icon = notice.createSpan({ cls: 'wesight-quick-membership-icon' });
     setIcon(icon, 'crown');
     const copy = notice.createDiv({ cls: 'wesight-quick-membership-copy' });
-    copy.createEl('strong', { text: '多平台转换，会员专享' });
-    copy.createEl('p', { text: '普通用户可选择 1 个平台，会员可同时生成多个平台文案。' });
+    copy.createEl('strong', { text: '转为图文，会员专享' });
+    copy.createEl('p', { text: '转为图文和多平台发布需要有效会员，请充值开通或续费后使用。' });
     const actions = notice.createDiv({ cls: 'wesight-quick-membership-actions' });
     const dismiss = actions.createEl('button', {
-      text: '继续单平台', attr: { type: 'button' },
+      text: '稍后再说', attr: { type: 'button' },
     });
     dismiss.onclick = () => {
       this.quickMembershipNotice = false;
@@ -2266,7 +2304,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
       this.contentEl.querySelector<HTMLButtonElement>('.wesight-quick-platform-list .is-selected')?.focus();
     };
     const learn = actions.createEl('button', {
-      cls: 'wesight-quick-membership-learn', text: '了解会员', attr: { type: 'button' },
+      cls: 'wesight-quick-membership-learn', text: '去充值会员', attr: { type: 'button' },
     });
     setIcon(learn.createSpan(), 'arrow-right');
     learn.onclick = () => {
@@ -2303,6 +2341,10 @@ export class XiaohongshuWorkbenchView extends ItemView {
     this.quickMembershipNotice = false;
     this.quickTargets = new Set(restoredTargets);
     this.quickCopyMode = saved?.quickTransform?.copyMode === 'shared' ? 'shared' : 'platform';
+    const savedXCopy = saved?.quickTransform?.xPostCopy;
+    this.quickXPostCopy = savedXCopy && typeof savedXCopy.body === 'string'
+      ? { body: savedXCopy.body, topics: normalizeXPostTopics(Array.isArray(savedXCopy.topics) ? savedXCopy.topics.filter((topic): topic is string => typeof topic === 'string') : []) }
+      : { body: '', topics: [] };
     const savedPreviewPlatform = saved?.quickTransform?.previewPlatform;
     this.quickPreviewPlatform = savedPreviewPlatform && this.quickTargets.has(savedPreviewPlatform)
       ? savedPreviewPlatform
@@ -2496,27 +2538,14 @@ export class XiaohongshuWorkbenchView extends ItemView {
 
   private async generateQuickTransform(): Promise<void> {
     if (!this.snapshot || this.quickOperation) return;
+    if (!await this.requireMembership('转为图文')) return;
     const targets = Array.from(this.quickTargets);
     if (!targets.length) {
       new Notice('请至少选择一个平台');
       return;
     }
-    const user = await this.options.auth.restoreSession();
-    if (!user) {
-      new Notice(MULTI_PUBLISH_LOGIN_PROMPT);
-      this.options.auth.startLogin();
-      return;
-    }
-    let billing = this.options.auth.getBillingSummary();
-    if (targets.length > 1) {
-      try {
-        billing = await this.options.auth.refreshBillingSummary(false);
-      } catch {
-        this.quickErrors.general = '暂时无法验证会员状态，请稍后重试。';
-        this.render();
-        return;
-      }
-    }
+    const user = this.options.auth.getCurrentUser();
+    const billing = this.options.auth.getBillingSummary();
     const access = resolveMultiPublishAccess(user, billing);
     const accessError = validateMultiPublishTargetCount(access, targets.length);
     if (accessError) {
@@ -2607,6 +2636,13 @@ export class XiaohongshuWorkbenchView extends ItemView {
                 jikeImages,
               );
             }
+            if (platformId === 'x-post') {
+              const sharedX = { body: sharedCopy.body, topics: normalizeXPostTopics(sharedCopy.tags) };
+              this.quickXPostCopy = validateXPostCopy(sharedX)
+                ? await this.options.generationService.generateXPostCopy(this.snapshot!, [this.copyRequirement, `请围绕这套统一文案的核心观点生成 X 精简版：\n${sharedCopy.body}`].filter(Boolean).join('\n'), signal)
+                : sharedX;
+              await this.saveDraft();
+            }
             this.quickPlatformStatus[platformId] = 'ready';
           } catch (error) {
             this.quickErrors[platformId] = error instanceof Error
@@ -2658,6 +2694,11 @@ export class XiaohongshuWorkbenchView extends ItemView {
         if (platformId === 'jike-post') {
           await this.jikePostWorkbench.prepareQuickDraft(jikeImages, signal);
         }
+        if (platformId === 'x-post') {
+          this.quickXPostCopy = await this.options.generationService.generateXPostCopy(this.snapshot!, this.copyRequirement, signal);
+          if (signal.aborted) throw new DOMException('已停止生成', 'AbortError');
+          await this.saveDraft();
+        }
         this.quickPlatformStatus[platformId] = 'ready';
       } catch (error) {
         if (signal.aborted) return;
@@ -2686,26 +2727,15 @@ export class XiaohongshuWorkbenchView extends ItemView {
 
   private async startQuickPublish(forcePair: boolean): Promise<void> {
     if (!this.snapshot || this.quickPublishBusy || !this.quickGenerationReady()) return;
+    if (!await this.requireMembership('转为图文和多平台发布')) return;
+    if (!requireBrowserConnection(this.options.bridge, this.options.openBrowserConnector, forcePair)) return;
     const targets = Array.from(this.quickTargets);
     this.quickPublishBusy = true;
     delete this.quickErrors.general;
     this.render();
     try {
-      const user = await this.options.auth.restoreSession();
-      if (!user) {
-        new Notice(MULTI_PUBLISH_LOGIN_PROMPT);
-        this.options.auth.startLogin();
-        this.publishLoginPending = true;
-        return;
-      }
-      let billing = this.options.auth.getBillingSummary();
-      if (targets.length > 1) {
-        try {
-          billing = await this.options.auth.refreshBillingSummary(false);
-        } catch {
-          throw new Error('暂时无法验证会员状态，请稍后重试。');
-        }
-      }
+      const user = this.options.auth.getCurrentUser();
+      const billing = this.options.auth.getBillingSummary();
       const access = resolveMultiPublishAccess(user, billing);
       const accessError = validateMultiPublishTargetCount(access, targets.length);
       if (accessError) {
@@ -2722,8 +2752,9 @@ export class XiaohongshuWorkbenchView extends ItemView {
       }
       if (connection.connected
         && connection.capabilities !== null
-        && !connection.capabilities.includes(QUICK_PUBLISH_CAPABILITY)) {
-        throw new Error('发布助手版本过旧，请更新并重新加载扩展后重试');
+        && [QUICK_PUBLISH_CAPABILITY, 'compose-v1', DYNAMIC_COMPOSE_CAPABILITY]
+          .some(capability => !connection.capabilities!.includes(capability))) {
+        throw new Error('发布助手版本过旧，请更新并重新加载扩展后使用动态发布中心');
       }
 
       const snapshots: QuickPublishSnapshotMap = {};
@@ -2743,22 +2774,26 @@ export class XiaohongshuWorkbenchView extends ItemView {
           snapshots[platformId] = await this.weiboPostWorkbench.buildQuickPublishSnapshot();
           return;
         }
+        if (platformId === 'x-post') {
+          await this.saveDraft();
+          snapshots[platformId] = await buildXPostPublishSnapshot({
+            source: this.snapshot!, copy: this.quickXPostCopy, images: this.quickSelectedImages(),
+            readBinary: reference => this.readPublishImage(reference),
+          });
+          return;
+        }
         snapshots[platformId] = await this.jikePostWorkbench.buildQuickPublishSnapshot();
       }));
 
       const batchSnapshot = buildQuickPublishBatchSnapshot(targets, snapshots);
-      if (forcePair) await this.options.bridge.clearPairing();
-      const result = this.options.bridge.createTask(batchSnapshot, targets, forcePair);
+      const result = this.options.bridge.createDynamicComposeTask(batchSnapshot, targets, access, forcePair);
       if (result.task.targets.length !== targets.length
         || targets.some(platformId => !result.task.targets.includes(platformId))) {
         throw new Error('发布任务的平台数量与当前选择不一致，请重新生成后重试');
       }
       this.quickPublishTask = result.task;
-      if (targets.includes('xiaohongshu')) this.publishTask = result.task;
-      this.weiboPostWorkbench.setQuickPublishTask(targets.includes('weibo-post') ? result.task : null);
-      this.jikePostWorkbench.setQuickPublishTask(targets.includes('jike-post') ? result.task : null);
       window.open(result.handoffUrl, '_blank', 'noopener,noreferrer');
-      new Notice(`已交给 WeSight 发布助手准备 ${targets.length} 个平台，最终发布请在浏览器中确认。`);
+      new Notice(`已打开动态发布中心，带入 ${targets.length} 套平台文案和图片，请在浏览器中选择平台并同步。`);
     } catch (error) {
       this.quickErrors.general = error instanceof Error ? error.message : '多平台发布任务启动失败';
     } finally {
@@ -2769,11 +2804,13 @@ export class XiaohongshuWorkbenchView extends ItemView {
 
   private async openQuickPublishTask(): Promise<void> {
     if (!this.quickPublishTask) return;
+    if (!await this.requireMembership('浏览器发布助手')) return;
+    if (!requireBrowserConnection(this.options.bridge, this.options.openBrowserConnector)) return;
     try {
       const url = this.options.bridge.createOpenTaskUrl(this.quickPublishTask.taskId);
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch (error) {
-      this.quickErrors.general = error instanceof Error ? error.message : '打开平台标签组失败';
+      this.quickErrors.general = error instanceof Error ? error.message : '打开动态发布中心失败';
       this.render();
     }
   }
@@ -2787,6 +2824,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
 
   private async generateCopy(): Promise<void> {
     if (!this.snapshot || this.operation) return;
+    if (!await this.requireMembership('转为图文')) return;
     this.generationController?.abort();
     this.generationController = new AbortController();
     this.operation = 'copy';
@@ -2813,6 +2851,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
 
   private async generatePageContents(): Promise<void> {
     if (!this.snapshot || this.operation) return;
+    if (!await this.requireMembership('转为图文')) return;
     this.generationController?.abort();
     this.generationController = new AbortController();
     this.operation = 'pageContents';
@@ -2840,6 +2879,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
   private async regenerateCurrentPageContent(): Promise<void> {
     const current = this.currentPageContent();
     if (!this.snapshot || !current || this.operation) return;
+    if (!await this.requireMembership('转为图文')) return;
     this.generationController?.abort();
     this.generationController = new AbortController();
     this.operation = 'pageContent';
@@ -2870,6 +2910,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
 
   private async generateImages(onlyPage?: number): Promise<void> {
     if (!this.snapshot || this.operation) return;
+    if (!await this.requireMembership('转为图文')) return;
     this.generationController?.abort();
     this.generationController = new AbortController();
     const controller = this.generationController;
@@ -2997,6 +3038,8 @@ export class XiaohongshuWorkbenchView extends ItemView {
 
   private async startXiaohongshuPublish(forcePair: boolean): Promise<void> {
     if (!this.snapshot || this.publishBusy) return;
+    if (!await this.requireMembership('浏览器发布助手')) return;
+    if (!requireBrowserConnection(this.options.bridge, this.options.openBrowserConnector, forcePair)) return;
     const validationErrors = validateXiaohongshuPublishInput(this.copy, this.pageCount, this.generatedPages);
     if (validationErrors.length) {
       new Notice(validationErrors[0]);
@@ -3021,7 +3064,6 @@ export class XiaohongshuWorkbenchView extends ItemView {
         pages: this.generatedPages,
         readBinary: reference => this.readPublishImage(reference),
       });
-      if (forcePair) await this.options.bridge.clearPairing();
       const result = this.options.bridge.createTask(publishSnapshot, ['xiaohongshu'], forcePair);
       this.publishTask = result.task;
       window.open(result.handoffUrl, '_blank', 'noopener,noreferrer');
@@ -3036,6 +3078,8 @@ export class XiaohongshuWorkbenchView extends ItemView {
 
   private async retryXiaohongshuTask(): Promise<void> {
     if (!this.publishTask) return;
+    if (!await this.requireMembership('浏览器发布助手')) return;
+    if (!requireBrowserConnection(this.options.bridge, this.options.openBrowserConnector)) return;
     try {
       const url = this.options.bridge.createRetryUrl(this.publishTask.taskId, 'xiaohongshu');
       window.open(url, '_blank', 'noopener,noreferrer');
@@ -3047,6 +3091,8 @@ export class XiaohongshuWorkbenchView extends ItemView {
 
   private async openXiaohongshuTask(): Promise<void> {
     if (!this.publishTask) return;
+    if (!await this.requireMembership('浏览器发布助手')) return;
+    if (!requireBrowserConnection(this.options.bridge, this.options.openBrowserConnector)) return;
     try {
       const url = this.options.bridge.createOpenUrl(this.publishTask.taskId, 'xiaohongshu');
       window.open(url, '_blank', 'noopener,noreferrer');
@@ -3056,15 +3102,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
     }
   }
 
-  private async openChromeExtensions(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(CHROME_EXTENSIONS_URL);
-    } catch {
-      // Direct navigation may still work when clipboard access is unavailable.
-    }
-    window.open(CHROME_EXTENSIONS_URL, '_blank', 'noopener,noreferrer');
-    new Notice('已尝试打开扩展程序管理页面；如果没有跳转，请粘贴已复制的地址。');
-  }
+  private openChromeExtensions(): void { this.options.openBrowserConnector(); }
 
   private async saveDraft(): Promise<void> {
     if (this.saveTimer !== null) {
@@ -3092,6 +3130,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
         copyMode: this.quickCopyMode,
         selectedImageIds: [...this.quickSelectedImageIds],
         previewPlatform: this.quickPreviewPlatform,
+        xPostCopy: this.quickXPostCopy,
       },
     };
     await this.options.draftStore.save(record);

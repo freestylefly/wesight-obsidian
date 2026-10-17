@@ -37,9 +37,9 @@ function billing(membershipActive: boolean): CloudBillingSummary {
 }
 
 describe('multi-platform membership access', () => {
-  test('defines six platforms and defaults new users to Zhihu only', () => {
+  test('defines seven article platforms and defaults new users to Zhihu only', () => {
     expect(MULTI_PLATFORM_IDS).toEqual([
-      'zhihu', 'csdn', 'juejin', 'bilibili-article', 'toutiao', 'weibo-article',
+      'zhihu', 'csdn', 'juejin', 'bilibili-article', 'toutiao', 'weibo-article', 'x-article',
     ]);
     expect(DEFAULT_SETTINGS.multiPublishPlatforms).toEqual(['zhihu']);
   });

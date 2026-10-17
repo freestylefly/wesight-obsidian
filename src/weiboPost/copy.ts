@@ -3,6 +3,7 @@ import { toXhsPlainText } from '../xiaohongshu/copy';
 import type { WeiboPostCopyDraft, WeiboPostTone } from './types';
 
 export const WEIBO_POST_BODY_LIMIT = 2000;
+export const WEIBO_POST_GENERATED_COPY_LIMIT = 1000;
 export const WEIBO_POST_PREVIEW_LIMIT = 140;
 export const WEIBO_POST_MAX_TOPICS = 10;
 export const WEIBO_POST_TOPIC_LIMIT = 20;
@@ -62,7 +63,9 @@ export function buildWeiboPostCopyPrompt(
     '仅返回 JSON，不要使用 Markdown 代码围栏。',
     'JSON 格式：{"body":"微博正文","topics":["话题1","话题2"]}',
     '要求：',
-    `- 正文与最终话题合计不超过 ${WEIBO_POST_BODY_LIMIT} 个 Unicode 字符。`,
+    '- 文案建议保持在 600 到 900 字，表达简洁，避免为了凑字数扩写。',
+    `- 正文、最终话题及其间空格和空行合计不超过 ${WEIBO_POST_GENERATED_COPY_LIMIT} 个 Unicode 字符。`,
+    '- 用户自定义要求不能放宽字数限制。',
     `- 当前语气：${TONE_INSTRUCTIONS[tone]}`,
     '- 前 140 字独立成立，用户收起正文时仍能理解核心信息。',
     '- 分段清楚，可使用少量自然符号增强阅读节奏。',
@@ -92,7 +95,7 @@ export function parseWeiboPostCopyOutput(
       : [];
     const topicText = topics.map(topic => `#${topic}#`).join(' ');
     const separatorLength = topicText ? 2 : 0;
-    const bodyLimit = Math.max(0, WEIBO_POST_BODY_LIMIT - Array.from(topicText).length - separatorLength);
+    const bodyLimit = Math.max(0, WEIBO_POST_GENERATED_COPY_LIMIT - Array.from(topicText).length - separatorLength);
     const body = typeof record.body === 'string'
       ? Array.from(record.body).slice(0, bodyLimit).join('')
       : '';

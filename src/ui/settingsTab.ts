@@ -42,6 +42,7 @@ import type { GitSyncService } from '../gitSync/service';
 import { GitSyncSettingsPanel } from './gitSyncSettings';
 import { ReleaseNotesModal } from './releaseNotesModal';
 import type { LarkCliService } from '../feishu/larkCli';
+import type { MultiPublishBridge } from '../multiPublish/bridge';
 
 interface SettingsTabDeps {
   gitSync: GitSyncService;
@@ -59,6 +60,7 @@ interface SettingsTabDeps {
   knowledgeBrain: KnowledgeBrain;
   knowledgeBrainEntitlement: KnowledgeBrainEntitlementService;
   larkCli: LarkCliService;
+  multiPublishBridge: MultiPublishBridge;
 }
 
 type SettingsTabId = 'general' | 'gitSync' | AgentId;
@@ -282,7 +284,7 @@ export class WeSightSettingTab extends PluginSettingTab {
       getSettings: () => deps.getSettings(),
       saveSettings: () => deps.saveSettings(),
     });
-    this.connectorsSettings = new ConnectorsSettings({ app, larkCli: deps.larkCli });
+    this.connectorsSettings = new ConnectorsSettings({ app, auth: deps.cloudAuth, larkCli: deps.larkCli, multiPublishBridge: deps.multiPublishBridge });
     this.gitSyncSettings = new GitSyncSettingsPanel(deps.gitSync, app);
     plugin.register(deps.cloudAuth.onChange(() => {
       if (this.activeTab !== 'general') return;
@@ -300,7 +302,13 @@ export class WeSightSettingTab extends PluginSettingTab {
     this.display();
   }
 
+  openBrowserConnector(): void {
+    this.openTab('general');
+    this.connectorsSettings.focusBrowserConnector();
+  }
+
   override display(): void {
+    if (this.activeTab !== 'general') this.connectorsSettings.dispose();
     this.gitSyncSettings.dispose();
     this.disposeMemberCard?.();this.disposeMemberCard=undefined;
     this.disposeCiyuan?.(); this.disposeCiyuan = undefined;

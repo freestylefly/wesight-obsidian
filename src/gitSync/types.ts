@@ -45,6 +45,17 @@ export interface GitSyncHistory {
   message: string;
 }
 
+/** Recognizes the stored network failure emitted by automatic synchronization. */
+export function isAutomaticOfflineHistory(entry: GitSyncHistory): boolean {
+  return entry.action === '自动同步' && !entry.ok
+    && [
+      '无法连接远程仓库，请检查网络；自动同步将在下次检查时重试。',
+      '无法连接远程仓库，请检查网络。',
+      '无法连接远程仓库，请检查网络',
+      '当前离线，已跳过自动同步。',
+    ].includes(entry.message);
+}
+
 export interface GitSyncState {
   available: boolean;
   root: string | null;
@@ -67,6 +78,7 @@ export interface GitSyncState {
 export interface GitSyncResult {
   ok: boolean;
   message: string;
+  skipped?: boolean;
 }
 
 export function parseGitChanges(porcelain: string): GitSyncChange[] {

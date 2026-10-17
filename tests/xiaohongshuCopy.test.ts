@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'vitest';
 
 import {
+  buildXhsCopyPrompt,
   buildXhsPageOutlines,
+  buildXhsPostText,
+  clampXhsCopy,
   clampXhsTitle,
   createDefaultXhsPageContents,
   createInitialXhsCopy,
@@ -11,6 +14,7 @@ import {
   parseXhsSinglePageContentOutput,
   reconcileXhsPageContents,
   toXhsPlainText,
+  XHS_BODY_LIMIT,
 } from '../src/xiaohongshu/copy';
 import type { MultiPublishSnapshot } from '../src/multiPublish/types';
 import type { XhsPageContent } from '../src/xiaohongshu/types';
@@ -61,6 +65,94 @@ describe('Xiaohongshu copy transformation', () => {
 
   test('normalizes duplicate tags and removes whitespace', () => {
     expect(normalizeXhsTags(['#AI 工具', 'AI 工具', ' 内容创作 '])).toEqual(['AI工具', '内容创作']);
+  });
+
+  test('makes the complete post limit mandatory even for conflicting custom instructions', () => {
+    const prompt = buildXhsCopyPrompt(snapshot(), '请写 3000 字的正文');
+
+    expect(prompt).toContain('600 到 900 字');
+    expect(prompt).toContain('不超过 1000 个 Unicode 字符');
+    expect(prompt).toContain('正文与话题之间的两个换行也计入字数');
+    expect(prompt.indexOf('此限制优先于用户自定义要求')).toBeGreaterThan(prompt.indexOf('请写 3000 字的正文'));
+  });
+
+  test('limits initial drafts including topics without splitting Unicode characters', () => {
+    const copy = createInitialXhsCopy(snapshot({ markdown: '🚀'.repeat(1200) }));
+    const text = buildXhsPostText(copy.body, copy.tags);
+
+    expect(Array.from(text)).toHaveLength(XHS_BODY_LIMIT);
+    expect(copy.body.endsWith('…')).toBe(true);
+    expect(Array.from(copy.body).every(character => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint < 0xd800 || codePoint > 0xdfff;
+    })).toBe(true);
+  });
+
+  test('enforces the complete post limit when an AI response ignores the prompt', () => {
+    const copy = parseXhsCopyOutput(JSON.stringify({
+      title: '效率复盘',
+      body: '正文'.repeat(800),
+      tags: ['工作流', 'AI工具'],
+    }));
+
+    expect(copy?.body).toBeTruthy();
+    expect(Array.from(buildXhsPostText(copy?.body ?? '', copy?.tags ?? []))).toHaveLength(XHS_BODY_LIMIT);
+  });
+
+  test('keeps an exactly 1000 character body unchanged when there are no topics', () => {
+    const body = '字'.repeat(XHS_BODY_LIMIT);
+    expect(clampXhsCopy({ title: '标题', body, tags: [] }).body).toBe(body);
+  });
+
+  test('budgets topic markers, spaces and the blank line as part of 1000 characters', () => {
+    const tags = ['AI', '工作流'];
+    const topicLength = Array.from('#AI #工作流').length;
+    const bodyBudget = XHS_BODY_LIMIT - topicLength - 2;
+    const exactBody = '字'.repeat(bodyBudget);
+    const copy = clampXhsCopy({ title: '标题', body: `${exactBody}多`, tags });
+
+    expect(buildXhsPostText(exactBody, tags)).toBe(`${exactBody}\n\n#AI #工作流`);
+    expect(clampXhsCopy({ title: '标题', body: exactBody, tags }).body).toBe(exactBody);
+    expect(Array.from(buildXhsPostText(copy.body, copy.tags))).toHaveLength(XHS_BODY_LIMIT);
+    expect(copy.body.endsWith('…')).toBe(true);
+  });
+
+  test('caps oversized generated topics while preserving a nonempty body', () => {
+    const copy = parseXhsCopyOutput(JSON.stringify({
+      title: '标题',
+      body: '正文内容',
+      tags: Array.from({ length: 8 }, (_, index) => `${index}${'🚀'.repeat(1500)}`),
+    }));
+
+    expect(copy?.body).toBe('正文内容');
+    expect(copy?.tags).toHaveLength(8);
+    expect(copy?.tags.every(tag => Array.from(tag).length === 20)).toBe(true);
+    expect(Array.from(buildXhsPostText(copy?.body ?? '', copy?.tags ?? []))).toHaveLength(181);
+  });
+
+  test('retains normal short paragraphs and counts existing manual topics in full', () => {
+    const body = '第一段介绍问题。\n\n第二段讲清方法。\n保留这次换行。';
+    const copy = parseXhsCopyOutput(JSON.stringify({ title: '标题', body, tags: ['效率'] }));
+
+    expect(copy?.body).toBe(body);
+    expect(buildXhsPostText('正文', ['字'.repeat(1200)])).toHaveLength(1205);
+  });
+
+  test('matches platform topic formatting without truncating or deduplicating manual topics', () => {
+    expect(buildXhsPostText('  正文  ', ['#效率#', ' AI 工具 ', '', '效率']))
+      .toBe('正文\n\n#效率 #AI 工具 #效率');
+  });
+
+  test('finishes an oversized generated body at a nearby sentence or paragraph boundary', () => {
+    const sentence = `${'字'.repeat(900)}。`;
+    const paragraph = `${'字'.repeat(900)}\n\n`;
+
+    expect(clampXhsCopy({ title: '标题', body: `${sentence}${'余'.repeat(400)}`, tags: [] }).body).toBe(sentence);
+    expect(clampXhsCopy({ title: '标题', body: `${paragraph}${'余'.repeat(400)}`, tags: [] }).body).toBe(paragraph.trimEnd());
+  });
+
+  test('rejects empty generated bodies even when topics are present', () => {
+    expect(parseXhsCopyOutput(JSON.stringify({ title: '标题', body: ' \n ', tags: ['效率'] }))).toBeNull();
   });
 
   test('builds the requested number of carousel pages', () => {

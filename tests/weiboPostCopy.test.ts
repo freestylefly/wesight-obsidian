@@ -10,6 +10,7 @@ import {
   parseWeiboPostCopyOutput,
   WEIBO_POST_TOPICS_CHAR_LIMIT,
   WEIBO_POST_BODY_LIMIT,
+  WEIBO_POST_GENERATED_COPY_LIMIT,
   weiboPostPreview,
 } from '../src/weiboPost/copy';
 
@@ -40,15 +41,42 @@ describe('weibo post copy', () => {
     expect(prompt).toContain('当前语气');
     expect(prompt).toContain('更像行业简讯');
     expect(prompt).toContain(snapshot.markdown);
+    expect(prompt).toContain('600 到 900 字');
+    expect(prompt).toContain('空格和空行合计不超过 1000');
+    expect(prompt).toContain('用户自定义要求不能放宽字数限制');
   });
 
   test('parses JSON, keeps the requested tone, and clamps the body', () => {
     const output = JSON.stringify({ body: '甲'.repeat(WEIBO_POST_BODY_LIMIT + 10), topics: ['AI'] });
     const parsed = parseWeiboPostCopyOutput(output, 'casual');
     expect(Array.from(buildWeiboPostText(parsed?.body ?? '', parsed?.topics ?? [])).length)
-      .toBeLessThanOrEqual(WEIBO_POST_BODY_LIMIT);
+      .toBeLessThanOrEqual(WEIBO_POST_GENERATED_COPY_LIMIT);
     expect(parsed?.tone).toBe('casual');
     expect(weiboPostPreview(parsed?.body ?? '')).toHaveLength(140);
+  });
+
+  test('preserves an exact 1000-character result and a short result', () => {
+    const exactBody = '甲'.repeat(WEIBO_POST_GENERATED_COPY_LIMIT);
+    expect(parseWeiboPostCopyOutput(JSON.stringify({ body: exactBody, topics: [] }), 'news'))
+      .toEqual({ body: exactBody, topics: [], tone: 'news' });
+    expect(parseWeiboPostCopyOutput(JSON.stringify({ body: '第一段\n\n第二段', topics: ['AI'] }), 'casual'))
+      .toEqual({ body: '第一段\n\n第二段', topics: ['AI'], tone: 'casual' });
+  });
+
+  test('counts emoji once and reserves the rendered topic and separator budget', () => {
+    const parsed = parseWeiboPostCopyOutput(JSON.stringify({
+      body: '😀'.repeat(WEIBO_POST_GENERATED_COPY_LIMIT + 10),
+      topics: ['AI', '效率'],
+    }), 'opinion');
+    const text = buildWeiboPostText(parsed?.body ?? '', parsed?.topics ?? []);
+    expect(Array.from(text)).toHaveLength(WEIBO_POST_GENERATED_COPY_LIMIT);
+    expect(text.endsWith('\n\n#AI# #效率#')).toBe(true);
+    expect(Array.from(parsed?.body ?? '').every(character => character === '😀')).toBe(true);
+  });
+
+  test('retains the manual 2000-character editor limit', () => {
+    expect(WEIBO_POST_BODY_LIMIT).toBe(2000);
+    expect(Array.from(clampWeiboPostBody('甲'.repeat(2001)))).toHaveLength(2000);
   });
 
   test('preserves intentional spaces and line breaks while editing', () => {

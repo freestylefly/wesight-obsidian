@@ -6,6 +6,8 @@ import {
   sharedCopyToJike,
   sharedCopyToWeibo,
 } from '../src/quickTransform/copy';
+import { buildWeiboPostText } from '../src/weiboPost/copy';
+import { buildJikePostText } from '../src/jikePost/copy';
 
 describe('quick transform copy mode', () => {
   const shared = {
@@ -49,5 +51,15 @@ describe('quick transform copy mode', () => {
       'Agent',
       '效率提升',
     ]);
+  });
+
+  test('reserves the additional closing topic markers when sharing a 1000-character XHS draft', () => {
+    const long = { title: '统一标题', body: '😀'.repeat(990), tags: ['AI', '效率'] };
+    const weibo = sharedCopyToWeibo(long, { body: '', topics: [], tone: 'news' });
+    const jike = sharedCopyToJike(long, { body: '', topics: [], tone: 'experience', circle: 'AI 探索站' });
+    expect(Array.from(buildWeiboPostText(weibo.body, weibo.topics))).toHaveLength(1000);
+    expect(Array.from(buildJikePostText(jike.body, jike.topics))).toHaveLength(1000);
+    expect(weibo.body).toBe(jike.body);
+    expect(long.body).toBe('😀'.repeat(990));
   });
 });
