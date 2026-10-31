@@ -106,14 +106,27 @@ afterEach(() => {
 });
 
 describe('browser publishing connector settings', () => {
-  test('unpaired status gives installation guidance without claiming the extension is missing', () => {
-    const { parent, ui } = fixture();
+  test('unpaired users can open the store without starting a connection or checking membership', async () => {
+    const f = fixture();
+    const { parent, ui } = f;
     expect(parent.textContent).toContain('连接浏览器');
     expect(parent.textContent).toContain('会员专享');
     expect(parent.textContent).toContain('安装或更新浏览器插件');
-    expect(parent.textContent).toContain('Chrome / Arc');
+    expect(parent.textContent).toContain('Chrome 应用商店');
     expect(parent.textContent).toContain('Edge');
     expect(parent.textContent).not.toContain('未安装');
+    expect(parent.textContent).not.toContain('开发者模式');
+    expect(parent.textContent).not.toContain('下载插件 ZIP');
+    expect(parent.textContent).toContain('停用旧版扩展');
+    expect(parent.all().find(node => node.tag === 'details')?.attrs.open).toBe('');
+    await f.click('前往 Chrome 应用商店');
+    expect(window.open).toHaveBeenCalledExactlyOnceWith(
+      'https://chromewebstore.google.com/detail/wesight-%E5%8F%91%E5%B8%83%E5%8A%A9%E6%89%8B/ocgepghgjgllnkhedapekeibaeklgoik',
+      '_blank', 'noopener,noreferrer',
+    );
+    expect(f.auth.refreshBillingSummary).not.toHaveBeenCalled();
+    expect(f.bridge.createConnectionUrl).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
     ui.dispose();
   });
 

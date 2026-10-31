@@ -92,3 +92,11 @@ under Apache License 2.0. Its bundled runtime dependencies include
 twemoji-parser (MIT), core-js (MIT), punycode (MIT), and @babel/runtime (MIT).
 Their copyright notices and license texts are preserved in
 `LICENSES/twitter-text-and-dependencies.txt`. All character counting runs locally.
+
+## Marked
+
+Tencent Docs document updates use Marked 18.1.2 to convert Markdown locally.
+Marked is distributed under the MIT License, Copyright (c) 2018+, MarkedJS,
+and Copyright (c) 2011-2018, Christopher Jeffrey. Its complete upstream license
+information, including the Markdown notice, is preserved in
+`LICENSES/marked.txt` and in the standalone production bundle.

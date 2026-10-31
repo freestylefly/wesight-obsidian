@@ -5,6 +5,7 @@ import { showProviderModelPicker } from './providerModelPicker';
 import { Editor, ItemView, MarkdownRenderer, MarkdownView, Menu, Notice, setIcon, TFile, WorkspaceLeaf } from 'obsidian';
 
 import { AGENT_IDS, getAgentDescriptor } from '../agents';
+import { KNOWLEDGE_BRAIN_VISIBLE } from '../featureFlags';
 import wesightLogo from '../../assets/wesight-logo.png';
 import type { CloudAuthService } from '../share/cloudAuth';
 import type { CloudUser } from '../share/types';
@@ -161,10 +162,12 @@ export class WeSightChatView extends ItemView {
   }
 
   async activateKnowledgeMode(): Promise<void> {
+    if (!KNOWLEDGE_BRAIN_VISIBLE) return;
     await this.switchConversationMode('knowledge');
   }
 
   async saveLatestAnswerToKnowledgeBrain(): Promise<void> {
+    if (!KNOWLEDGE_BRAIN_VISIBLE) return;
     const message = [...(this.conversation?.messages ?? [])].reverse().find(item => (
       item.role === 'assistant'
       && item.content.trim().length > 0
@@ -207,7 +210,7 @@ export class WeSightChatView extends ItemView {
         this.renderAccountControl();
       });
     }
-    if (!this.knowledgeAccessUnsubscribe) {
+    if (KNOWLEDGE_BRAIN_VISIBLE && !this.knowledgeAccessUnsubscribe) {
       this.knowledgeAccessUnsubscribe = this.deps.knowledgeBrainEntitlement.onChange(() => {
         if (this.running) return;
         this.render();
@@ -625,7 +628,7 @@ export class WeSightChatView extends ItemView {
   }
 
   private knowledgeComposerPlaceholder(): string {
-    if (this.conversationMode !== 'knowledge') return 'Message WeSight...';
+    if (!KNOWLEDGE_BRAIN_VISIBLE || this.conversationMode !== 'knowledge') return 'Message WeSight...';
     const access = this.deps.knowledgeBrainEntitlement.getCurrentStatus();
     return access.allowed ? '基于知识库提问…' : (access.reason ?? '会员内测功能暂不可用');
   }
@@ -640,6 +643,7 @@ export class WeSightChatView extends ItemView {
   }
 
   private async requireKnowledgeAccess(): Promise<boolean> {
+    if (!KNOWLEDGE_BRAIN_VISIBLE) return false;
     const access = await this.deps.knowledgeBrainEntitlement.probe();
     if (access.allowed) return true;
     this.openKnowledgeAccess(access);
@@ -647,6 +651,7 @@ export class WeSightChatView extends ItemView {
   }
 
   private render(): void {
+    if (!KNOWLEDGE_BRAIN_VISIBLE) this.conversationMode = 'chat';
     this.disposeMemberCard?.();this.disposeMemberCard=undefined;
     this.hideConfigSubmenu();
     this.hideModelSubmenu();
@@ -797,31 +802,33 @@ export class WeSightChatView extends ItemView {
     }
 
     const toolbarRight = toolbar.createDiv({ cls: 'wesight-toolbar-right' });
-    const knowledgeActive = this.conversationMode === 'knowledge';
-    const knowledgeToggle = toolbarRight.createEl('button', {
-      cls: 'wesight-permission-toggle wesight-kb-mode-switch',
-      attr: {
-        type: 'button',
-        'aria-label': '切换普通对话与知识库模式',
-        'aria-pressed': String(knowledgeActive),
-      },
-    });
-    knowledgeToggle.toggleClass('is-locked', !currentAccess.allowed);
-    const knowledgeLabel = knowledgeToggle.createSpan({ cls: 'wesight-permission-label wesight-kb-mode-label', text: '知识库' });
-    if (!currentAccess.allowed) {
-      const lock = knowledgeToggle.createSpan({ cls: 'wesight-kb-mode-lock' });
-      setIcon(lock, 'lock-keyhole');
-    }
-    knowledgeLabel.toggleClass('knowledge-active', knowledgeActive);
-    const knowledgeSwitch = knowledgeToggle.createDiv({ cls: 'wesight-toggle-switch' });
-    knowledgeSwitch.toggleClass('active', knowledgeActive);
-    knowledgeToggle.onclick = () => {
-      if (!currentAccess.allowed && !knowledgeActive) {
-        this.openKnowledgeAccess(currentAccess);
-        return;
+    if (KNOWLEDGE_BRAIN_VISIBLE) {
+      const knowledgeActive = this.conversationMode === 'knowledge';
+      const knowledgeToggle = toolbarRight.createEl('button', {
+        cls: 'wesight-permission-toggle wesight-kb-mode-switch',
+        attr: {
+          type: 'button',
+          'aria-label': '切换普通对话与知识库模式',
+          'aria-pressed': String(knowledgeActive),
+        },
+      });
+      knowledgeToggle.toggleClass('is-locked', !currentAccess.allowed);
+      const knowledgeLabel = knowledgeToggle.createSpan({ cls: 'wesight-permission-label wesight-kb-mode-label', text: '知识库' });
+      if (!currentAccess.allowed) {
+        const lock = knowledgeToggle.createSpan({ cls: 'wesight-kb-mode-lock' });
+        setIcon(lock, 'lock-keyhole');
       }
-      void this.switchConversationMode(knowledgeActive ? 'chat' : 'knowledge');
-    };
+      knowledgeLabel.toggleClass('knowledge-active', knowledgeActive);
+      const knowledgeSwitch = knowledgeToggle.createDiv({ cls: 'wesight-toggle-switch' });
+      knowledgeSwitch.toggleClass('active', knowledgeActive);
+      knowledgeToggle.onclick = () => {
+        if (!currentAccess.allowed && !knowledgeActive) {
+          this.openKnowledgeAccess(currentAccess);
+          return;
+        }
+        void this.switchConversationMode(knowledgeActive ? 'chat' : 'knowledge');
+      };
+    }
 
     this.sendButtonEl = toolbarRight.createEl('button', { cls: 'clickable-icon wesight-send-btn' });
     setIcon(this.sendButtonEl, 'arrow-up');
@@ -1452,7 +1459,7 @@ export class WeSightChatView extends ItemView {
     body.createDiv({ cls: 'wesight-history-item-title', text: conversation.title || '未命名对话' });
     body.createDiv({
       cls: 'wesight-history-item-meta',
-      text: `${conversation.mode === 'knowledge' ? '知识库 · ' : ''}${getAgentDescriptor(conversation.agentId).displayName} · ${formatRelativeTime(conversation.updatedAt)}`,
+      text: `${KNOWLEDGE_BRAIN_VISIBLE && conversation.mode === 'knowledge' ? '知识库 · ' : ''}${getAgentDescriptor(conversation.agentId).displayName} · ${formatRelativeTime(conversation.updatedAt)}`,
     });
     item.onclick = () => {
       void this.openHistoryConversation(conversation);
@@ -1470,7 +1477,7 @@ export class WeSightChatView extends ItemView {
     this.hideHistoryPopover();
     await this.discardPendingInputAttachments();
     this.conversation = conversation;
-    this.conversationMode = conversation.mode ?? 'chat';
+    this.conversationMode = KNOWLEDGE_BRAIN_VISIBLE ? (conversation.mode ?? 'chat') : 'chat';
     if (this.agentId !== conversation.agentId) {
       this.agentId = conversation.agentId;
     }
@@ -1893,7 +1900,7 @@ export class WeSightChatView extends ItemView {
         );
       };
     }
-    if (message.metadata?.knowledgeBased) item.createDiv({ cls: 'wesight-kb-answer-badge', text: '基于知识库' });
+    if (KNOWLEDGE_BRAIN_VISIBLE && message.metadata?.knowledgeBased) item.createDiv({ cls: 'wesight-kb-answer-badge', text: '基于知识库' });
     if (message.role === 'assistant' || message.role === 'error') {
       if (message.role === 'assistant' && message.metadata?.process?.length) {
         const collapsed = message.metadata.processCollapsed !== false;
@@ -2074,6 +2081,7 @@ export class WeSightChatView extends ItemView {
   }
 
   private renderKnowledgeBrainSaveButton(parent: HTMLElement, message: ChatMessage): void {
+    if (!KNOWLEDGE_BRAIN_VISIBLE) return;
     if (!message.content.trim() || message.metadata?.cancelled) return;
     const saved = message.metadata?.knowledgeSave;
     if (saved) {
@@ -2223,6 +2231,7 @@ export class WeSightChatView extends ItemView {
 
   private async sendPreparedMessage(): Promise<void> {
     if (this.running) return;
+    if (!KNOWLEDGE_BRAIN_VISIBLE) this.conversationMode = 'chat';
     this.cancelledByUser = false;
     const rawPrompt = this.inputEl.value.trim();
     const inputAttachments = this.conversationMode === 'chat' ? [...this.pendingInputAttachments] : [];
@@ -2554,6 +2563,7 @@ export class WeSightChatView extends ItemView {
   }
 
   private async switchConversationMode(mode: ConversationMode): Promise<void> {
+    if (!KNOWLEDGE_BRAIN_VISIBLE && mode === 'knowledge') return;
     if (this.running || mode === this.conversationMode) return;
     if (mode === 'knowledge' && !(await this.requireKnowledgeAccess())) return;
     await this.discardPendingInputAttachments();
@@ -2756,7 +2766,7 @@ export class WeSightChatView extends ItemView {
   }
 
   private updateRunControls(): void {
-    const knowledgeLocked = this.conversationMode === 'knowledge'
+    const knowledgeLocked = KNOWLEDGE_BRAIN_VISIBLE && this.conversationMode === 'knowledge'
       && !this.deps.knowledgeBrainEntitlement.getCurrentStatus().allowed;
     if (this.sendButtonEl) {
       this.sendButtonEl.disabled = this.running || this.importingAttachments || knowledgeLocked;

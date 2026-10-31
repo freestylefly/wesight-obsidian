@@ -40,10 +40,13 @@ function encodedToken(contentHash: string): string {
 }
 
 function resolveImage(app: App, sourcePath: string, linkPath: string): TFile | null {
-  const cleanPath = decodeURIComponent(linkPath)
+  const rawPath = linkPath
     .replace(/^<|>$/g, '')
     .split('#', 1)[0]
+    .replace(/\\([\\() ])/g, '$1')
     .trim();
+  let cleanPath = rawPath;
+  try { cleanPath = decodeURIComponent(rawPath); } catch { /* Vault filenames may contain a literal percent sign. */ }
   if (!cleanPath || /^(?:https?:|data:|wesight-asset:)/i.test(cleanPath)) return null;
   const resolved = app.metadataCache.getFirstLinkpathDest(cleanPath, sourcePath);
   return resolved instanceof TFile && imageMimeType(resolved) ? resolved : null;
@@ -112,10 +115,10 @@ export async function buildShareSnapshot(app: App, file: TFile): Promise<ShareSn
 
   markdown = await replaceAsync(
     markdown,
-    /!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g,
+    /!\[([^\]]*)\]\(\s*(<[^>\r\n]+>|(?:\\.|[^\\()\s]|\((?:\\.|[^\\()\s])*\))+)(?:\s+["'][^"']*["'])?\s*\)/g,
     async (match) => {
       const target = match[2];
-      if (/^(?:https?:|data:|wesight-asset:)/i.test(target)) return match[0];
+      if (/^(?:https?:|data:|wesight-asset:)/i.test(target.replace(/^<|>$/g, ''))) return match[0];
       const image = resolveImage(app, file.path, target);
       if (!image) {
         warnings.add(`图片“${target}”无法解析，线上文章将保留原始链接`);

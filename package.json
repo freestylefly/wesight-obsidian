@@ -1,6 +1,6 @@
 {
   "name": "wesight-obsidian",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "WeSight Obsidian plugin for local agent runtimes.",
   "type": "module",
   "main": "main.js",
@@ -38,6 +38,7 @@
   "dependencies": {
     "@codemirror/state": "^6.5.0",
     "@codemirror/view": "^6.38.6",
+    "marked": "^18.1.2",
     "qrcode": "^1.5.4",
     "twitter-text": "3.1.0"
   }

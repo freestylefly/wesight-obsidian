@@ -1,7 +1,7 @@
-import { App, Notice, setIcon } from 'obsidian';
+import { App, setIcon } from 'obsidian';
 
 import type { MultiPublishBridge } from '../multiPublish/bridge';
-import { CHROME_EXTENSION_DOWNLOAD_URL, CHROME_INSTALL_STEPS } from '../multiPublish/installGuide';
+import { CHROME_WEB_STORE_URL, CHROME_INSTALL_STEPS } from '../multiPublish/installGuide';
 import type { CloudAuthService } from '../share/cloudAuth';
 import { requireMemberFeature } from './memberFeatureGate';
 import { confirmShareAction } from './shareConfirm';
@@ -127,14 +127,16 @@ export class BrowserConnectorSettings {
       row.createSpan({ text: `：${step.description}` });
     }
     const actions = guide.createDiv({ cls: 'wesight-connector-actions' });
-    this.addButton(actions, '下载插件 ZIP', () => {
-      window.open(CHROME_EXTENSION_DOWNLOAD_URL, '_blank', 'noopener,noreferrer');
-    });
-    this.addButton(actions, 'Chrome / Arc 扩展管理', () => void this.openExtensions('chrome://extensions/'));
-    this.addButton(actions, 'Edge 扩展管理', () => void this.openExtensions('edge://extensions/'));
+    this.addButton(actions, '前往 Chrome 应用商店', () => {
+      window.open(CHROME_WEB_STORE_URL, '_blank', 'noopener,noreferrer');
+    }, true);
     guide.createDiv({
       cls: 'wesight-connector-note',
-      text: '管理页无法直接打开时，可将已复制的地址粘贴到对应浏览器。更新时使用新文件夹重新加载扩展，再回到这里连接。',
+      text: '商店版由浏览器自动更新。需要更新时，可前往商店查看，再回到这里重新连接。',
+    });
+    guide.createDiv({
+      cls: 'wesight-connector-note',
+      text: '曾通过 ZIP 安装的用户，请先处理旧版中的未完成草稿，再停用旧版扩展，安装商店版后重新连接。',
     });
   }
 
@@ -201,18 +203,6 @@ export class BrowserConnectorSettings {
       this.disconnecting = false;
       this.renderCard();
     }
-  }
-
-  private async openExtensions(url: string): Promise<void> {
-    let copied = false;
-    try {
-      await navigator.clipboard.writeText(url);
-      copied = true;
-    } catch {
-      // Navigation can still succeed without clipboard permission.
-    }
-    window.open(url, '_blank', 'noopener,noreferrer');
-    new Notice(copied ? `已复制 ${url}，若未跳转请粘贴到对应浏览器。` : `请在对应浏览器地址栏打开 ${url}`);
   }
 
   private clearTimer(): void {

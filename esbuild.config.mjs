@@ -20,12 +20,13 @@ const rawTextPlugin = {
   },
 };
 
-// Retain bundled font copyright and OFL terms in the standalone release asset.
+// Retain bundled runtime and font notices in the standalone release asset.
 const fontNotices = await Promise.all([
   'LICENSES/NotoSansSC-OFL-1.1.txt',
   'LICENSES/NotoSerifSC-OFL-1.1.txt',
   'LICENSES/MaShanZheng-OFL-1.1.txt',
   'LICENSES/ZCOOLKuaiLe-OFL-1.1.txt',
+  'LICENSES/marked.txt',
 ].map(async file => `${file}\n${await fs.readFile(file, 'utf8')}`));
 
 const context = await esbuild.context({

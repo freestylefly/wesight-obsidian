@@ -13,9 +13,13 @@ WeSight detects existing executables from the configured path, the system path, 
 
 ## Features
 
+### 1.5.0 release
+
+The [1.5.0 update](docs/releases/1.5.0.md) adds Tencent Docs browser authorization, publishing with images, and updates to the original document while keeping its link. It improves image-link handling and Chrome Web Store installation guidance, and temporarily hides Knowledge Brain entry points while preserving existing files and history. The release notes also cover the available cloud improvements for membership cancellation and Watcha account lookup. Use **版本更新说明** in the avatar menu or general settings to read this release and recent version changes offline.
+
 ### 1.4.0 release
 
-The [1.4.0 update](docs/releases/1.4.0.md) adds the browser dynamic publishing center, X posts in quick conversion, centralized browser connector settings, and membership checks for conversion and browser handoff. It also improves generated copy limits and skips automatic Git sync while offline. Update the [browser publishing assistant to 1.1.0](https://github.com/freestylefly/wesight-chrome/releases/tag/v1.1.0) alongside the plugin. Use **版本更新说明** in the avatar menu or general settings to read this release and recent version changes offline.
+The [1.4.0 update](docs/releases/1.4.0.md) adds the browser dynamic publishing center, X posts in quick conversion, centralized browser connector settings, and membership checks for conversion and browser handoff. It also improves generated copy limits and skips automatic Git sync while offline. Install or update the [browser publishing assistant from the Chrome Web Store](https://chromewebstore.google.com/detail/wesight-%E5%8F%91%E5%B8%83%E5%8A%A9%E6%89%8B/ocgepghgjgllnkhedapekeibaeklgoik) alongside the plugin. Use **版本更新说明** in the avatar menu or general settings to read this release and recent version changes offline.
 
 ### GitHub team collaboration
 
@@ -39,7 +43,9 @@ An active membership is required for both single-platform and multi-platform con
 
 **分享 → 多平台** opens the browser's **WeSight publish center** with the current note already imported. In the publish center you can adjust the title, summary, cover, and Markdown body, then tick Zhihu, CSDN, Juejin, Bilibili articles, Toutiao, Weibo articles, or X Articles and start syncing. The publish center also imports local `.md` files (select the images alongside them) and article links. The social workbench additionally prepares Xiaohongshu image posts, Weibo image posts, and Jike posts.
 
-Install the latest [WeSight Publish Assistant](https://github.com/freestylefly/wesight-chrome/releases) in Chrome, Edge, or Arc and follow the one-time local pairing flow; older extension versions are asked to update. The plugin starts a temporary HTTP service bound only to `127.0.0.1`. The article handoff expires after ten minutes, and sync progress is reported back to Obsidian for two hours. Article and image transfer to the extension does not use WeSight Cloud. The extension keeps the current publish-center draft in its local browser storage and uploads to the platforms you choose using the browser's existing signed-in session. The extension uses the same WeSight account system and displays the verified profile in its header. Free users sync one platform at a time; members can select several. The extension restores your previous platform choices, uses the first body image as the default cover, previews with the Canghe green theme, and checks X’s 15-image limit only when X is selected. Leading publication badges are removed from the publishing copy.
+Install [WeSight Publish Assistant from the Chrome Web Store](https://chromewebstore.google.com/detail/wesight-%E5%8F%91%E5%B8%83%E5%8A%A9%E6%89%8B/ocgepghgjgllnkhedapekeibaeklgoik), then return to **Settings → WeSight → General → Connectors** to connect it. The store-installed extension updates automatically through your browser; if an update is requested, check the store and reconnect from Connectors after updating. When migrating from a ZIP-installed extension, save or finish its browser drafts first, disable the old extension, install the store version, and reconnect from Connectors.
+
+The plugin starts a temporary HTTP service bound only to `127.0.0.1`. The article handoff expires after ten minutes, and sync progress is reported back to Obsidian for two hours. Article and image transfer to the extension does not use WeSight Cloud. The extension keeps the current publish-center draft in its local browser storage and uploads to the platforms you choose using the browser's existing signed-in session. The extension uses the same WeSight account system and displays the verified profile in its header. Free users sync one platform at a time; members can select several. The extension restores your previous platform choices, uses the first body image as the default cover, previews with the Canghe green theme, and checks X’s 15-image limit only when X is selected. Leading publication badges are removed from the publishing copy.
 
 The publish center shows per-platform status, editor links, login recovery, and retries. All workflows stop at an editable draft: **you perform the final Publish action**. The existing WeChat draft service continues separately.
 
@@ -69,6 +75,8 @@ Local chats and inline edits run the selected CLI as a child process. Agent capa
 Chat image input supports PNG, JPEG, WebP, and GIF files up to 25 MB each. Selected images are copied into the current vault, shown with the conversation, and passed to the selected agent CLI as local attachments. The CLI and its configured provider determine whether those image bytes leave the device.
 
 ### Knowledge Brain
+
+Knowledge Brain entry points are temporarily hidden in this build. Existing knowledge files and conversation history are preserved.
 
 Knowledge Brain is an opt-in local knowledge workflow powered by [claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian). It is available as a member-only internal test and does not consume WeSight credits. The first release supports local macOS vaults, Python 3.11 or later, and Claude Code or Codex.
 
@@ -104,6 +112,10 @@ Open the sharing panel and choose **Feishu Documents**. WeSight detects your exi
 
 Lark CLI and the operating system credential store retain Feishu tokens. WeSight stores a non-secret authorization status record at `~/.wesight/lark/authorization.json`. The vault, note frontmatter, and WeSight logs do not store Feishu access tokens, refresh tokens, device codes, or authorization URLs.
 
+### Tencent Docs
+
+Connect Tencent Docs below Feishu in **Settings → WeSight → 连接器**. Choose **登录授权**, sign in and authorize in the official browser page, and keep settings open while WeSight completes the connection automatically. Credentials are kept in Obsidian SecretStorage; manual token entry remains available in the collapsed fallback section. In the sharing panel, **腾讯文档** appears immediately after Feishu. Publish the note and its images once, then update the same document while keeping its link. Unchanged notes show an up-to-date status; creating a separate document remains available. The document link, title, content fingerprint, and publication time are saved to the note's frontmatter. See the [Tencent Docs setup guide](docs/tencent-docs.md).
+
 ### WeChat Official Account drafts
 
 Open the sharing panel and choose **公众号草稿**, or run **WeSight: 同步当前笔记到公众号草稿箱**. Configure an Official Account under **Settings → WeSight → 发布平台**, preview the rendered article, and then create or update a cloud-managed draft.
@@ -130,7 +142,7 @@ The plugin connects to remote services only for features that need them:
 - `api.wesight.ai` handles WeSight sign-in, Knowledge Brain member entitlements, share snapshots, share assets, comments configuration, and WeChat draft operations.
 - `share.wesight.ai` hosts links created by the internet-sharing feature.
 - GitHub Releases provides the latest formal WeSight plugin manifest for update discovery and hosts optional Knowledge Brain resources.
-- GitHub Releases also hosts the separately installed Chrome/Edge publishing assistant. Local pairing and publishing tasks use `127.0.0.1`; the extension contacts the selected content platforms.
+- The [Chrome Web Store](https://chromewebstore.google.com/detail/wesight-%E5%8F%91%E5%B8%83%E5%8A%A9%E6%89%8B/ocgepghgjgllnkhedapekeibaeklgoik) provides installation and browser-managed automatic updates for the publishing assistant. Local pairing and publishing tasks use `127.0.0.1`; the extension contacts the selected content platforms.
 - The provider URL selected in settings may be contacted to load its model list. Agent subprocesses contact providers according to their own configuration.
 - Generating a Skill-based WeChat theme sends the article Markdown to the provider used by the selected agent configuration.
 - Lark CLI contacts Feishu when you configure, authorize, create, or update a document.

@@ -7,6 +7,8 @@ import { confirmShareAction } from './shareConfirm';
 import type { MultiPublishBridge } from '../multiPublish/bridge';
 import type { CloudAuthService } from '../share/cloudAuth';
 import { BrowserConnectorSettings } from './browserConnectorSettings';
+import type { TencentDocsService } from '../tencentDocs/service';
+import { TencentDocsConnectorSettings } from './tencentDocsConnectorSettings';
 
 const LARK_CLI_INSTALL_URL = 'https://github.com/larksuite/cli#installation';
 
@@ -14,6 +16,7 @@ interface ConnectorsSettingsOptions {
   app: App;
   auth: CloudAuthService;
   larkCli: LarkCliService;
+  tencentDocs: TencentDocsService;
   multiPublishBridge: MultiPublishBridge;
 }
 
@@ -29,7 +32,7 @@ function formatAuthorizedAt(value: string | null): string {
 }
 
 /**
- * 通用设置中的连接器，集中管理浏览器发布与飞书授权。
+ * 通用设置中的连接器，集中管理文档授权与浏览器发布。
  */
 export class ConnectorsSettings {
   private container: HTMLElement | null = null;
@@ -40,9 +43,11 @@ export class ConnectorsSettings {
   private error: string | null = null;
   private unsubscribe: (() => void) | null = null;
   private readonly browserConnector: BrowserConnectorSettings;
+  private readonly tencentDocsConnector: TencentDocsConnectorSettings;
 
   constructor(private readonly options: ConnectorsSettingsOptions) {
     this.browserConnector = new BrowserConnectorSettings({ app: options.app, auth: options.auth, bridge: options.multiPublishBridge });
+    this.tencentDocsConnector = new TencentDocsConnectorSettings({ app: options.app, service: options.tencentDocs });
   }
 
   render(parent: HTMLElement): void {
@@ -54,10 +59,12 @@ export class ConnectorsSettings {
     });
     this.container = section.createDiv({ cls: 'wesight-connector-card' });
     this.renderFeishu();
+    this.tencentDocsConnector.render(section);
     this.browserConnector.render(section);
   }
 
   activate(): void {
+    this.tencentDocsConnector.activate();
     this.browserConnector.activate();
     if (!this.unsubscribe) {
       this.unsubscribe = this.options.larkCli.onProgress(progress => {
@@ -70,6 +77,7 @@ export class ConnectorsSettings {
   }
 
   dispose(): void {
+    this.tencentDocsConnector.dispose();
     this.browserConnector.dispose();
     this.unsubscribe?.();
     this.unsubscribe = null;
@@ -82,6 +90,10 @@ export class ConnectorsSettings {
 
   focusBrowserConnector(): void {
     this.browserConnector.focus();
+  }
+
+  focusTencentDocsConnector(): void {
+    this.tencentDocsConnector.focus();
   }
 
   private async refresh(): Promise<void> {

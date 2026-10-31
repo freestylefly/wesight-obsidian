@@ -2586,7 +2586,7 @@ button.wesight-provider-icon-btn svg {
 
 .wesight-share-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   min-height: 52px;
   padding: 0 20px;
   border-bottom: 1px solid var(--background-modifier-border);
@@ -6763,7 +6763,8 @@ button.wesight-share-icon-button:disabled {
   padding: 18px 20px 20px;
 }
 
-.wesight-share-body.is-feishu {
+.wesight-share-body.is-feishu,
+.wesight-share-body.is-tencent-docs {
   gap: 13px;
 }
 
@@ -6957,7 +6958,8 @@ button.wesight-share-primary-button {
   box-shadow: none;
 }
 
-button.wesight-share-primary-button.is-feishu {
+button.wesight-share-primary-button.is-feishu,
+button.wesight-share-primary-button.is-tencent-docs {
   border-color: #1769ff;
   background: #1769ff;
 }
@@ -7503,7 +7505,8 @@ body.theme-dark button.wesight-share-primary-button {
   color: #111827;
 }
 
-body.theme-dark button.wesight-share-primary-button.is-feishu {
+body.theme-dark button.wesight-share-primary-button.is-feishu,
+body.theme-dark button.wesight-share-primary-button.is-tencent-docs {
   border-color: #3b82f6;
   background: #3b82f6;
   color: white;
@@ -10002,6 +10005,67 @@ button.wesight-picker-manage { flex-shrink: 0; margin-top: 8px; padding: 8px 4px
   outline-offset: 3px;
 }
 
+.wesight-tencent-docs-connector:focus {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 3px;
+}
+
+.wesight-connector-logo.is-tencent-docs,
+.wesight-feishu-logo.is-tencent-docs {
+  background: rgba(23, 105, 255, 0.1);
+  color: #1769ff;
+}
+
+.is-tencent-docs > svg {
+  width: 26px;
+  height: 26px;
+}
+
+.wesight-tencent-docs-token-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.wesight-tencent-docs-connector > details {
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 10px;
+}
+
+.wesight-tencent-docs-connector summary {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--font-ui-small);
+}
+
+.wesight-tencent-docs-token-form input {
+  width: 100%;
+  min-width: 0;
+}
+
+.wesight-share-published-url {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.wesight-share-published-url svg {
+  width: 16px;
+  height: 16px;
+}
+
+@media (max-width: 430px) {
+  .wesight-share-tabs {
+    padding: 0 12px;
+  }
+
+  button.wesight-share-tab {
+    padding: 0 4px;
+    font-size: 12px;
+  }
+}
+
 .wesight-browser-install-guide {
   border-top: 1px solid var(--background-modifier-border);
   padding-top: 10px;
@@ -10028,15 +10092,18 @@ button.wesight-picker-manage { flex-shrink: 0; margin-top: 8px; padding: 8px 4px
 }
 
 @media (max-width: 620px) {
-  .wesight-browser-connector .wesight-connector-header {
+  .wesight-browser-connector .wesight-connector-header,
+  .wesight-tencent-docs-connector .wesight-connector-header {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .wesight-browser-connector .wesight-connector-header > .wesight-connector-actions {
+  .wesight-browser-connector .wesight-connector-header > .wesight-connector-actions,
+  .wesight-tencent-docs-connector .wesight-connector-header > .wesight-connector-actions {
     grid-column: 2;
   }
 
-  .wesight-browser-connector .wesight-connector-title {
+  .wesight-browser-connector .wesight-connector-title,
+  .wesight-tencent-docs-connector .wesight-connector-title {
     flex-wrap: wrap;
   }
 }

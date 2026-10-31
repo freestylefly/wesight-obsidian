@@ -21,6 +21,7 @@ for (const file of [
   'README.md',
   'LICENSE',
   'LICENSES/MIT.txt',
+  'LICENSES/marked.txt',
   'THIRD_PARTY_NOTICES.md',
   'main.js',
   'manifest.json',
@@ -55,6 +56,11 @@ requireCondition(license.includes('GNU AFFERO GENERAL PUBLIC LICENSE'), 'Root li
 
 const bundle = fs.readFileSync('main.js', 'utf8');
 requireCondition(bundle.includes('SIL OPEN FONT LICENSE'), 'Production bundle must retain the bundled font license.');
+requireCondition(
+  bundle.includes('Copyright (c) 2018+, MarkedJS')
+    && bundle.includes('Copyright (c) 2011-2018, Christopher Jeffrey'),
+  'Production bundle must retain the bundled Marked copyright notices.',
+);
 requireCondition(!/sourceMappingURL=/.test(bundle), 'Production main.js must not include a source map.');
 requireCondition(
   !/\bimport\(\s*["'](?:node:)?(?:assert|buffer|child_process|crypto|events|fs(?:\/promises)?|https?|os|path|stream|url|util|zlib)["']\s*\)/.test(bundle),

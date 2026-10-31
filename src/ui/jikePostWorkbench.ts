@@ -595,7 +595,7 @@ export class JikePostWorkbench {
     });
     connectionCopy.createSpan({
       text: extensionNeedsUpdate
-        ? '请更新本地扩展后再使用即刻动态'
+        ? '请前往 Chrome 应用商店更新，再回到连接器设置重新连接'
         : '正文和图片仅通过 127.0.0.1 临时通道传输',
     });
     if (extensionNeedsUpdate) {
@@ -653,7 +653,7 @@ export class JikePostWorkbench {
     });
     copy.createSpan({
       text: extensionNeedsUpdate
-        ? '请重新加载支持即刻动态的最新扩展'
+        ? '请前往 Chrome 应用商店更新，再回到连接器设置重新连接'
         : state.message || JIKE_PUBLISH_STATUS[state.status],
     });
     if (state.warnings.length) copy.createSpan({ text: state.warnings[0] });

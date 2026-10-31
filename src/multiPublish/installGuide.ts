@@ -1,22 +1,17 @@
-export const CHROME_EXTENSION_DOWNLOAD_URL =
-  'https://github.com/freestylefly/wesight-chrome/releases/latest/download/wesight-chrome.zip';
-export const CHROME_EXTENSIONS_URL = 'chrome://extensions/';
+export const CHROME_WEB_STORE_URL =
+  'https://chromewebstore.google.com/detail/wesight-%E5%8F%91%E5%B8%83%E5%8A%A9%E6%89%8B/ocgepghgjgllnkhedapekeibaeklgoik';
 
 export const CHROME_INSTALL_STEPS = [
   {
-    title: '下载浏览器插件',
-    description: '下载 WeSight 发布助手 ZIP 安装包。',
+    title: '打开 Chrome 应用商店',
+    description: '在要使用发布助手的浏览器中打开 WeSight 发布助手商店页。',
   },
   {
-    title: '解压安装包',
-    description: '把 wesight-chrome.zip 解压为完整文件夹。',
+    title: '添加浏览器插件',
+    description: '点击“添加至 Chrome”并确认添加扩展程序。Edge 如有提示，请允许来自其他商店的扩展。',
   },
   {
-    title: '打开扩展管理页',
-    description: '进入 Chrome、Edge 或 Arc 的扩展程序管理页面。',
-  },
-  {
-    title: '加载插件文件夹',
-    description: '开启右上角“开发者模式”，点击左上角“加载已解压的扩展程序”，选择刚解压的 wesight-chrome 文件夹；也可以把该文件夹拖入此页面。',
+    title: '返回 Obsidian 连接',
+    description: '安装完成后，回到上方点击“连接浏览器”或“重新连接”，并在安装了发布助手的浏览器中打开连接页。',
   },
 ] as const;

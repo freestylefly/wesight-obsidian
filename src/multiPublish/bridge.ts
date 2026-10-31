@@ -2,6 +2,7 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import http, { type IncomingMessage, type ServerResponse } from 'http';
 
 import type { MultiPublishAccess } from './access';
+import { CHROME_WEB_STORE_URL } from './installGuide';
 import type { CloudUser } from '../share/types';
 import type {
   MultiPlatformId,
@@ -112,10 +113,10 @@ async function readJson(request: IncomingMessage): Promise<{ raw: string; value:
 
 function bridgePage(connect: boolean): string {
   const message = connect
-    ? '正在连接浏览器插件…若没有反应，请更新扩展并回到 Obsidian 设置 → 连接器重试。'
+    ? '正在连接浏览器插件…若没有反应，请安装或更新发布助手，再回到 Obsidian 设置 → 连接器重试。'
     : '正在等待浏览器扩展响应…';
   const help = connect
-    ? '<p style="margin-top:14px">如果提示任务链接不完整，或页面没有响应，请先更新浏览器插件，再回到 Obsidian 设置 → 连接器重新连接。</p>'
+    ? `<p style="margin-top:14px">如果提示任务链接不完整，或页面没有响应，请<a href="${CHROME_WEB_STORE_URL}" target="_blank" rel="noopener noreferrer">前往 Chrome 应用商店安装或更新</a>，再回到 Obsidian 设置 → 连接器重新连接。</p>`
     : '';
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WeSight 发布助手</title><style>body{margin:0;background:#f8f6f3;color:#342923;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{max-width:520px;margin:12vh auto;padding:30px;border:1px solid #eadfd8;border-radius:16px;background:#fff;box-shadow:0 18px 50px rgba(80,54,40,.08)}h1{margin:0 0 10px;font-size:20px;color:#d97757}p{margin:0;color:#736159}</style></head><body><main class="card"><h1>WeSight 发布助手</h1><p id="wesight-bridge-status">${message}</p>${help}</main></body></html>`;
 }

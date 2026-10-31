@@ -97,6 +97,7 @@ describe('multi-platform loopback bridge', () => {
       const pageBody = await page.text();
       expect(pageBody).toContain('正在连接浏览器插件');
       expect(pageBody).toContain('连接器重试');
+      expect(pageBody).toContain('href="https://chromewebstore.google.com/detail/wesight-%E5%8F%91%E5%B8%83%E5%8A%A9%E6%89%8B/ocgepghgjgllnkhedapekeibaeklgoik"');
       expect(pageBody).not.toContain(fragment.get('pairToken'));
       const response = await loopbackRequest(`${connection.origin}/v1/pair`, {
         method: 'POST',

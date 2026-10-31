@@ -1,25 +1,21 @@
 import {
-  CHROME_EXTENSION_DOWNLOAD_URL,
-  CHROME_EXTENSIONS_URL,
+  CHROME_WEB_STORE_URL,
   CHROME_INSTALL_STEPS,
 } from '../src/multiPublish/installGuide';
 
 describe('multi-platform extension install guide', () => {
-  test('uses the browser extension release and Chrome management links', () => {
-    expect(CHROME_EXTENSION_DOWNLOAD_URL)
-      .toBe('https://github.com/freestylefly/wesight-chrome/releases/latest/download/wesight-chrome.zip');
-    expect(CHROME_EXTENSIONS_URL).toBe('chrome://extensions/');
+  test('uses the published Chrome Web Store listing', () => {
+    expect(CHROME_WEB_STORE_URL)
+      .toBe('https://chromewebstore.google.com/detail/wesight-%E5%8F%91%E5%B8%83%E5%8A%A9%E6%89%8B/ocgepghgjgllnkhedapekeibaeklgoik');
   });
 
-  test('explains the complete unpacked-extension installation flow', () => {
+  test('guides users from store installation back to connecting in Obsidian', () => {
     expect(CHROME_INSTALL_STEPS.map(step => step.title)).toEqual([
-      '下载浏览器插件',
-      '解压安装包',
-      '打开扩展管理页',
-      '加载插件文件夹',
+      '打开 Chrome 应用商店',
+      '添加浏览器插件',
+      '返回 Obsidian 连接',
     ]);
-    expect(CHROME_INSTALL_STEPS[3].description).toContain('开发者模式');
-    expect(CHROME_INSTALL_STEPS[3].description).toContain('加载已解压的扩展程序');
-    expect(CHROME_INSTALL_STEPS[3].description).toContain('拖入');
+    expect(CHROME_INSTALL_STEPS[1].description).toContain('添加至 Chrome');
+    expect(CHROME_INSTALL_STEPS[2].description).toContain('连接浏览器');
   });
 });

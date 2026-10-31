@@ -770,7 +770,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
       });
     } else if (extensionNeedsUpdate && generated) {
       status.createEl('strong', { text: '发布助手版本过旧' });
-      status.createSpan({ text: '请更新并重新加载浏览器扩展后继续' });
+      status.createSpan({ text: '请前往 Chrome 应用商店更新，再回到连接器设置重新连接' });
     } else if (this.quickOperation) {
       status.createEl('strong', { text: `正在生成 ${this.quickCompleted}/${this.quickTargets.size}` });
       const progress = status.createEl('progress', {
@@ -2012,7 +2012,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
     });
     connectionCopy.createSpan({
       text: extensionNeedsUpdate
-        ? '当前浏览器扩展还不支持小红书，请更新本地扩展后重试'
+        ? '请前往 Chrome 应用商店更新，再回到连接器设置重新连接'
         : '文案和图片仅通过 127.0.0.1 临时通道传输',
     });
     if (extensionNeedsUpdate) {
@@ -2074,7 +2074,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
     copy.createEl('strong', { text: extensionNeedsUpdate ? '发布助手版本过旧' : XHS_PUBLISH_STATUS[state.status] });
     copy.createSpan({
       text: extensionNeedsUpdate
-        ? '请在扩展管理页重新加载支持小红书的最新构建'
+        ? '请前往 Chrome 应用商店更新，再回到连接器设置重新连接'
         : state.message || XHS_PUBLISH_STATUS[state.status],
     });
     if (state.warnings.length) copy.createSpan({ text: state.warnings[0] });
@@ -2748,13 +2748,13 @@ export class XiaohongshuWorkbenchView extends ItemView {
       const connection = this.options.bridge.getConnectionState();
       if (connection.connected && connection.supportedPlatforms !== null) {
         const unsupported = targets.find(platformId => !connection.supportedPlatforms!.includes(platformId));
-        if (unsupported) throw new Error(`发布助手还不支持${QUICK_PLATFORM_COPY[unsupported].label}，请更新扩展后重试`);
+        if (unsupported) throw new Error(`发布助手还不支持${QUICK_PLATFORM_COPY[unsupported].label}，请前往 Chrome 应用商店更新，再回到连接器设置重新连接`);
       }
       if (connection.connected
         && connection.capabilities !== null
         && [QUICK_PUBLISH_CAPABILITY, 'compose-v1', DYNAMIC_COMPOSE_CAPABILITY]
           .some(capability => !connection.capabilities!.includes(capability))) {
-        throw new Error('发布助手版本过旧，请更新并重新加载扩展后使用动态发布中心');
+        throw new Error('发布助手版本过旧，暂不支持动态发布中心，请前往 Chrome 应用商店更新，再回到连接器设置重新连接');
       }
 
       const snapshots: QuickPublishSnapshotMap = {};

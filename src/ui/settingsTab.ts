@@ -25,6 +25,7 @@ import { fetchProviderModels, resolveProviderModels, testProviderConnection } fr
 import type { WeChatCloudApi } from '../wechat/cloudApi';
 import { promptForText } from './textPromptModal';
 import type { KnowledgeBrain } from '../knowledgeBrain/service';
+import { KNOWLEDGE_BRAIN_VISIBLE } from '../featureFlags';
 import type { KnowledgeBrainEntitlementService } from '../knowledgeBrain/entitlement';
 import { KnowledgeBrainAccessModal } from '../knowledgeBrain/accessModal';
 import type { KnowledgeBrainAccessStatus } from '../knowledgeBrain/types';
@@ -42,6 +43,7 @@ import type { GitSyncService } from '../gitSync/service';
 import { GitSyncSettingsPanel } from './gitSyncSettings';
 import { ReleaseNotesModal } from './releaseNotesModal';
 import type { LarkCliService } from '../feishu/larkCli';
+import type { TencentDocsService } from '../tencentDocs/service';
 import type { MultiPublishBridge } from '../multiPublish/bridge';
 
 interface SettingsTabDeps {
@@ -60,6 +62,7 @@ interface SettingsTabDeps {
   knowledgeBrain: KnowledgeBrain;
   knowledgeBrainEntitlement: KnowledgeBrainEntitlementService;
   larkCli: LarkCliService;
+  tencentDocs: TencentDocsService;
   multiPublishBridge: MultiPublishBridge;
 }
 
@@ -284,16 +287,18 @@ export class WeSightSettingTab extends PluginSettingTab {
       getSettings: () => deps.getSettings(),
       saveSettings: () => deps.saveSettings(),
     });
-    this.connectorsSettings = new ConnectorsSettings({ app, auth: deps.cloudAuth, larkCli: deps.larkCli, multiPublishBridge: deps.multiPublishBridge });
+    this.connectorsSettings = new ConnectorsSettings({ app, auth: deps.cloudAuth, larkCli: deps.larkCli, tencentDocs: deps.tencentDocs, multiPublishBridge: deps.multiPublishBridge });
     this.gitSyncSettings = new GitSyncSettingsPanel(deps.gitSync, app);
     plugin.register(deps.cloudAuth.onChange(() => {
       if (this.activeTab !== 'general') return;
       this.publishingSettings.activate(true);
       this.display();
     }));
-    plugin.register(deps.knowledgeBrainEntitlement.onChange(() => {
-      if (this.activeTab === 'general') this.display();
-    }));
+    if (KNOWLEDGE_BRAIN_VISIBLE) {
+      plugin.register(deps.knowledgeBrainEntitlement.onChange(() => {
+        if (this.activeTab === 'general') this.display();
+      }));
+    }
   }
 
   openTab(tab: SettingsTabId): void {
@@ -305,6 +310,11 @@ export class WeSightSettingTab extends PluginSettingTab {
   openBrowserConnector(): void {
     this.openTab('general');
     this.connectorsSettings.focusBrowserConnector();
+  }
+
+  openTencentDocsConnector(): void {
+    this.openTab('general');
+    this.connectorsSettings.focusTencentDocsConnector();
   }
 
   override display(): void {
@@ -332,7 +342,7 @@ export class WeSightSettingTab extends PluginSettingTab {
       this.publishingSettings.activate();
       this.renderEnvironment(panel);
       this.renderPrivacy(panel);
-      this.renderKnowledgeBrainCard(panel);
+      if (KNOWLEDGE_BRAIN_VISIBLE) this.renderKnowledgeBrainCard(panel);
       return;
     }
     this.renderProfiles(panel, this.activeTab);

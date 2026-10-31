@@ -14,6 +14,7 @@ import {
 } from 'obsidian';
 
 import { DEFAULT_SETTINGS, type WeSightObsidianSettings } from './types';
+import { KNOWLEDGE_BRAIN_VISIBLE } from './featureFlags';
 import { KnowledgeBrain } from './knowledgeBrain/service';
 import { KnowledgeBrainEntitlementService } from './knowledgeBrain/entitlement';
 import { KnowledgeBrainAccessModal } from './knowledgeBrain/accessModal';
@@ -35,6 +36,7 @@ import { WeSightSettingTab } from './ui/settingsTab';
 import { CloudAuthService } from './share/cloudAuth';
 import { ShareCloudApi } from './share/cloudApi';
 import { LarkCliService } from './feishu/larkCli';
+import { TencentDocsService } from './tencentDocs/service';
 import { SharePopoverController } from './ui/sharePopover';
 import { resolveMultiPublishAccess } from './multiPublish/access';
 import { requireMemberFeature } from './ui/memberFeatureGate';
@@ -95,6 +97,7 @@ export default class WeSightPlugin extends Plugin {
   wechatThemeService!: WeChatThemeService;
   wechatTemplateThemeService!: TemplateThemeService;
   larkCli!: LarkCliService;
+  tencentDocs!: TencentDocsService;
   sharePopover!: SharePopoverController;
   multiPublishBridge!: MultiPublishBridge;
   xiaohongshuGenerationService!: XiaohongshuGenerationService;
@@ -152,8 +155,10 @@ export default class WeSightPlugin extends Plugin {
       this.cloudAuth,
       this.app.secretStorage,
     );
-    this.knowledgeBrainEntitlement.start();
-    this.register(this.knowledgeBrainEntitlement.onChange(() => this.refreshKnowledgeActionAccess()));
+    if (KNOWLEDGE_BRAIN_VISIBLE) {
+      this.knowledgeBrainEntitlement.start();
+      this.register(this.knowledgeBrainEntitlement.onChange(() => this.refreshKnowledgeActionAccess()));
+    }
     void this.cloudAuth.restoreSession();
     this.shareCloudApi = new ShareCloudApi(this.cloudAuth);
     this.wechatCloudApi = new WeChatCloudApi(this.cloudAuth);
@@ -163,6 +168,7 @@ export default class WeSightPlugin extends Plugin {
       getSettings: () => this.settings,
     });
     this.larkCli = new LarkCliService();
+    this.tencentDocs = new TencentDocsService(this.app.secretStorage);
     this.xiaohongshuDraftStore = new XiaohongshuDraftStore(this.app.vault.adapter);
     this.weiboPostDraftStore = new WeiboPostDraftStore(this.app.vault.adapter);
     this.jikePostDraftStore = new JikePostDraftStore(this.app.vault.adapter);
@@ -209,6 +215,7 @@ export default class WeSightPlugin extends Plugin {
       this.shareCloudApi,
       this.wechatCloudApi,
       this.larkCli,
+      this.tencentDocs,
       this.multiPublishBridge,
       () => this.settings,
       () => this.saveSettings(),
@@ -216,6 +223,7 @@ export default class WeSightPlugin extends Plugin {
       (file) => this.activateWeChatPreview(file),
       (file) => this.activateWeChatArticleStats(file),
       () => this.openSettings('browserConnector'),
+      () => this.openSettings('tencentDocsConnector'),
     );
     this.knowledgeBrain = new KnowledgeBrain({
       getRuntimeConfig: agentId => this.settings.configSources[agentId] === 'wesightManaged'
@@ -372,15 +380,17 @@ export default class WeSightPlugin extends Plugin {
         .setIcon('notebook-pen')
         .onClick(() => void this.activateXiaohongshuWorkbench(file)));
     }));
-    this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
-      if (!(file instanceof TFile) || file.extension !== 'md') return;
-      menu.addItem(item => item
-        .setTitle(this.knowledgeBrainEntitlement.getCurrentStatus().allowed
-          ? '收录到知识大脑'
-          : '收录到知识大脑（会员内测）')
-        .setIcon(this.knowledgeBrainEntitlement.getCurrentStatus().allowed ? 'brain' : 'lock-keyhole')
-        .onClick(() => void this.collectCurrentNote(file)));
-    }));
+    if (KNOWLEDGE_BRAIN_VISIBLE) {
+      this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
+        if (!(file instanceof TFile) || file.extension !== 'md') return;
+        menu.addItem(item => item
+          .setTitle(this.knowledgeBrainEntitlement.getCurrentStatus().allowed
+            ? '收录到知识大脑'
+            : '收录到知识大脑（会员内测）')
+          .setIcon(this.knowledgeBrainEntitlement.getCurrentStatus().allowed ? 'brain' : 'lock-keyhole')
+          .onClick(() => void this.collectCurrentNote(file)));
+      }));
+    }
 
     this.addCommand({
       id: 'inline-edit',
@@ -398,40 +408,42 @@ export default class WeSightPlugin extends Plugin {
         new Notice('WeSight stop signal sent.');
       },
     });
-    this.addCommand({
-      id: 'knowledge-brain-enable',
-      name: '开启知识大脑',
-      callback: () => void this.enableKnowledgeBrain(),
-    });
-    this.addCommand({
-      id: 'knowledge-brain-health-check',
-      name: '知识大脑健康检查',
-      checkCallback: checking => {
-        if (checking) return true;
-        void this.runKnowledgeBrainHealthCheck();
-        return true;
-      },
-    });
-    this.addCommand({
-      id: 'knowledge-brain-collect-current-note',
-      name: '收录当前笔记到知识大脑',
-      checkCallback: checking => {
-        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (!view?.file || view.file.extension !== 'md') return false;
-        if (!checking) void this.collectCurrentNote(view.file);
-        return true;
-      },
-    });
-    this.addCommand({
-      id: 'knowledge-brain-query',
-      name: '向知识大脑提问',
-      callback: () => void this.knowledgeBrainQuery(),
-    });
-    this.addCommand({
-      id: 'knowledge-brain-save-last-answer',
-      name: '保存最近 AI 回答到知识大脑',
-      callback: () => void this.saveLatestKnowledgeAnswer(),
-    });
+    if (KNOWLEDGE_BRAIN_VISIBLE) {
+      this.addCommand({
+        id: 'knowledge-brain-enable',
+        name: '开启知识大脑',
+        callback: () => void this.enableKnowledgeBrain(),
+      });
+      this.addCommand({
+        id: 'knowledge-brain-health-check',
+        name: '知识大脑健康检查',
+        checkCallback: checking => {
+          if (checking) return true;
+          void this.runKnowledgeBrainHealthCheck();
+          return true;
+        },
+      });
+      this.addCommand({
+        id: 'knowledge-brain-collect-current-note',
+        name: '收录当前笔记到知识大脑',
+        checkCallback: checking => {
+          const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+          if (!view?.file || view.file.extension !== 'md') return false;
+          if (!checking) void this.collectCurrentNote(view.file);
+          return true;
+        },
+      });
+      this.addCommand({
+        id: 'knowledge-brain-query',
+        name: '向知识大脑提问',
+        callback: () => void this.knowledgeBrainQuery(),
+      });
+      this.addCommand({
+        id: 'knowledge-brain-save-last-answer',
+        name: '保存最近 AI 回答到知识大脑',
+        callback: () => void this.saveLatestKnowledgeAnswer(),
+      });
+    }
 
 
     this.addCommand({
@@ -455,6 +467,20 @@ export default class WeSightPlugin extends Plugin {
         if (!file || file.extension !== 'md') return false;
         if (!checking) {
           this.sharePopover.open(file, view ? this.shareActions.get(view) : null, 'feishu');
+        }
+        return true;
+      },
+    });
+
+    this.addCommand({
+      id: 'publish-current-note-to-tencent-docs',
+      name: 'Publish current note to Tencent Docs',
+      checkCallback: checking => {
+        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        const file = view?.file ?? this.app.workspace.getActiveFile();
+        if (!file || file.extension !== 'md') return false;
+        if (!checking) {
+          this.sharePopover.open(file, view ? this.shareActions.get(view) : null, 'tencent-docs');
         }
         return true;
       },
@@ -519,6 +545,7 @@ export default class WeSightPlugin extends Plugin {
       knowledgeBrain: this.knowledgeBrain,
       knowledgeBrainEntitlement: this.knowledgeBrainEntitlement,
       larkCli: this.larkCli,
+      tencentDocs: this.tencentDocs,
       gitSync: this.gitSync,
       multiPublishBridge: this.multiPublishBridge,
     });
@@ -535,6 +562,7 @@ export default class WeSightPlugin extends Plugin {
     void this.multiPublishBridge?.stop();
     void this.runtimeManager?.shutdown();
     this.larkCli?.cancelActiveOperation();
+    this.tencentDocs?.cancelActiveOperation();
     this.knowledgeBrain?.cancel();
     this.knowledgeBrainEntitlement?.dispose();
     void this.knowledgeBrain?.cleanup();
@@ -720,12 +748,13 @@ export default class WeSightPlugin extends Plugin {
     ).open();
     return false;
   }
-  private openSettings(tab?: 'general' | 'gitSync' | 'browserConnector'): void {
+  private openSettings(tab?: 'general' | 'gitSync' | 'browserConnector' | 'tencentDocsConnector'): void {
     const setting = (this.app as AppWithSettings).setting;
     if (setting) {
       setting.open();
       setting.openTabById(this.manifest.id);
       if (tab === 'browserConnector') this.settingTab?.openBrowserConnector();
+      else if (tab === 'tencentDocsConnector') this.settingTab?.openTencentDocsConnector();
       else if (tab) this.settingTab?.openTab(tab);
     } else {
       new Notice('Open settings and choose WeSight.');
@@ -757,7 +786,7 @@ export default class WeSightPlugin extends Plugin {
         this.shareActionElements.add(action);
       }
       const existingKnowledge = this.knowledgeActions.get(view);
-      if (!existingKnowledge?.isConnected) {
+      if (KNOWLEDGE_BRAIN_VISIBLE && !existingKnowledge?.isConnected) {
         const action = view.addAction('brain', '收录到知识大脑', () => {
           if (view.file?.extension === 'md') void this.collectCurrentNote(view.file);
         });

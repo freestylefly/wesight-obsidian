@@ -9,17 +9,19 @@ import {
 } from '../share/snapshot';
 import type { ShareSnapshot, ShareState } from '../share/types';
 import type { LarkCliService } from '../feishu/larkCli';
+import type { TencentDocsService } from '../tencentDocs/service';
 import type { MultiPublishBridge } from '../multiPublish/bridge';
 import type { WeSightObsidianSettings } from '../types';
 import { recordValue } from '../utils/records';
 import type { WeChatCloudApi } from '../wechat/cloudApi';
 import { FeishuSharePanel } from './feishuSharePanel';
+import { TencentDocsSharePanel } from './tencentDocsSharePanel';
 import { confirmShareAction } from './shareConfirm';
 import { openBillingModal } from './billingModal';
 import { WeChatSharePanel } from './wechatSharePanel';
 import { MultiPublishPanel } from './multiPublishPanel';
 
-export type SharePopoverTab = 'internet' | 'feishu' | 'wechat' | 'multi-platform';
+export type SharePopoverTab = 'internet' | 'feishu' | 'tencent-docs' | 'wechat' | 'multi-platform';
 
 function formatPublishedAt(value: string): string {
   return new Intl.DateTimeFormat('zh-CN', {
@@ -39,6 +41,7 @@ export class SharePopoverController {
     private readonly api: ShareCloudApi,
     private readonly wechatApi: WeChatCloudApi,
     private readonly larkCli: LarkCliService,
+    private readonly tencentDocs: TencentDocsService,
     private readonly multiPublishBridge: MultiPublishBridge,
     private readonly getSettings: () => WeSightObsidianSettings,
     private readonly saveSettings: () => Promise<void>,
@@ -46,6 +49,7 @@ export class SharePopoverController {
     private readonly openWeChatPreview: (file: TFile) => Promise<void>,
     private readonly openWeChatArticleStats: (file: TFile) => Promise<void>,
     private readonly openBrowserConnector: () => void,
+    private readonly openTencentDocsSettings: () => void,
   ) {}
 
   open(
@@ -65,6 +69,7 @@ export class SharePopoverController {
       this.api,
       this.wechatApi,
       this.larkCli,
+      this.tencentDocs,
       this.multiPublishBridge,
       this.getSettings,
       this.saveSettings,
@@ -72,6 +77,7 @@ export class SharePopoverController {
       this.openWeChatPreview,
       this.openWeChatArticleStats,
       this.openBrowserConnector,
+      this.openTencentDocsSettings,
       file,
       anchor ?? null,
       initialTab,
@@ -103,6 +109,7 @@ class SharePopover {
   private loadVersion = 0;
   private authUnsubscribe: (() => void) | null = null;
   private readonly feishuPanel: FeishuSharePanel;
+  private readonly tencentDocsPanel: TencentDocsSharePanel;
   private readonly wechatPanel: WeChatSharePanel;
   private readonly multiPublishPanel: MultiPublishPanel;
   private readonly onResize = () => this.position();
@@ -116,6 +123,7 @@ class SharePopover {
     private readonly api: ShareCloudApi,
     wechatApi: WeChatCloudApi,
     larkCli: LarkCliService,
+    tencentDocs: TencentDocsService,
     multiPublishBridge: MultiPublishBridge,
     getSettings: () => WeSightObsidianSettings,
     saveSettings: () => Promise<void>,
@@ -123,6 +131,7 @@ class SharePopover {
     openWeChatPreview: (file: TFile) => Promise<void>,
     openWeChatArticleStats: (file: TFile) => Promise<void>,
     openBrowserConnector: () => void,
+    openTencentDocsSettings: () => void,
     private readonly file: TFile,
     private readonly anchor: HTMLElement | null,
     private activeTab: SharePopoverTab,
@@ -136,6 +145,14 @@ class SharePopover {
       saveSettings,
       requestRender: () => this.render(),
       requestPosition: () => this.position(),
+    });
+    this.tencentDocsPanel = new TencentDocsSharePanel({
+      app,
+      service: tencentDocs,
+      file,
+      requestRender: () => this.render(),
+      requestPosition: () => this.position(),
+      openSettings: () => { this.close(); openTencentDocsSettings(); },
     });
     this.wechatPanel = new WeChatSharePanel({
       app,
@@ -197,6 +214,8 @@ class SharePopover {
     this.position();
     if (this.activeTab === 'feishu') {
       this.feishuPanel.activate();
+    } else if (this.activeTab === 'tencent-docs') {
+      this.tencentDocsPanel.activate();
     } else if (this.activeTab === 'wechat') {
       this.wechatPanel.activate();
     } else if (this.activeTab === 'multi-platform') {
@@ -209,6 +228,7 @@ class SharePopover {
   close(): void {
     this.loadVersion += 1;
     this.feishuPanel.dispose();
+    this.tencentDocsPanel.dispose();
     this.wechatPanel.dispose();
     this.multiPublishPanel.dispose();
     this.authUnsubscribe?.();
@@ -279,10 +299,12 @@ class SharePopover {
 
     this.renderTabs();
     const body = this.panelEl.createDiv({
-      cls: `wesight-share-body${this.activeTab === 'feishu' ? ' is-feishu' : ''}${this.activeTab === 'wechat' ? ' is-wechat' : ''}${this.activeTab === 'multi-platform' ? ' is-multi-platform' : ''}`,
+      cls: `wesight-share-body${this.activeTab === 'feishu' ? ' is-feishu' : ''}${this.activeTab === 'tencent-docs' ? ' is-tencent-docs' : ''}${this.activeTab === 'wechat' ? ' is-wechat' : ''}${this.activeTab === 'multi-platform' ? ' is-multi-platform' : ''}`,
     });
     if (this.activeTab === 'feishu') {
       this.feishuPanel.render(body);
+    } else if (this.activeTab === 'tencent-docs') {
+      this.tencentDocsPanel.render(body);
     } else if (this.activeTab === 'wechat') {
       this.wechatPanel.render(body);
     } else if (this.activeTab === 'multi-platform') {
@@ -316,6 +338,7 @@ class SharePopover {
     const options: Array<{ id: SharePopoverTab; label: string; ariaLabel: string }> = [
       { id: 'internet', label: '互联网', ariaLabel: '互联网分享' },
       { id: 'feishu', label: '飞书', ariaLabel: '飞书文档' },
+      { id: 'tencent-docs', label: '腾讯文档', ariaLabel: '腾讯文档' },
       { id: 'wechat', label: '公众号', ariaLabel: '公众号草稿' },
       { id: 'multi-platform', label: '多平台', ariaLabel: '多平台草稿' },
     ];
@@ -337,6 +360,8 @@ class SharePopover {
         this.render();
         if (option.id === 'feishu') {
           this.feishuPanel.activate();
+        } else if (option.id === 'tencent-docs') {
+          this.tencentDocsPanel.activate();
         } else if (option.id === 'wechat') {
           this.wechatPanel.activate();
         } else if (option.id === 'multi-platform') {
