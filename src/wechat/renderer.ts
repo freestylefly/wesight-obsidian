@@ -5,7 +5,7 @@ import type { WeChatAssetDraft, WeChatPreviewSnapshot } from './types';
 import { assetMap, replaceAssetTokens } from './assetTokens';
 import { getWeChatTheme, type WeChatThemeDocument } from './themes';
 import type { LoadedTemplateTheme } from './templateThemeTypes';
-import { renderTemplateThemeArticle } from './templateThemeRenderer';
+import { applyTemplateThemeStyles, renderTemplateThemeArticle } from './templateThemeRenderer';
 import {
   buildStreamingThemePreviewDocument,
   sanitizeStreamingThemeHtml,
@@ -631,9 +631,10 @@ async function svgToPng(svg: SVGElement): Promise<ArrayBuffer> {
 export async function replaceFormulaSvgs(
   root: HTMLElement,
   upload: (asset: WeChatAssetDraft) => Promise<string>,
-  applyCangheStyles = true,
+  templateTheme?: LoadedTemplateTheme | null,
 ): Promise<void> {
   const formulas = Array.from(root.querySelectorAll<SVGElement>('mjx-container svg, .math svg'));
+  let replaced = false;
   for (let index = 0; index < formulas.length; index += 1) {
     const svg = formulas[index];
     if (!svg.isConnected) continue;
@@ -654,8 +655,14 @@ export async function replaceFormulaSvgs(
     image.alt = '公式';
     const target = svg.closest('mjx-container, .math') ?? svg;
     target.replaceWith(image);
+    replaced = true;
   }
-  if (applyCangheStyles) applyCangheWechatStyles(root);
+  if (!replaced) return;
+  if (templateTheme) {
+    applyTemplateThemeStyles(root, templateTheme);
+  } else if (root.classList.contains('wesight-wechat-canghe-article')) {
+    applyCangheWechatStyles(root);
+  }
 }
 
 export function serializeWeChatArticle(root: HTMLElement): string {

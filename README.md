@@ -13,6 +13,10 @@ WeSight detects existing executables from the configured path, the system path, 
 
 ## Features
 
+### 1.5.1 patch
+
+The [1.5.1 patch](docs/releases/1.5.1.md) preserves the selected WeChat theme when copying an article or syncing it to the Official Account draft box. It fixes template colors being overwritten by the default green styling and keeps formula images styled with the selected template.
+
 ### 1.5.0 release
 
 The [1.5.0 update](docs/releases/1.5.0.md) adds Tencent Docs browser authorization, publishing with images, and updates to the original document while keeping its link. It improves image-link handling and Chrome Web Store installation guidance, and temporarily hides Knowledge Brain entry points while preserving existing files and history. The release notes also cover the available cloud improvements for membership cancellation and Watcha account lookup. Use **版本更新说明** in the avatar menu or general settings to read this release and recent version changes offline.

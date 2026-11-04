@@ -94,6 +94,13 @@ export function applyTemplateThemeFeatures(
   }
 }
 
+export function applyTemplateThemeStyles(
+  root: HTMLElement,
+  theme: LoadedTemplateTheme,
+): void {
+  inlineTemplateThemeCss(root, theme.cssText, containerClassForTemplateThemeId(theme.manifest.id));
+}
+
 export async function renderTemplateThemeArticle(
   app: App,
   component: Component,
@@ -113,5 +120,5 @@ export async function renderTemplateThemeArticle(
   );
   sanitizeTemplateRoot(container);
   applyTemplateThemeFeatures(container, theme);
-  inlineTemplateThemeCss(container, theme.cssText, containerClass);
+  applyTemplateThemeStyles(container, theme);
 }

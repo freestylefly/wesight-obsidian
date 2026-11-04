@@ -2387,6 +2387,7 @@ export class WeChatPreviewView extends ItemView {
     const snapshot = this.preparedSnapshot();
     const themeDocument = this.validThemeDocument(snapshot);
     const theme = getWeChatTheme(this.currentThemeId());
+    const templateTheme = this.currentTemplateTheme();
     if (theme.kind !== 'template' && !themeDocument) {
       new Notice(`请先重新生成 ${this.currentThemeLabel()} 主题预览。`);
       return;
@@ -2443,7 +2444,7 @@ export class WeChatPreviewView extends ItemView {
       await renderWeChatArticle(this.app, this, snapshot, article, {
         uploadedUrls,
         themeDocument,
-        templateTheme: this.currentTemplateTheme(),
+        templateTheme,
       });
       await replaceFormulaSvgs(article, async (asset) => {
         this.operation = '正在上传公式图片…';
@@ -2451,7 +2452,7 @@ export class WeChatPreviewView extends ItemView {
         const result = await this.options.api.uploadAsset('content', asset);
         if (!result.url) throw new Error('公式图片上传失败');
         return result.url;
-      }, theme.kind === 'template');
+      }, templateTheme);
       const content = serializeWeChatArticle(article);
       const thumbMediaId = await this.resolveCoverMediaId(snapshot);
       const payload: WeChatDraftPayload = {
@@ -2559,6 +2560,7 @@ export class WeChatPreviewView extends ItemView {
     const snapshot = this.preparedSnapshot();
     const themeDocument = this.validThemeDocument(snapshot);
     const theme = getWeChatTheme(this.currentThemeId());
+    const templateTheme = this.currentTemplateTheme();
     if (theme.kind !== 'template' && !themeDocument) {
       new Notice(`请先重新生成 ${this.currentThemeLabel()} 主题预览。`);
       return;
@@ -2582,7 +2584,7 @@ export class WeChatPreviewView extends ItemView {
       await renderWeChatArticle(this.app, this, snapshot, article, {
         uploadedUrls,
         themeDocument,
-        templateTheme: this.currentTemplateTheme(),
+        templateTheme,
       });
       await replaceFormulaSvgs(article, async (asset) => {
         this.operation = '正在上传公式图片…';
@@ -2590,7 +2592,7 @@ export class WeChatPreviewView extends ItemView {
         const result = await this.options.api.uploadAsset('content', asset);
         if (!result.url) throw new Error('公式图片上传失败');
         return result.url;
-      }, theme.kind === 'template');
+      }, templateTheme);
       const content = serializeWeChatArticle(article);
       await navigator.clipboard.write([new ClipboardItem({
         'text/html': new Blob([content], { type: 'text/html' }),
