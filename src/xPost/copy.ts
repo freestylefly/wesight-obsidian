@@ -1,6 +1,7 @@
 import twitterText from 'twitter-text';
 
 import type { MultiPublishSnapshot } from '../multiPublish/types';
+import { toXhsPlainText } from '../xiaohongshu/copy';
 import type { XPostCopyDraft } from './types';
 
 export const X_POST_TEXT_LIMIT = 280;
@@ -8,6 +9,13 @@ export const X_POST_TEXT_LIMIT = 280;
 export function normalizeXPostTopics(values: string[]): string[] {
   return Array.from(new Set(values.map(value => value.replace(/^#+|#+$/g, '').replace(/\s+/gu, '').trim())
     .filter(Boolean))).slice(0, 2);
+}
+
+export function createInitialXPostCopy(snapshot: MultiPublishSnapshot): XPostCopyDraft {
+  return {
+    body: toXhsPlainText(snapshot.markdown) || snapshot.title.trim(),
+    topics: normalizeXPostTopics(snapshot.tags),
+  };
 }
 
 export function buildXPostText(body: string, topics: string[]): string {

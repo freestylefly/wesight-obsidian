@@ -1,12 +1,40 @@
 import { describe, expect, test, vi } from 'vitest';
 
-import { buildXPostCopyPrompt, buildXPostText, parseXPostCopyOutput, validateXPostCopy, xPostWeightedLength } from '../src/xPost/copy';
+import { buildXPostCopyPrompt, buildXPostText, createInitialXPostCopy, parseXPostCopyOutput, validateXPostCopy, xPostWeightedLength } from '../src/xPost/copy';
 import { XiaohongshuGenerationService } from '../src/xiaohongshu/generationService';
 import type { MultiPublishSnapshot } from '../src/multiPublish/types';
 
 const source = { markdown: '原文核心观点：为长期合作保留上下文。' } as MultiPublishSnapshot;
 
 describe('X short-form copy', () => {
+  test('initializes editable copy from cleaned article text and normalized topics', () => {
+    const result = createInitialXPostCopy({
+      ...source,
+      title: '原文标题',
+      markdown: '---\nprivate: true\n---\n# 文章标题\n\n**关键观点**与[参考链接](https://example.com)。\n\n<p>保留内容 &amp; 细节。</p>\n\n```js\nconsole.log("code");\n```',
+      tags: ['#AI#', 'AI', '工作 效率', '更多话题'],
+    });
+    expect(result).toEqual({
+      body: '文章标题\n\n关键观点与参考链接。\n\n保留内容 & 细节。',
+      topics: ['AI', '工作效率'],
+    });
+  });
+
+  test('uses the article title when cleaned body is empty', () => {
+    expect(createInitialXPostCopy({
+      ...source, title: '  标题里的核心观点  ', markdown: '```js\nconst value = 1;\n```', tags: [],
+    })).toEqual({ body: '标题里的核心观点', topics: [] });
+  });
+
+  test('preserves complete initial text beyond the X limit for manual editing', () => {
+    const body = '长'.repeat(300) + '，保留最后一句完整观点。';
+    const result = createInitialXPostCopy({
+      ...source, title: '长文章', markdown: `**${body}**`, tags: ['AI'],
+    });
+    expect(result).toEqual({ body, topics: ['AI'] });
+    expect(validateXPostCopy(result)).toContain('280');
+  });
+
   test('uses official weighted length for CJK, emoji families, normalized text and links', () => {
     expect(xPostWeightedLength('中'.repeat(140))).toBe(280);
     expect(validateXPostCopy({ body: '中'.repeat(141), topics: [] })).toContain('280');

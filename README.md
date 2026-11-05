@@ -13,6 +13,10 @@ WeSight detects existing executables from the configured path, the system path, 
 
 ## Features
 
+### 1.5.2 patch
+
+The [1.5.2 patch](docs/releases/1.5.2.md) gives quick conversion separate actions for AI copy generation and publishing. Send existing or manually edited copy with the current image selection and order, including after a generation failure once the content meets platform requirements. X starts with editable article text and retains saved edits; overlong copy must be shortened before sending. The browser dynamic composer keeps the final publishing decision with you.
+
 ### 1.5.1 patch
 
 The [1.5.1 patch](docs/releases/1.5.1.md) preserves the selected WeChat theme when copying an article or syncing it to the Official Account draft box. It fixes template colors being overwritten by the default green styling and keeps formula images styled with the selected template.
@@ -33,7 +37,7 @@ The WeSight avatar menu provides current-repository status, **立即拉取**, **
 
 **转为图文** and connecting the browser publishing assistant require an active WeSight membership. Free and expired accounts receive a membership prompt with a link to recharge. Membership is refreshed before generation, connecting, and publishing; existing paired connections and task links also require membership when handing off content.
 
-Use **转为图文** in the WeSight header, note toolbar, file menu, or command palette to open the right-side workbench while keeping the original note visible. **快速转** prepares Xiaohongshu, Weibo image posts, Jike posts, and X posts with shared or platform-specific copy. X gets complete short sentences within its 280 weighted-character limit, including topics; Chinese characters usually count as two. Its first four supported PNG/JPEG/WebP images are sent, up to 5 MB each, with skipped images reported and other platforms left intact. Review and edit copy in place and select/reorder original article images. The one-click publishing action opens the browser extension's **动态** composer with each platform's copy, images, and Jike circle preserved; start syncing there when ready. The extension also supports creating dynamics directly with text, images, or a video, without connecting Obsidian.
+Use **转为图文** in the WeSight header, note toolbar, file menu, or command palette to open the right-side workbench while keeping the original note visible. **快速转** prepares Xiaohongshu, Weibo image posts, Jike posts, and X posts with shared or platform-specific copy. AI generation is optional: review existing copy or edit it manually, select/reorder article images, and publish directly. Generated X copy uses complete short sentences within its 280 weighted-character limit, including topics; Chinese characters usually count as two. Initial X copy uses the article text and may need shortening. Its first four supported PNG/JPEG/WebP images are sent, up to 5 MB each, with skipped images reported and other platforms left intact. The one-click publishing action opens the browser extension's **动态** composer with each platform's copy, images, and Jike circle preserved; start syncing there when ready. The extension also supports creating dynamics directly with text, images, or a video, without connecting Obsidian.
 
 Generated social copy targets 600–900 characters and stays within 1,000 characters including topics, spaces, and line breaks. The Xiaohongshu editor shows the combined count and blocks syncing overlong manual edits so the text can be shortened before sending.
 

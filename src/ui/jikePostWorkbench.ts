@@ -179,13 +179,13 @@ export class JikePostWorkbench {
     this.scheduleSave();
   }
 
-  async buildQuickPublishSnapshot(): Promise<MultiPublishSnapshot> {
+  async buildQuickPublishSnapshot(images: JikePostImage[] = this.images): Promise<MultiPublishSnapshot> {
     if (!this.snapshot) throw new Error('即刻工作台还没有读取当前文章');
     await this.save();
     return buildJikePostPublishSnapshot({
       source: this.snapshot,
       copy: this.copy,
-      images: this.images,
+      images,
       readBinary: reference => this.readImageBinary(reference),
     });
   }

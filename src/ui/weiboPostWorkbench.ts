@@ -172,13 +172,13 @@ export class WeiboPostWorkbench {
     this.scheduleSave();
   }
 
-  async buildQuickPublishSnapshot(): Promise<MultiPublishSnapshot> {
+  async buildQuickPublishSnapshot(images: WeiboPostImage[] = this.images): Promise<MultiPublishSnapshot> {
     if (!this.snapshot) throw new Error('微博工作台还没有读取当前文章');
     await this.save();
     return buildWeiboPostPublishSnapshot({
       source: this.snapshot,
       copy: this.copy,
-      images: this.images,
+      images,
       readBinary: reference => this.readImageBinary(reference),
     });
   }

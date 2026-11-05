@@ -12,10 +12,12 @@ import { JikePostWorkbench, type JikePostWorkbenchOptions } from '../src/ui/jike
 import { MultiPublishPanel } from '../src/ui/multiPublishPanel';
 import { confirmShareAction } from '../src/ui/shareConfirm';
 import { WeiboPostWorkbench, type WeiboPostWorkbenchOptions } from '../src/ui/weiboPostWorkbench';
+import type { WeiboPostImage } from '../src/weiboPost/types';
 
 interface WorkbenchActions {
   copy: { body: string; topics: string[]; tone: string; circle: string };
-  images: unknown[];
+  images: WeiboPostImage[];
+  buildQuickPublishSnapshot(images?: WeiboPostImage[]): Promise<MultiPublishSnapshot>;
   publishBusy: boolean;
   startPublish(forcePair: boolean): Promise<void>;
   retryTask(): Promise<void>;
@@ -81,7 +83,7 @@ function workbench(Workbench: typeof WeiboPostWorkbench | typeof JikePostWorkben
   ) as unknown as WorkbenchActions;
   Object.assign(state, {
     snapshot, copy: { body: '用户已编辑的文案', topics: ['AI'], tone: 'opinion', circle: 'AI 探索站' },
-    images: [{ id: 'image-1', vaultPath: 'images/one.png', fileName: 'one.png', mimeType: 'image/png' }],
+    images: [{ id: 'image-1', vaultPath: 'images/one.png', fileName: 'one.png', mimeType: 'image/png', label: '配图 1', source: 'upload' }],
     publishTask: { taskId: 'saved-task' },
   });
   return { ...context, state };
@@ -100,6 +102,55 @@ describe.each([
   ['微博', WeiboPostWorkbench, 'weibo-post', 'generateWeiboPostCopy'],
   ['即刻', JikePostWorkbench, 'jike-post', 'generateJikePostCopy'],
 ] as const)('%s 会员发布动作', (_name, Workbench, platform, generateMethod) => {
+  test('快速发布使用显式配图顺序和现有文案，保留工作台草稿', async () => {
+    const { state, options, app } = workbench(Workbench, true);
+    const originalCopy = state.copy, originalImages = state.images;
+    const selectedImages = [
+      { ...originalImages[0], id: 'quick-3', vaultPath: 'images/three.png', fileName: 'three.png' },
+      { ...originalImages[0], id: 'quick-2', vaultPath: 'images/two.png', fileName: 'two.png' },
+    ];
+
+    const result = await state.buildQuickPublishSnapshot(selectedImages);
+
+    expect(result.assets.map(asset => asset.fileName)).toEqual(['three.png', 'two.png']);
+    expect(app.vault.adapter.readBinary.mock.calls).toEqual([
+      ['images/three.png'], ['images/two.png'],
+    ]);
+    expect(result.markdown).toBe(originalCopy.body);
+    expect(result.tags).toEqual(originalCopy.topics);
+    if (platform === 'jike-post') expect(result.targetOptions?.jikePost?.circle).toBe(originalCopy.circle);
+    expect(state.copy).toBe(originalCopy);
+    expect(state.images).toBe(originalImages);
+    expect(options.draftStore.save).toHaveBeenCalledWith(expect.objectContaining({
+      copy: originalCopy, images: originalImages,
+    }));
+    expect(options.generationService[generateMethod]).not.toHaveBeenCalled();
+  });
+
+  test('快速发布未传入配图时沿用工作台文案和配图', async () => {
+    const { state, options, app } = workbench(Workbench, true);
+
+    const result = await state.buildQuickPublishSnapshot();
+
+    expect(result.assets.map(asset => asset.fileName)).toEqual(['one.png']);
+    expect(app.vault.adapter.readBinary).toHaveBeenCalledWith('images/one.png');
+    expect(result.markdown).toBe(state.copy.body);
+    expect(result.tags).toEqual(state.copy.topics);
+    if (platform === 'jike-post') expect(result.targetOptions?.jikePost?.circle).toBe(state.copy.circle);
+    expect(options.draftStore.save).toHaveBeenCalledOnce();
+    expect(options.generationService[generateMethod]).not.toHaveBeenCalled();
+  });
+
+  test('快速发布会校验显式配图，保留工作台已有配图', async () => {
+    const { state, app } = workbench(Workbench, true);
+    const originalImages = state.images;
+
+    await expect(state.buildQuickPublishSnapshot([originalImages[0], originalImages[0]])).rejects.toThrow('重复项');
+
+    expect(app.vault.adapter.readBinary).not.toHaveBeenCalled();
+    expect(state.images).toBe(originalImages);
+  });
+
   test('扩展已连接的非会员无法建任务、重试或打开已有任务，文案与图片保留', async () => {
     const { state, options, auth, bridge, app } = workbench(Workbench, false);
     const originalCopy = state.copy, originalImages = state.images;

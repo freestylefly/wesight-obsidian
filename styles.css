@@ -4105,7 +4105,7 @@ button.wesight-quick-image.is-selected .wesight-quick-image-check {
   bottom: 22px;
   z-index: 4;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(250px, 0.9fr);
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 1fr);
   align-items: center;
   gap: 14px;
   margin-top: auto;
@@ -4139,12 +4139,25 @@ button.wesight-quick-image.is-selected .wesight-quick-image-check {
   accent-color: #d97757;
 }
 
-button.wesight-quick-generate {
+.wesight-quick-footer-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 10px;
+}
+
+.wesight-quick-footer-actions button.wesight-quick-generate,
+.wesight-quick-footer-actions button.wesight-quick-publish {
   width: 100%;
+  min-width: 0;
   min-height: 46px;
+  padding: 8px 12px;
+  font-size: 13px;
+  white-space: normal;
+}
+
+.wesight-quick-footer-actions button.wesight-quick-publish {
   border-color: #dd603c;
   background: #ef633c;
-  font-size: 13px;
 }
 
 button.wesight-xhs-platform-badge:hover,
@@ -6425,6 +6438,10 @@ button.wesight-jike-generate-button {
 }
 
 @container (max-width: 460px) {
+  .wesight-quick-footer-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .wesight-xhs-header {
     align-items: flex-start;
   }

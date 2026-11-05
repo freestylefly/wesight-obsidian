@@ -33,7 +33,7 @@ import type { WeiboPostDraftStore } from '../weiboPost/store';
 import type { WeiboPostImage } from '../weiboPost/types';
 import type { JikePostDraftStore } from '../jikePost/store';
 import type { JikePostImage } from '../jikePost/types';
-import { buildXPostText, normalizeXPostTopics, validateXPostCopy, xPostWeightedLength, X_POST_TEXT_LIMIT } from '../xPost/copy';
+import { buildXPostText, createInitialXPostCopy, normalizeXPostTopics, validateXPostCopy, xPostWeightedLength, X_POST_TEXT_LIMIT } from '../xPost/copy';
 import { buildXPostPublishSnapshot, selectXPostImages } from '../xPost/publish';
 import type { XPostCopyDraft } from '../xPost/types';
 import {
@@ -648,7 +648,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
     engine.onclick = () => this.options.openSettings();
 
     const platformBar = parent.createDiv({ cls: 'wesight-quick-platform-bar' });
-    platformBar.createSpan({ text: '生成平台' });
+    platformBar.createSpan({ text: '发布平台' });
     const platformList = platformBar.createDiv({ cls: 'wesight-quick-platform-list' });
     for (const platformId of QUICK_TRANSFORM_PLATFORM_IDS) {
       const selected = this.quickTargets.has(platformId);
@@ -664,6 +664,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
       const icon = button.createSpan();
       setIcon(icon, platform.icon);
       button.createSpan({ text: platform.label });
+      button.disabled = this.quickOperation || this.quickPublishBusy;
       button.onclick = () => this.toggleQuickTarget(platformId);
     }
 
@@ -689,8 +690,9 @@ export class XiaohongshuWorkbenchView extends ItemView {
       text: '清空',
       attr: { type: 'button' },
     });
-    clear.disabled = this.quickOperation || this.quickSelectedImageIds.length === 0;
+    clear.disabled = this.quickOperation || this.quickPublishBusy || this.quickSelectedImageIds.length === 0;
     clear.onclick = () => {
+      if (this.quickOperation || this.quickPublishBusy) return;
       this.quickSelectedImageIds = [];
       this.quickErrors = {};
       this.quickCompleted = 0;
@@ -725,7 +727,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
     const generateImageIcon = generateImage.createSpan();
     setIcon(generateImageIcon, 'sparkles');
     generateImage.createSpan({ text: 'AI 生成图片' });
-    generateImage.disabled = this.quickOperation;
+    generateImage.disabled = this.quickOperation || this.quickPublishBusy;
     generateImage.onclick = () => this.openQuickImageStudio(false);
     const typography = supplementActions.createEl('button', {
       attr: { type: 'button' },
@@ -733,13 +735,17 @@ export class XiaohongshuWorkbenchView extends ItemView {
     const typographyIcon = typography.createSpan();
     setIcon(typographyIcon, 'type');
     typography.createSpan({ text: '文字配图' });
-    typography.disabled = this.quickOperation;
+    typography.disabled = this.quickOperation || this.quickPublishBusy;
     typography.onclick = () => this.openQuickImageStudio(true);
     const supplementNote = supplement.createDiv({ cls: 'wesight-quick-supplement-note' });
     const noteIcon = supplementNote.createSpan();
     setIcon(noteIcon, 'info');
     supplementNote.createSpan({ text: '生成后的图片会自动加入已选列表' });
 
+    this.renderQuickFooter(parent);
+  }
+
+  private renderQuickFooter(parent: HTMLElement): void {
     const footer = parent.createDiv({ cls: 'wesight-quick-footer' });
     const status = footer.createDiv({ cls: 'wesight-quick-footer-status' });
     const generated = this.quickGenerationReady();
@@ -768,7 +774,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
           ? `${failedCount} 个失败，进入对应平台后可重试`
           : loginCount ? `${loginCount} 个平台需要登录` : '可在浏览器中继续编辑、选择平台并同步',
       });
-    } else if (extensionNeedsUpdate && generated) {
+    } else if (extensionNeedsUpdate) {
       status.createEl('strong', { text: '发布助手版本过旧' });
       status.createSpan({ text: '请前往 Chrome 应用商店更新，再回到连接器设置重新连接' });
     } else if (this.quickOperation) {
@@ -778,8 +784,8 @@ export class XiaohongshuWorkbenchView extends ItemView {
       });
       progress.value = this.quickCompleted;
     } else if (this.quickErrorSummary()) {
-      status.createEl('strong', { text: '部分平台生成失败，可直接重试' });
-      status.createSpan({ text: this.quickErrorSummary() });
+      status.createEl('strong', { text: '部分平台生成失败' });
+      status.createSpan({ text: '可编辑当前文案后直接发布，也可重新生成' });
     } else if (this.quickCompleted > 0) {
       status.createEl('strong', {
         text: this.quickCopyMode === 'shared'
@@ -788,44 +794,46 @@ export class XiaohongshuWorkbenchView extends ItemView {
       });
       status.createSpan({ text: '点击后进入浏览器动态发布中心，继续编辑并选择同步平台' });
     } else {
-      status.createSpan({
-        text: this.quickCopyMode === 'shared'
-          ? `将生成 1 套统一文案，复用当前 ${this.quickSelectedImageIds.length} 张图片`
-          : `将生成 ${this.quickTargets.size} 套平台文案，复用当前 ${this.quickSelectedImageIds.length} 张图片`,
-      });
+      status.createSpan({ text: `可直接发布当前文案和已选 ${this.quickSelectedImageIds.length} 张图片，也可先用 AI 生成文案` });
     }
-    const generate = footer.createEl('button', {
-      cls: 'wesight-xhs-primary-button wesight-quick-generate',
+    const actions = footer.createDiv({ cls: 'wesight-quick-footer-actions' });
+    const busy = this.quickOperation || this.quickPublishBusy;
+    const missingSelection = this.quickTargets.size === 0 || this.quickSelectedImageIds.length === 0;
+    const generate = actions.createEl('button', {
+      cls: 'wesight-xhs-secondary-button wesight-quick-generate',
+      text: this.quickOperation
+        ? `正在生成 ${this.quickCompleted}/${this.quickTargets.size}`
+        : generated ? '重新生成文案' : '一键生成文案',
+      attr: { type: 'button' },
+    });
+    const generateIcon = generate.createSpan();
+    setIcon(generateIcon, this.quickOperation ? 'loader-circle' : 'sparkles');
+    generate.prepend(generateIcon);
+    generate.disabled = busy || missingSelection;
+    generate.onclick = () => void this.generateQuickTransform();
+
+    const publish = actions.createEl('button', {
+      cls: 'wesight-xhs-primary-button wesight-quick-publish',
       text: this.quickPublishBusy
         ? '正在打开动态发布中心…'
         : this.quickPublishTask
           ? previousPublishReady
             ? '重新发送到动态发布中心'
             : '打开动态发布中心'
-          : this.quickOperation
-            ? `正在生成 ${this.quickCompleted}/${this.quickTargets.size}`
-            : generated
-              ? `一键发布到 ${this.quickTargets.size} 个平台`
-              : `一键生成 ${this.quickTargets.size} 个平台`,
+          : `一键发布到 ${this.quickTargets.size} 个平台`,
       attr: { type: 'button' },
     });
-    const generateIcon = generate.createSpan();
-    setIcon(generateIcon, this.quickOperation || this.quickPublishBusy
+    const publishIcon = publish.createSpan();
+    setIcon(publishIcon, this.quickPublishBusy
       ? 'loader-circle'
       : this.quickPublishTask
         ? previousPublishReady ? 'refresh-cw' : 'external-link'
         : 'send');
-    generate.prepend(generateIcon);
-    generate.disabled = this.quickOperation
-      || this.quickPublishBusy
-      || this.quickTargets.size === 0
-      || this.quickSelectedImageIds.length === 0
-      || (generated && extensionNeedsUpdate);
-    generate.onclick = () => {
-      if (previousPublishReady) void this.startQuickPublish(false);
-      else if (this.quickPublishTask) void this.openQuickPublishTask();
-      else if (generated) void this.startQuickPublish(false);
-      else void this.generateQuickTransform();
+    publish.prepend(publishIcon);
+    publish.disabled = busy || missingSelection || extensionNeedsUpdate;
+    publish.onclick = () => {
+      if (this.quickPublishTask && !previousPublishReady) void this.openQuickPublishTask();
+      else void this.startQuickPublish(false);
     };
   }
 
@@ -846,7 +854,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
           'aria-pressed': String(this.quickCopyMode === mode.id),
         },
       });
-      button.disabled = this.quickOperation;
+      button.disabled = this.quickOperation || this.quickPublishBusy;
       button.onclick = () => this.setQuickCopyMode(mode.id);
     }
     row.createSpan({
@@ -881,7 +889,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
           title: selected ? '点击取消选择，拖拽可调整顺序' : `选择${image.label}`,
         },
       });
-      card.draggable = selected && !this.quickOperation;
+      card.draggable = selected && !this.quickOperation && !this.quickPublishBusy;
       card.dataset.quickImageId = image.id;
       card.createEl('img', {
         attr: { src: this.imageResourceUrl(image), alt: image.label },
@@ -899,7 +907,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
       } else if (image.source === 'generated') {
         card.createSpan({ cls: 'wesight-quick-image-recommended is-generated', text: '生成' });
       }
-      card.disabled = this.quickOperation;
+      card.disabled = this.quickOperation || this.quickPublishBusy;
       card.onclick = () => {
         this.quickImageScrollLeft.set(key, grid.scrollLeft);
         this.toggleQuickImage(image.id);
@@ -1047,6 +1055,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
         },
       });
       title.value = this.copy.title;
+      title.disabled = this.quickOperation || this.quickPublishBusy;
       const count = titleRow.createSpan({ text: `${Array.from(this.copy.title).length}/${XHS_TITLE_LIMIT}` });
       title.oninput = () => {
         this.copy.title = clampXhsTitle(title.value);
@@ -1092,12 +1101,13 @@ export class XiaohongshuWorkbenchView extends ItemView {
       cls: 'wesight-quick-copy-body',
       attr: {
         rows: '5',
-        placeholder: '生成后可在这里直接修改文案',
+        placeholder: '可直接编辑文案，也可使用 AI 生成',
         'aria-label': '平台正文',
         ...(bodyLimit && !formatText ? { maxlength: String(bodyLimit) } : {}),
       },
     });
     body.value = initialBody;
+    body.disabled = this.quickOperation || this.quickPublishBusy;
     const meta = parent.createDiv({ cls: 'wesight-quick-copy-meta' });
     const topics = meta.createEl('input', {
       attr: {
@@ -1107,6 +1117,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
       },
     });
     topics.value = initialTopics.map(topic => `#${topic}`).join(' ');
+    topics.disabled = this.quickOperation || this.quickPublishBusy;
     const count = meta.createSpan();
     const updateCount = (): void => {
       const length = measureText(formatText ? formatText(currentBody, currentTopics) : currentBody);
@@ -1128,7 +1139,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
   }
 
   private setQuickCopyMode(mode: QuickTransformCopyMode): void {
-    if (this.quickCopyMode === mode || this.quickOperation) return;
+    if (this.quickCopyMode === mode || this.quickOperation || this.quickPublishBusy) return;
     this.quickCopyMode = mode;
     this.resetQuickGeneration();
     this.scheduleDraftSave();
@@ -2344,7 +2355,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
     const savedXCopy = saved?.quickTransform?.xPostCopy;
     this.quickXPostCopy = savedXCopy && typeof savedXCopy.body === 'string'
       ? { body: savedXCopy.body, topics: normalizeXPostTopics(Array.isArray(savedXCopy.topics) ? savedXCopy.topics.filter((topic): topic is string => typeof topic === 'string') : []) }
-      : { body: '', topics: [] };
+      : createInitialXPostCopy(this.snapshot);
     const savedPreviewPlatform = saved?.quickTransform?.previewPlatform;
     this.quickPreviewPlatform = savedPreviewPlatform && this.quickTargets.has(savedPreviewPlatform)
       ? savedPreviewPlatform
@@ -2497,7 +2508,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
   }
 
   private toggleQuickImage(imageId: string): void {
-    if (this.quickOperation) return;
+    if (this.quickOperation || this.quickPublishBusy) return;
     const selectedIndex = this.quickSelectedImageIds.indexOf(imageId);
     if (selectedIndex >= 0) {
       this.quickSelectedImageIds.splice(selectedIndex, 1);
@@ -2513,7 +2524,7 @@ export class XiaohongshuWorkbenchView extends ItemView {
   }
 
   private moveQuickImage(sourceId: string, targetId: string): void {
-    if (!sourceId || sourceId === targetId || this.quickOperation) return;
+    if (!sourceId || sourceId === targetId || this.quickOperation || this.quickPublishBusy) return;
     const sourceIndex = this.quickSelectedImageIds.indexOf(sourceId);
     const targetIndex = this.quickSelectedImageIds.indexOf(targetId);
     if (sourceIndex < 0 || targetIndex < 0) return;
@@ -2537,8 +2548,9 @@ export class XiaohongshuWorkbenchView extends ItemView {
   }
 
   private async generateQuickTransform(): Promise<void> {
-    if (!this.snapshot || this.quickOperation) return;
+    if (!this.snapshot || this.quickOperation || this.quickPublishBusy) return;
     if (!await this.requireMembership('转为图文')) return;
+    if (this.quickOperation || this.quickPublishBusy) return;
     const targets = Array.from(this.quickTargets);
     if (!targets.length) {
       new Notice('请至少选择一个平台');
@@ -2726,14 +2738,23 @@ export class XiaohongshuWorkbenchView extends ItemView {
   }
 
   private async startQuickPublish(forcePair: boolean): Promise<void> {
-    if (!this.snapshot || this.quickPublishBusy || !this.quickGenerationReady()) return;
-    if (!await this.requireMembership('转为图文和多平台发布')) return;
-    if (!requireBrowserConnection(this.options.bridge, this.options.openBrowserConnector, forcePair)) return;
-    const targets = Array.from(this.quickTargets);
+    if (!this.snapshot || this.quickPublishBusy || this.quickOperation) return;
+    if (!this.quickTargets.size) {
+      new Notice('请至少选择一个平台');
+      return;
+    }
+    if (!this.quickSelectedImages().length) {
+      new Notice('请至少选择一张图片');
+      return;
+    }
     this.quickPublishBusy = true;
     delete this.quickErrors.general;
     this.render();
     try {
+      if (!await this.requireMembership('转为图文和多平台发布')) return;
+      if (!requireBrowserConnection(this.options.bridge, this.options.openBrowserConnector, forcePair)) return;
+      const targets = Array.from(this.quickTargets);
+      const images = this.quickSelectedImages();
       const user = this.options.auth.getCurrentUser();
       const billing = this.options.auth.getBillingSummary();
       const access = resolveMultiPublishAccess(user, billing);
@@ -2764,32 +2785,46 @@ export class XiaohongshuWorkbenchView extends ItemView {
           snapshots[platformId] = await buildXiaohongshuPublishSnapshot({
             source: this.snapshot!,
             copy: this.copy,
-            pageCount: this.pageCount,
-            pages: this.generatedPages,
+            pageCount: images.length,
+            pages: images.map((image, index) => ({
+              id: image.id,
+              type: 'image' as const,
+              vaultPath: image.vaultPath,
+              mimeType: image.mimeType,
+              createdAt: Date.now(),
+              pageNumber: index + 1,
+              label: image.label,
+              fileName: image.fileName,
+              previewUrl: image.previewUrl,
+            })),
             readBinary: reference => this.readPublishImage(reference),
           });
           return;
         }
         if (platformId === 'weibo-post') {
-          snapshots[platformId] = await this.weiboPostWorkbench.buildQuickPublishSnapshot();
+          snapshots[platformId] = await this.weiboPostWorkbench.buildQuickPublishSnapshot(
+            images.map(image => ({ ...image, source: image.source === 'article' ? 'article' : 'xiaohongshu' })),
+          );
           return;
         }
         if (platformId === 'x-post') {
           await this.saveDraft();
           snapshots[platformId] = await buildXPostPublishSnapshot({
-            source: this.snapshot!, copy: this.quickXPostCopy, images: this.quickSelectedImages(),
+            source: this.snapshot!, copy: this.quickXPostCopy, images,
             readBinary: reference => this.readPublishImage(reference),
           });
           return;
         }
-        snapshots[platformId] = await this.jikePostWorkbench.buildQuickPublishSnapshot();
+        snapshots[platformId] = await this.jikePostWorkbench.buildQuickPublishSnapshot(
+          images.map(image => ({ ...image, source: image.source === 'article' ? 'article' : 'xiaohongshu' })),
+        );
       }));
 
       const batchSnapshot = buildQuickPublishBatchSnapshot(targets, snapshots);
       const result = this.options.bridge.createDynamicComposeTask(batchSnapshot, targets, access, forcePair);
       if (result.task.targets.length !== targets.length
         || targets.some(platformId => !result.task.targets.includes(platformId))) {
-        throw new Error('发布任务的平台数量与当前选择不一致，请重新生成后重试');
+        throw new Error('发布任务的平台数量与当前选择不一致，请重新选择平台后重试');
       }
       this.quickPublishTask = result.task;
       window.open(result.handoffUrl, '_blank', 'noopener,noreferrer');
