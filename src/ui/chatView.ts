@@ -47,6 +47,8 @@ import type { GitSyncService } from '../gitSync/service';
 import { addGitSyncMenuItems, GitSyncHistoryModal } from './gitSyncSettings';
 import { ReleaseNotesModal } from './releaseNotesModal';
 import { getClaudeDetectedLocalModel, listLocalModels } from '../runtime/localModels';
+import { checkAntigravityAuth, onAntigravityAuthChange } from '../runtime/antigravity';
+import { antigravityEnvironment, openAntigravityLogin, resolveAntigravityBinary } from './antigravityLoginModal';
 import type { UpdateService, UpdateState } from '../update/updateService';
 import { RuntimeSetupModal } from './runtimeSetupModal';
 import {
@@ -143,6 +145,7 @@ export class WeSightChatView extends ItemView {
   private knowledgeAccessUnsubscribe: (() => void) | null = null;
   private codexStatusUnsubscribe: (() => void) | null = null;
   private memberAiUnsubscribe: (() => void) | null = null;
+  private antigravityAuthUnsubscribe: (() => void) | null = null;
   private accountMenu: Menu | null = null;
 
   constructor(leaf: WorkspaceLeaf, private readonly deps: ChatViewDeps) {
@@ -245,7 +248,40 @@ export class WeSightChatView extends ItemView {
     this.renderMessages();
     this.refreshStatus();
     if (this.agentId === 'codex') void this.deps.runtimeManager.refreshCodexStatus();
+    if (this.agentId === 'antigravity') void this.ensureAntigravityReady(false);
+    if (!this.antigravityAuthUnsubscribe) {
+      this.antigravityAuthUnsubscribe = onAntigravityAuthChange(() => {
+        if (this.agentId !== 'antigravity') return;
+        const label = this.contentEl.querySelector('.wesight-profile-selector .wesight-model-label');
+        if (label) label.textContent = this.getModelSelectorLabel();
+      });
+    }
     void this.restoreAuthSession();
+  }
+
+  /**
+   * Antigravity needs the local `agy` CLI and a Google sign-in. Checks both and opens
+   * the install guide or the browser login when one is missing. Returns true when ready.
+   */
+  private async ensureAntigravityReady(promptLogin: boolean): Promise<boolean> {
+    const settings = this.deps.getSettings();
+    const binaryPath = resolveAntigravityBinary(settings);
+    if (!binaryPath) {
+      if (promptLogin) this.openRuntimeSetup();
+      return false;
+    }
+    const auth = await checkAntigravityAuth(binaryPath, antigravityEnvironment(settings));
+    if (auth.state === 'signedIn') return true;
+    if (auth.state === 'signedOut') {
+      if (promptLogin) {
+        openAntigravityLogin(this.app, settings, this.deps.openSettings, () => this.refreshStatus());
+      } else {
+        new Notice('Antigravity 尚未登录，发送消息时会引导你完成浏览器登录。');
+      }
+      return false;
+    }
+    // Network or other probe errors: let the run itself report what went wrong.
+    return auth.state !== 'checking';
   }
 
   override async onClose(): Promise<void> {
@@ -267,6 +303,8 @@ export class WeSightChatView extends ItemView {
     this.codexStatusUnsubscribe = null;
     this.memberAiUnsubscribe?.();
     this.memberAiUnsubscribe = null;
+    this.antigravityAuthUnsubscribe?.();
+    this.antigravityAuthUnsubscribe = null;
   }
 
   private closeAllDropdowns(): void {
@@ -2275,6 +2313,9 @@ export class WeSightChatView extends ItemView {
       new Notice('知识大脑首版仅支持 Claude Code 与 Codex。');
       return;
     }
+    if (this.agentId === 'antigravity' && !(await this.ensureAntigravityReady(true))) {
+      return;
+    }
     const resolved = knowledgeMode
       ? { prompt: rawPrompt, attachments: [] as FileAttachment[] }
       : await resolveMentions(this.app, rawPrompt, settings.maxContextFileChars);
@@ -2582,7 +2623,7 @@ export class WeSightChatView extends ItemView {
   }
 
   private async switchAgent(agentId: AgentId, promptInstallIfMissing = false): Promise<void> {
-    if (this.conversationMode === 'knowledge' && agentId === 'opencode') {
+    if (this.conversationMode === 'knowledge' && agentId !== 'claude' && agentId !== 'codex') {
       new Notice('知识大脑首版仅支持 Claude Code 与 Codex。');
       return;
     }
@@ -2591,6 +2632,10 @@ export class WeSightChatView extends ItemView {
     this.renderMessages();
     this.refreshStatus();
     if (agentId === 'codex') void this.deps.runtimeManager.refreshCodexStatus();
+    if (agentId === 'antigravity') {
+      void this.ensureAntigravityReady(true);
+      return;
+    }
     if (promptInstallIfMissing) {
       this.openRuntimeSetup();
     }
@@ -3190,6 +3235,7 @@ const HISTORY_AGENT_ICONS: Record<AgentId, string> = {
   claude: 'bot',
   codex: 'terminal',
   opencode: 'code',
+  antigravity: 'rocket',
 };
 
 function formatRelativeTime(timestamp: number): string {

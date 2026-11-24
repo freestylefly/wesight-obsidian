@@ -14,5 +14,6 @@ export function memberAiConfigSources(
           : 'wesightManaged',
     codex: 'localCli',
     opencode: value?.configSources?.opencode === 'providerProfile' ? 'providerProfile' : 'localCli',
+    antigravity: 'localCli',
   };
 }

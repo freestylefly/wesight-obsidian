@@ -2,7 +2,7 @@ import type { CatalogModel } from './ciyuan/catalog';
 import type { WeChatThemeId } from './wechat/themes';
 import type { MultiPlatformId, MultiPublishPairing } from './multiPublish/types';
 
-export type AgentId = 'claude' | 'codex' | 'opencode';
+export type AgentId = 'claude' | 'codex' | 'opencode' | 'antigravity';
 
 export type RuntimeConfigSource = 'localCli' | 'providerProfile' | 'wesightManaged';
 
@@ -323,24 +323,28 @@ export const DEFAULT_CONFIG_SOURCES: ConfigSourcesByAgent = {
   claude: 'wesightManaged',
   codex: 'localCli',
   opencode: 'localCli',
+  antigravity: 'localCli',
 };
 
 export const DEFAULT_CONFIGURED_PATHS: ConfiguredPathsByAgent = {
   claude: '',
   codex: '',
   opencode: '',
+  antigravity: '',
 };
 
 export const DEFAULT_PROFILE_SELECTION: ProfileSelectionByAgent = {
   claude: '',
   codex: '',
   opencode: '',
+  antigravity: '',
 };
 
 export const DEFAULT_LOCAL_MODELS: LocalModelByAgent = {
   claude: '',
   codex: '',
   opencode: '',
+  antigravity: '',
 };
 
 export const DEFAULT_SETTINGS: WeSightObsidianSettings = {

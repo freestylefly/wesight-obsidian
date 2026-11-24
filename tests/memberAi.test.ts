@@ -74,9 +74,9 @@ describe('member configuration migration', () => {
     expect(memberAiConfigSources({ defaultAgentId: 'opencode' }).claude).toBe('localCli');
     expect(
       memberAiConfigSources({
-        configSources: { claude: 'providerProfile', codex: 'localCli', opencode: 'providerProfile' },
+        configSources: { claude: 'providerProfile', codex: 'localCli', opencode: 'providerProfile', antigravity: 'localCli' },
       }),
-    ).toEqual({ claude: 'providerProfile', codex: 'localCli', opencode: 'providerProfile' });
+    ).toEqual({ claude: 'providerProfile', codex: 'localCli', opencode: 'providerProfile', antigravity: 'localCli' });
     expect(DEFAULT_SETTINGS.defaultAgentId).toBe('claude');
   });
   it('accepts only the exact TLS gateway origin', () => {

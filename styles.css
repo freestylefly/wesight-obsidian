@@ -10261,3 +10261,22 @@ button.wesight-picker-manage { flex-shrink: 0; margin-top: 8px; padding: 8px 4px
   display: grid;
   gap: 6px;
 }
+
+/* Antigravity browser sign-in */
+.wesight-antigravity-steps {
+  white-space: pre-line;
+  color: var(--text-muted);
+}
+
+.wesight-antigravity-status {
+  margin: 8px 0;
+  color: var(--text-normal);
+}
+
+.wesight-antigravity-code-input {
+  width: 100%;
+}
+
+.wesight-antigravity-retry {
+  margin-left: 8px;
+}

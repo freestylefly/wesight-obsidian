@@ -7,6 +7,7 @@ import { managedBinaryPath, runtimeManagedDir } from '../paths';
 import type { AgentId, AgentStatus, RuntimeConfigSource } from '../types';
 import { resolveCommand, readCommandVersion } from '../utils/command';
 import { executableFileExists } from '../utils/fs';
+import { antigravityAppInstalled, antigravityLocalConfigPaths } from './antigravity';
 import { resolveCodexDesktopBinary } from './codexDesktop';
 
 export interface RuntimeDiscoveryOptions {
@@ -169,7 +170,9 @@ export class RuntimeDiscovery {
       managedDir,
       configSource,
       localConfigFound,
-      error: `${descriptor.binaryName} was not found.`,
+      error: agentId === 'antigravity' && antigravityAppInstalled()
+        ? '检测到 Antigravity 应用，但没有找到 agy 命令行。请在 Antigravity 中安装命令行工具（agy），或在设置里填写 agy 路径。'
+        : `${descriptor.binaryName} was not found.`,
     };
   }
 
@@ -203,6 +206,8 @@ export class RuntimeDiscovery {
         path.join(home, '.claude', 'claude.json'),
         path.join(home, '.claude.json'),
       ]
+      : agentId === 'antigravity'
+        ? antigravityLocalConfigPaths()
       : agentId === 'codex'
         ? [
           path.join(home, '.codex', 'config.toml'),

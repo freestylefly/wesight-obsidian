@@ -15,6 +15,9 @@ export class RuntimeSetupModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.createEl('h2', { text: `Set up ${this.status.descriptor.displayName}` });
+    if (this.status.error && this.status.agentId === 'antigravity') {
+      contentEl.createEl('p', { text: this.status.error });
+    }
     contentEl.createEl('p', {
       text: 'Install the CLI independently from its official website, then restart Obsidian or configure the executable path in WeSight settings. WeSight does not install or update CLI tools.',
     });

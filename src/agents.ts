@@ -37,9 +37,21 @@ export const AGENT_DESCRIPTORS: Record<AgentId, AgentDescriptor> = {
     supportsProviderProfiles: true,
     docsUrl: 'https://opencode.ai/',
   },
+  antigravity: {
+    id: 'antigravity',
+    displayName: 'Antigravity',
+    shortName: 'Antigravity',
+    packageName: 'antigravity',
+    binaryName: 'agy',
+    bestFor: 'Google Antigravity agent with Gemini models, signed in through the browser.',
+    supportsImages: false,
+    supportsInlineEdit: true,
+    supportsProviderProfiles: false,
+    docsUrl: 'https://antigravity.google/',
+  },
 };
 
-export const AGENT_IDS: AgentId[] = ['claude', 'codex', 'opencode'];
+export const AGENT_IDS: AgentId[] = ['claude', 'codex', 'opencode', 'antigravity'];
 
 export function getAgentDescriptor(agentId: AgentId): AgentDescriptor {
   return AGENT_DESCRIPTORS[agentId];

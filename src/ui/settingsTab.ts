@@ -42,6 +42,8 @@ import { ConnectorsSettings } from './connectorsSettings';
 import type { GitSyncService } from '../gitSync/service';
 import { GitSyncSettingsPanel } from './gitSyncSettings';
 import { ReleaseNotesModal } from './releaseNotesModal';
+import { antigravityEnvironment, openAntigravityLogin, resolveAntigravityBinary } from './antigravityLoginModal';
+import { checkAntigravityAuth, getAntigravityAuthStatus } from '../runtime/antigravity';
 import type { LarkCliService } from '../feishu/larkCli';
 import type { TencentDocsService } from '../tencentDocs/service';
 import type { MultiPublishBridge } from '../multiPublish/bridge';
@@ -367,6 +369,7 @@ export class WeSightSettingTab extends PluginSettingTab {
       { id: 'claude', label: 'Claude' },
       { id: 'codex', label: 'Codex' },
       { id: 'opencode', label: 'OpenCode' },
+      { id: 'antigravity', label: 'Antigravity' },
       { id: 'gitSync', label: '仓库同步' },
     ];
     for (const entry of entries) {
@@ -583,7 +586,7 @@ export class WeSightSettingTab extends PluginSettingTab {
             this.display();
           });
       });
-    if(agentId==='claude')configSourceSetting.settingEl.hide();
+    if(agentId==='claude'||agentId==='antigravity')configSourceSetting.settingEl.hide();
     if (agentId === 'codex') {
       configSourceSetting.setDesc(
         'Codex 当前仅支持本机模式，自动复用官方 ChatGPT / Codex 桌面应用内置的 Codex CLI；WeSight 模式不可用。',
@@ -650,6 +653,63 @@ export class WeSightSettingTab extends PluginSettingTab {
     }
   }
 
+  private renderAntigravitySettings(section: HTMLElement): void {
+    const settings = this.deps.getSettings();
+    const binaryPath = resolveAntigravityBinary(settings);
+    if (!binaryPath) {
+      new Setting(section)
+        .setName('Google 账号')
+        .setDesc('未检测到本机 Antigravity 命令行（agy），安装后才能登录。')
+        .addButton(button => button.setButtonText('查看安装说明').onClick(() => {
+          openAntigravityLogin(this.app, settings, () => this.display(), () => this.display());
+        }));
+      return;
+    }
+    const auth = getAntigravityAuthStatus();
+    const desc = auth.state === 'signedIn'
+      ? `已登录 · ${auth.models.length} 个可用模型`
+      : auth.state === 'signedOut'
+        ? '尚未登录。点击「浏览器登录」，完成 Google 授权后粘贴授权码。'
+        : auth.state === 'error'
+          ? `检查失败：${auth.message ?? '未知错误'}`
+          : '正在检查登录状态…';
+    new Setting(section)
+      .setName('Google 账号')
+      .setDesc(desc)
+      .addButton(button => button
+        .setButtonText(auth.state === 'signedIn' ? '重新登录' : '浏览器登录')
+        .setCta()
+        .onClick(() => openAntigravityLogin(this.app, settings, () => this.display(), () => {
+          this.deps.refreshViews();
+          if (this.activeTab === 'antigravity') this.display();
+        })))
+      .addButton(button => button
+        .setButtonText('刷新状态')
+        .onClick(async () => {
+          button.setDisabled(true);
+          await checkAntigravityAuth(binaryPath, antigravityEnvironment(settings), { force: true });
+          if (this.activeTab === 'antigravity') this.display();
+        }));
+    if (auth.state === 'unknown') {
+      void checkAntigravityAuth(binaryPath, antigravityEnvironment(settings)).then(() => {
+        if (this.activeTab === 'antigravity') this.display();
+      });
+    }
+    new Setting(section)
+      .setName('默认模型')
+      .setDesc('列表来自 agy models。留空则使用 Antigravity 的默认模型。')
+      .addDropdown(dropdown => {
+        dropdown.addOption('', 'Antigravity 默认');
+        const selected = settings.localModelByAgent.antigravity ?? '';
+        for (const model of auth.models) dropdown.addOption(model.id, model.label);
+        if (selected && !auth.models.some(model => model.id === selected)) dropdown.addOption(selected, selected);
+        dropdown.setValue(selected).onChange(async value => {
+          settings.localModelByAgent.antigravity = value;
+          await this.deps.saveSettings();
+        });
+      });
+  }
+
   private renderLocalModelSetting(section: HTMLElement, agentId: AgentId): void {
     const settings = this.deps.getSettings();
     new Setting(section)
@@ -688,6 +748,10 @@ export class WeSightSettingTab extends PluginSettingTab {
     }
     if (agentFilter === 'codex') {
       this.renderCodexModelSettings(section);
+      return;
+    }
+    if (agentFilter === 'antigravity') {
+      this.renderAntigravitySettings(section);
       return;
     }
     this.renderProviderConsole(section, agentFilter);

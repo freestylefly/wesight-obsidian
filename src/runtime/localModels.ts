@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 
 import type { AgentId } from '../types';
+import { listAntigravityLocalModels } from './antigravity';
 
 export interface LocalModelOption {
   /** Value passed to the CLI (`claude --model <id>`). Empty string = CLI default. */
@@ -167,5 +168,6 @@ export function listOpenCodeLocalModels(): LocalModelOption[] {
 export function listLocalModels(agentId: AgentId, env: NodeJS.ProcessEnv = process.env): LocalModelOption[] {
   if (agentId === 'claude') return listClaudeLocalModels(env);
   if (agentId === 'codex') return listCodexLocalModels();
+  if (agentId === 'antigravity') return listAntigravityLocalModels();
   return listOpenCodeLocalModels();
 }

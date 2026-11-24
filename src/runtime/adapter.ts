@@ -11,6 +11,11 @@ import {
   parseOpenCodeStreamLine,
 } from './parsers';
 import {
+  createAntigravityStreamParser,
+  isAntigravitySignInOutput,
+  markAntigravitySignedOutFromRun,
+} from './antigravity';
+import {
   classifyClaudeProviderError,
   extractClaudeConnectorWarning,
   stripClaudeConnectorWarning,
@@ -30,6 +35,7 @@ export class AgentAdapter extends EventEmitter {
   private pendingTerminalError: Extract<RuntimeTurnEvent, { type: 'error' }> | null = null;
   private terminalErrorTimer: number | null = null;
   private parseClaudeLine = createClaudeStreamParser();
+  private parseAntigravityLine = createAntigravityStreamParser();
 
   constructor(private readonly options: AgentAdapterOptions) {
     super();
@@ -37,6 +43,7 @@ export class AgentAdapter extends EventEmitter {
 
   run(request: ChatTurnRequest): Promise<void> {
     this.parseClaudeLine = createClaudeStreamParser();
+    this.parseAntigravityLine = createAntigravityStreamParser();
     this.terminalErrorEmitted = false;
     this.cancelled = false;
     this.clearPendingTerminalError();
@@ -49,7 +56,9 @@ export class AgentAdapter extends EventEmitter {
       return Promise.resolve();
     }
     const baseEnv = mergeEnvironment(process.env, this.options.sharedEnvironmentVariables);
-    const projection = request.configSource === 'wesightManaged'
+    const projection = this.options.agentId === 'antigravity'
+      ? prepareProviderProjection('antigravity', null, baseEnv)
+      : request.configSource === 'wesightManaged'
       ? managedProjection(this.options.providerProfile, baseEnv)
       : request.configSource !== 'localCli'
       ? prepareProviderProjection(this.options.agentId, this.options.providerProfile, baseEnv)
@@ -89,6 +98,9 @@ export class AgentAdapter extends EventEmitter {
       child.stderr?.on('data', (chunk: unknown) => {
         const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
         stderrTail = appendTail(stderrTail, text);
+        if (this.options.agentId === 'antigravity' && isAntigravitySignInOutput(stderrTail)) {
+          this.emitAntigravitySignInRequired();
+        }
         if (this.options.agentId === 'claude' && this.options.providerProfile) {
           const classified = classifyClaudeProviderError(stderrTail, {
             providerName: this.options.providerProfile?.name,
@@ -228,6 +240,10 @@ export class AgentAdapter extends EventEmitter {
      return { args, stdinPayload: prompt };
     }
 
+    if (this.options.agentId === 'antigravity') {
+      return { args: buildAntigravityArgs(request, prompt), stdinPayload: null };
+    }
+
     const args = [
       'run',
       '--format',
@@ -251,7 +267,13 @@ export class AgentAdapter extends EventEmitter {
   private emitParsed(line: string): void {
     const events = this.options.agentId === 'claude'
       ? this.parseClaudeLine(line)
-      : parseOpenCodeStreamLine(line);
+      : this.options.agentId === 'antigravity'
+        ? this.parseAntigravityLine(line)
+        : parseOpenCodeStreamLine(line);
+    if (this.options.agentId === 'antigravity' && isAntigravitySignInOutput(line)) {
+      this.emitAntigravitySignInRequired();
+      return;
+    }
     for (const event of events) {
       if (event.type === 'error') {
         if (this.terminalErrorEmitted) continue;
@@ -269,6 +291,16 @@ export class AgentAdapter extends EventEmitter {
       }
       this.emitEvent(event);
     }
+  }
+
+  private emitAntigravitySignInRequired(): void {
+    if (this.terminalErrorEmitted) return;
+    markAntigravitySignedOutFromRun();
+    this.emitTerminalProviderError({
+      type: 'error',
+      message: '尚未登录 Antigravity。',
+      detail: '请在 设置 → Antigravity 中点击「浏览器登录」，完成 Google 授权后粘贴授权码。',
+    });
   }
 
   private emitTerminalProviderError(event: Extract<RuntimeTurnEvent, { type: 'error' }>): void {
@@ -317,6 +349,26 @@ export class AgentAdapter extends EventEmitter {
   private emitEvent(event: RuntimeTurnEvent): void {
     this.emit('runtimeEvent', event);
   }
+}
+
+/**
+ * `agy` takes the prompt as the value of `-p` (it does not read a prompt from stdin),
+ * so it is attached with `-p=` to keep a leading dash from being read as a flag.
+ */
+export function buildAntigravityArgs(request: ChatTurnRequest, prompt: string): string[] {
+  const args = ['--output-format', 'stream-json'];
+  if (request.model?.trim()) args.push('--model', request.model.trim());
+  if (request.sessionId?.trim()) args.push('--conversation', request.sessionId.trim());
+  if (request.textOnly) {
+    args.push('--disable-slash-commands', '--mode', 'plan', '--effort', 'low');
+  } else if (request.accessMode === 'read-only' || request.planMode) {
+    args.push('--mode', 'plan');
+  } else {
+    // Print mode cannot answer interactive permission prompts.
+    args.push('--dangerously-skip-permissions');
+  }
+  args.push(`-p=${prompt}`);
+  return args;
 }
 
 function buildEffectivePrompt(request: ChatTurnRequest, agentId: AgentId): string {

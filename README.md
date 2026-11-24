@@ -1,11 +1,11 @@
 # WeSight for Obsidian
 
-Run Claude Code, Codex, and OpenCode as local AI collaborators inside an Obsidian vault. WeSight provides a sidebar chat, inline editing, model-provider profiles, file mentions, slash commands, GitHub team sync, internet sharing, Feishu and Tencent Docs publishing, WeChat Official Account drafts, and browser-assisted multi-platform publishing.
+Run Claude Code, Codex, OpenCode, and Antigravity as local AI collaborators inside an Obsidian vault. WeSight provides a sidebar chat, inline editing, model-provider profiles, file mentions, slash commands, GitHub team sync, internet sharing, Feishu and Tencent Docs publishing, WeChat Official Account drafts, and browser-assisted multi-platform publishing.
 
 ## Requirements
 
 - Obsidian 1.11.4 or later on desktop.
-- At least one supported agent CLI installed independently: [Claude Code](https://code.claude.com/), [Codex](https://github.com/openai/codex), or [OpenCode](https://opencode.ai/).
+- At least one supported agent CLI installed independently: [Claude Code](https://code.claude.com/), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai/), or [Antigravity](https://antigravity.google/) (`agy` CLI).
 - The optional Feishu workflow requires an independently installed [Lark CLI](https://github.com/larksuite/cli#installation).
 - Skill-generated WeChat themes use the bundled [gzh-design Skill](https://github.com/isjiamu/gzh-design-skill). A compatible local installation can still override the bundled copy for development.
 
@@ -15,6 +15,7 @@ WeSight detects existing executables from the configured path, the system path, 
 
 Use **版本更新说明** in the avatar menu or general settings to read recent release notes offline.
 
+- [1.6.0](docs/releases/1.6.0.md) — Antigravity engine: detects the local `agy` CLI and signs in through the browser with an authorization code.
 - [1.5.3](docs/releases/1.5.3.md) — maintenance: dead-code and duplicate-asset cleanup, refreshed documentation.
 - [1.5.2](docs/releases/1.5.2.md) — quick conversion can publish existing or edited copy without AI generation.
 - [1.5.1](docs/releases/1.5.1.md) — keeps the selected WeChat theme when copying or syncing drafts.
@@ -67,10 +68,12 @@ Claude Code supports WeSight member models through the recommended configuration
 
 ### Local agent chat
 
-1. Open **Settings → WeSight** and select Claude Code, Codex, or OpenCode.
+1. Open **Settings → WeSight** and select Claude Code, Codex, OpenCode, or Antigravity.
 2. Confirm that WeSight detects the CLI, or enter its executable path.
 3. Open the WeSight sidebar from the ribbon or command palette.
 4. Chat with the selected agent, mention vault files, attach or paste images, switch models, or use slash commands.
+
+Antigravity needs the `agy` CLI; the Antigravity desktop app alone is not enough. If `agy` is not signed in, WeSight opens Google sign-in in the browser and asks for the authorization code shown on the Antigravity page, then passes it to `agy acp --login`. Credentials stay in Antigravity's own local profile.
 
 Local chats and inline edits run the selected CLI as a child process. Agent capabilities, provider requests, tool calls, file access, and approval behavior follow that CLI's own configuration.
 
