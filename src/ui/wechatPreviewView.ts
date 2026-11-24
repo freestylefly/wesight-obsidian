@@ -138,7 +138,6 @@ export class WeChatPreviewView extends ItemView {
   private themeSubmenuEl: HTMLElement | null = null;
   private themeMenuHideTimer: number | null = null;
   private themeGenerationController: AbortController | null = null;
-  private themeGenerationStopping = false;
   private themeGenerationId = 0;
   private pendingThemeId: WeChatThemeId | null = null;
   private pendingCustomTheme: WeChatCustomThemePreferences | null = null;
@@ -2112,7 +2111,6 @@ export class WeChatPreviewView extends ItemView {
     let generated = false;
     const previousPreviewScrollTop = this.currentPreviewScrollTop();
     this.themeGenerationController = controller;
-    this.themeGenerationStopping = false;
     this.pendingThemeId = themeId;
     this.pendingCustomTheme = customTheme ?? null;
     this.streamingThemeHtml = '';
@@ -2167,7 +2165,6 @@ export class WeChatPreviewView extends ItemView {
         this.clearStreamingPreviewTimer();
         this.resetStreamingPreviewAutoFollow();
         this.themeGenerationController = null;
-        this.themeGenerationStopping = false;
         this.pendingThemeId = null;
         this.pendingCustomTheme = null;
         this.streamingThemeHtml = null;
@@ -2176,14 +2173,6 @@ export class WeChatPreviewView extends ItemView {
         this.render();
       }
     }
-  }
-
-  private stopThemeGeneration(): void {
-    if (!this.themeGenerationController || this.themeGenerationStopping) return;
-    this.themeGenerationStopping = true;
-    this.operation = '正在停止主题生成…';
-    this.themeGenerationController.abort();
-    this.render();
   }
 
   private invalidateThemeGeneration(): void {
@@ -2198,7 +2187,6 @@ export class WeChatPreviewView extends ItemView {
     this.clearStreamingPreviewTimer();
     this.resetStreamingPreviewAutoFollow();
     this.themeGenerationController = null;
-    this.themeGenerationStopping = false;
     this.pendingThemeId = null;
     this.pendingCustomTheme = null;
     this.streamingThemeHtml = null;

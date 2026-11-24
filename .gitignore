@@ -4,6 +4,8 @@ main.js
 dist/
 coverage/
 .DS_Store
+.idea/
+.vscode/
 .wesight/
 
 # Local agent workspace state and private memory
@@ -31,3 +33,6 @@ design-qa*/
 qa-*.png
 evidence_round_*.json
 plan*.json
+
+# 第三方扩展逆向样本（不入库）
+samples/

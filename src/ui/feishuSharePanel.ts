@@ -94,7 +94,6 @@ export class FeishuSharePanel {
   private consoleUrl: string | null = null;
   private title = '';
   private updateSameDocument = true;
-  private openedConfigUrl: string | null = null;
   private authUnsubscribe: (() => void) | null = null;
 
   constructor(private readonly options: FeishuSharePanelOptions) {}
@@ -717,10 +716,7 @@ export class FeishuSharePanel {
         );
         throw new Error('请先按照官方指引独立安装飞书 CLI。');
       }
-      await this.options.cli.ensureConfigured(url => {
-        this.openedConfigUrl = url;
-        this.openExternal(url);
-      });
+      await this.options.cli.ensureConfigured(url => this.openExternal(url));
       const progress = await this.options.cli.startAuthorization();
       this.authProgress = progress;
       this.requestRender();

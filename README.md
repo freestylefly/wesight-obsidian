@@ -1,6 +1,6 @@
 # WeSight for Obsidian
 
-Run Claude Code, Codex, and OpenCode as local AI collaborators inside an Obsidian vault. WeSight provides a sidebar chat, inline editing, model-provider profiles, file mentions, slash commands, internet sharing, Feishu document publishing, and WeChat Official Account draft publishing.
+Run Claude Code, Codex, and OpenCode as local AI collaborators inside an Obsidian vault. WeSight provides a sidebar chat, inline editing, model-provider profiles, file mentions, slash commands, GitHub team sync, internet sharing, Feishu and Tencent Docs publishing, WeChat Official Account drafts, and browser-assisted multi-platform publishing.
 
 ## Requirements
 
@@ -11,29 +11,29 @@ Run Claude Code, Codex, and OpenCode as local AI collaborators inside an Obsidia
 
 WeSight detects existing executables from the configured path, the system path, and compatible legacy WeSight runtime locations. It does not install or update CLI tools, agent runtimes, or their dependencies.
 
+## Recent releases
+
+Use **版本更新说明** in the avatar menu or general settings to read recent release notes offline.
+
+- [1.5.3](docs/releases/1.5.3.md) — maintenance: dead-code and duplicate-asset cleanup, refreshed documentation.
+- [1.5.2](docs/releases/1.5.2.md) — quick conversion can publish existing or edited copy without AI generation.
+- [1.5.1](docs/releases/1.5.1.md) — keeps the selected WeChat theme when copying or syncing drafts.
+- [1.5.0](docs/releases/1.5.0.md) — Tencent Docs connector with image publishing and in-place updates; Knowledge Brain entry points hidden.
+- [1.4.0](docs/releases/1.4.0.md) — browser dynamic publishing center, X posts, connector settings, and membership checks.
+- [1.3.0](docs/releases/1.3.0.md) — GitHub collaboration and commit summaries.
+- [1.2.2](docs/releases/1.2.2.md) — OpenLux renamed to 词元API (`https://ciyuan.today/v1`), settings migrate automatically.
+- [1.2.1](docs/releases/1.2.1.md) — fixes duplicated Claude Code replies and thinking content.
+- [1.2.0](docs/releases/1.2.0.md) — 词元API models grouped by vendor with a two-column picker.
+- [1.1.0](docs/releases/1.1.0.md) — WeSight member models and weekly usage.
+- [1.0.0](docs/releases/1.0.0.md) — article-to-social workbench and browser-assisted multi-platform drafts.
+
 ## Features
-
-### 1.5.2 patch
-
-The [1.5.2 patch](docs/releases/1.5.2.md) gives quick conversion separate actions for AI copy generation and publishing. Send existing or manually edited copy with the current image selection and order, including after a generation failure once the content meets platform requirements. X starts with editable article text and retains saved edits; overlong copy must be shortened before sending. The browser dynamic composer keeps the final publishing decision with you.
-
-### 1.5.1 patch
-
-The [1.5.1 patch](docs/releases/1.5.1.md) preserves the selected WeChat theme when copying an article or syncing it to the Official Account draft box. It fixes template colors being overwritten by the default green styling and keeps formula images styled with the selected template.
-
-### 1.5.0 release
-
-The [1.5.0 update](docs/releases/1.5.0.md) adds Tencent Docs browser authorization, publishing with images, and updates to the original document while keeping its link. It improves image-link handling and Chrome Web Store installation guidance, and temporarily hides Knowledge Brain entry points while preserving existing files and history. The release notes also cover the available cloud improvements for membership cancellation and Watcha account lookup. Use **版本更新说明** in the avatar menu or general settings to read this release and recent version changes offline.
-
-### 1.4.0 release
-
-The [1.4.0 update](docs/releases/1.4.0.md) adds the browser dynamic publishing center, X posts in quick conversion, centralized browser connector settings, and membership checks for conversion and browser handoff. It also improves generated copy limits and skips automatic Git sync while offline. Install or update the [browser publishing assistant from the Chrome Web Store](https://chromewebstore.google.com/detail/wesight-%E5%8F%91%E5%B8%83%E5%8A%A9%E6%89%8B/ocgepghgjgllnkhedapekeibaeklgoik) alongside the plugin. Use **版本更新说明** in the avatar menu or general settings to read this release and recent version changes offline.
 
 ### GitHub team collaboration
 
 The WeSight avatar menu provides current-repository status, **立即拉取**, **推送提交**, sync settings, and recent activity. **Settings → WeSight → 仓库同步** configures optional automatic pull, push, idle commits, and pull on vault open. Automation starts disabled and is saved per vault on each device, outside the shared vault. Existing Git credentials and upstream branches are reused. Local edits and conflicts pause the affected operations; independent team changes can merge normally. See [GitHub collaboration](docs/git-sync.md) for scope, configuration, and recovery.
 
-### Article-to-social workbench (1.0.0)
+### Article-to-social workbench
 
 **转为图文** and connecting the browser publishing assistant require an active WeSight membership. Free and expired accounts receive a membership prompt with a link to recharge. Membership is refreshed before generation, connecting, and publishing; existing paired connections and task links also require membership when handing off content.
 
@@ -47,7 +47,7 @@ The Xiaohongshu image workspace offers local typography templates and a separate
 
 An active membership is required for both single-platform and multi-platform conversion and browser handoff. Free and expired accounts see a prompt with **去充值会员**, which opens the existing membership checkout. Edited text, images, and saved tasks stay available for use after renewal.
 
-### Browser-assisted platform drafts (1.0.0)
+### Browser-assisted platform drafts
 
 **分享 → 多平台** opens the browser's **WeSight publish center** with the current note already imported. In the publish center you can adjust the title, summary, cover, and Markdown body, then tick Zhihu, CSDN, Juejin, Bilibili articles, Toutiao, Weibo articles, or X Articles and start syncing. The publish center also imports local `.md` files (select the images alongside them) and article links. The social workbench additionally prepares Xiaohongshu image posts, Weibo image posts, and Jike posts.
 
@@ -61,17 +61,11 @@ The publish center shows per-platform status, editor links, login recovery, and 
 
 Claude Code also supports [词元API](docs/ciyuan.md), listed immediately after TokenDance. Enter an API key, fetch your account’s chat models, and choose a default. 词元API models are grouped by manufacturer in settings and the two-column chat picker, with search and collapsible groups.
 
-The [1.2.2 update](docs/releases/1.2.2.md) renames OpenLux to 词元API and uses `https://ciyuan.today/v1`. Existing API keys and model selections carry over automatically. See the release notes for upgrade and validation details.
-
-### Member models and usage (1.1.0)
+### Member models and usage
 
 Claude Code supports WeSight member models through the recommended configuration, or a personal TokenDance connection. The account menu shows the remaining weekly allowance next to **使用情况** and opens the web dashboard with model usage and reset times. Existing installations retain their selected configuration; model availability follows the account's current entitlement.
 
-See the [1.1.0 release notes](docs/releases/1.1.0.md) for the complete Chinese update summary and upgrade instructions.
-
 ### Local agent chat
-
-The [1.2.1 patch](docs/releases/1.2.1.md) fixes duplicated Claude Code replies and thinking content while preserving live streaming.
 
 1. Open **Settings → WeSight** and select Claude Code, Codex, or OpenCode.
 2. Confirm that WeSight detects the CLI, or enter its executable path.
@@ -141,7 +135,7 @@ Canghe Style is the default local template. The theme selector can also generate
 
 ## Accounts and network use
 
-Knowledge Brain contacts `api.wesight.ai` to verify member access and contacts GitHub after an eligible user explicitly enables it. The plugin also reads the manifest from the latest formal GitHub Release at startup and every six hours to discover updates. Update checks send no Vault content, account data, or device identifiers. Entitlement requests contain the existing account credential and do not include Vault content, questions, answers, file paths, or message identifiers. Claude Code or Codex may send the supplied prompt and evidence to the model provider selected by your existing agent configuration.
+The plugin reads the manifest from the latest formal GitHub Release at startup and every six hours to discover updates. Update checks send no Vault content, account data, or device identifiers. When Knowledge Brain is available and an eligible user explicitly enables it, the plugin contacts `api.wesight.ai` to verify member access and GitHub to download its runtime. Entitlement requests contain the existing account credential and do not include Vault content, questions, answers, file paths, or message identifiers. Claude Code or Codex may send the supplied prompt and evidence to the model provider selected by your existing agent configuration.
 
 Local chat and inline editing do not require a WeSight account. A WeSight account with an active Creator membership is required for the Knowledge Brain internal test. A WeSight account is also required for internet sharing and WeChat publishing. Feishu publishing uses the account configured by Lark CLI.
 
@@ -179,10 +173,10 @@ The desktop plugin also accesses these paths outside the vault:
 
 ```bash
 npm ci
-npm test
-npm run lint
-npm run build
+npm run check   # tests, lint, type check, production build, release-asset verification
 ```
+
+Individual steps are available as `npm test`, `npm run lint`, `npm run build`, and `npm run verify:release`. `npm run dev` rebuilds `main.js` on change.
 
 The release assets are `main.js`, `manifest.json`, and `styles.css`.
 

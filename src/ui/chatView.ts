@@ -2969,27 +2969,6 @@ export class WeSightChatView extends ItemView {
     this.inputEl.dispatchEvent(new Event('input'));
   }
 
-  private attachActiveNote(): void {
-    const file = this.app.workspace.getActiveFile();
-    if (!(file instanceof TFile)) {
-      new Notice('No active note to attach.');
-      return;
-    }
-    const absolute = resolveVaultAbsolutePath(this.app, file.path);
-    if (!absolute) {
-      new Notice('Could not resolve the active note path.');
-      return;
-    }
-    const prefix = this.inputEl.value.trim() ? `${this.inputEl.value.trim()}\n` : '';
-    this.inputEl.value = `${prefix}@"${file.path}"`;
-    const mimeType = guessMimeType(file);
-    if (mimeType?.startsWith('image/')) {
-      new Notice('Image attachment added.');
-    } else {
-      new Notice('Note attachment added.');
-    }
-  }
-
   private openMultiPublish(anchor: HTMLElement): void {
     this.updateEditorContextFromWorkspace();
     const file = this.getVisibleEditorContext()?.file

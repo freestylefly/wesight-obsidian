@@ -15,14 +15,16 @@ import type {
 } from './templateThemeTypes';
 import type { WeChatThemeDefinition } from './themes';
 
+// Built-in theme CSS is stored as .css.txt: Vitest replaces .css imports (including ?raw) with
+// empty modules. The files are written to the vault under the manifest's cssFile names (*.css).
 import cangheStyleCss from '../../assets/theme/canghe-demos/themes/canghe-style-tes.css.txt?raw';
 import cangheVioletCss from '../../assets/theme/canghe-demos/themes/canghe-violet.css.txt?raw';
- import cangheOrangeCss from '../../assets/theme/canghe-demos/themes/canghe-orange.css.txt?raw';
- import cangheCyanCss from '../../assets/theme/canghe-demos/themes/canghe-cyan.css.txt?raw';
- import cangheRedCss from '../../assets/theme/canghe-demos/themes/canghe-red.css.txt?raw';
- import cangheBlueCss from '../../assets/theme/canghe-demos/themes/canghe-blue.css.txt?raw';
- import cangheGeekBlackCss from '../../assets/theme/canghe-demos/themes/canghe-geek-black.css.txt?raw';
- import canghePinkCss from '../../assets/theme/canghe-demos/themes/canghe-pink.css.txt?raw';
+import cangheOrangeCss from '../../assets/theme/canghe-demos/themes/canghe-orange.css.txt?raw';
+import cangheCyanCss from '../../assets/theme/canghe-demos/themes/canghe-cyan.css.txt?raw';
+import cangheRedCss from '../../assets/theme/canghe-demos/themes/canghe-red.css.txt?raw';
+import cangheBlueCss from '../../assets/theme/canghe-demos/themes/canghe-blue.css.txt?raw';
+import cangheGeekBlackCss from '../../assets/theme/canghe-demos/themes/canghe-geek-black.css.txt?raw';
+import canghePinkCss from '../../assets/theme/canghe-demos/themes/canghe-pink.css.txt?raw';
 import builtInManifestRaw from '../../assets/theme/canghe-demos/template-themes.json?raw';
 
 const BUILT_IN_PACK_ID = 'canghe-demos';
@@ -76,7 +78,7 @@ export class TemplateThemeService {
 
   constructor(
     private readonly adapter: TemplateThemeAdapter,
-    private readonly pluginDir: string,
+    pluginDir: string,
   ) {
     this._packsDir = vaultTemplateThemePacksDir(pluginDir);
     this.builtInManifest = loadTemplateThemePackManifest(builtInManifestRaw);

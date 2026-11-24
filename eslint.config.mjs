@@ -4,7 +4,7 @@ import tseslint from 'typescript-eslint';
 
 export default [
   {
-    ignores: ['main.js', 'node_modules/**', 'dist/**'],
+    ignores: ['main.js', 'node_modules/**', 'dist/**', 'coverage/**', 'samples/**'],
   },
   ...obsidianmd.configs.recommended,
   {

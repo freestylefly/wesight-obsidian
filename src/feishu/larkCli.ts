@@ -417,7 +417,6 @@ export class LarkCliService extends EventEmitter {
   private activeChild: ChildProcess | null = null;
   private cancelled = false;
   private pendingDeviceCode: string | null = null;
-  private pendingVerificationUrl: string | null = null;
   private pendingRequestedScopes: string[] = [];
   private pendingExpiresAt: number | null = null;
   private resolvedCliPath: string | null = null;
@@ -478,7 +477,6 @@ export class LarkCliService extends EventEmitter {
   async startAuthorization(): Promise<FeishuAuthProgress> {
     const cliPath = this.requireCli();
     this.pendingDeviceCode = null;
-    this.pendingVerificationUrl = null;
     this.pendingRequestedScopes = [];
     this.pendingExpiresAt = null;
     this.emitProgress({ phase: 'waiting-auth', message: '正在申请全部飞书权限…' });
@@ -495,7 +493,6 @@ export class LarkCliService extends EventEmitter {
       throw new LarkCliError('飞书 CLI 未返回有效授权地址，请重试。', result.code);
     }
     this.pendingDeviceCode = deviceCode;
-    this.pendingVerificationUrl = verificationUrl;
     this.pendingRequestedScopes = requestedScopesFromPayload(payload);
     const expiresIn = findNumber(payload, ['expires_in', 'expiresIn']) ?? 600;
     this.pendingExpiresAt = Date.now() + expiresIn * 1000;
@@ -563,7 +560,6 @@ export class LarkCliService extends EventEmitter {
       };
     } finally {
       this.pendingDeviceCode = null;
-      this.pendingVerificationUrl = null;
       this.pendingRequestedScopes = [];
       this.pendingExpiresAt = null;
     }
@@ -904,7 +900,6 @@ export class LarkCliService extends EventEmitter {
   cancelActiveOperation(): void {
     this.cancelled = true;
     this.pendingDeviceCode = null;
-    this.pendingVerificationUrl = null;
     this.pendingRequestedScopes = [];
     this.pendingExpiresAt = null;
     this.activeChild?.kill('SIGTERM');

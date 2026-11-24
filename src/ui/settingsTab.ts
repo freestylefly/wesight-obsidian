@@ -21,7 +21,7 @@ import { loadLocalSkills, invalidateSkillCache } from '../skill/skillDiscovery';
 import type { RuntimeManager } from '../runtime/runtimeManager';
 import type { CloudAuthService } from '../share/cloudAuth';
 import { inferAnthropicAuthMode, requiresProviderApiKey } from '../utils/providerAuth';
-import { fetchProviderModels, resolveProviderModels, testProviderConnection } from '../utils/providerModels';
+import { resolveProviderModels, testProviderConnection } from '../utils/providerModels';
 import type { WeChatCloudApi } from '../wechat/cloudApi';
 import { promptForText } from './textPromptModal';
 import type { KnowledgeBrain } from '../knowledgeBrain/service';
@@ -265,7 +265,6 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
 ];
 
 export class WeSightSettingTab extends PluginSettingTab {
-  private editingProfileId: string | null = null;
   private activeTab: SettingsTabId = 'general';
   private selectedProviderKey = 'tokendance';
   private disposeMemberCard?: () => void;
@@ -303,7 +302,6 @@ export class WeSightSettingTab extends PluginSettingTab {
 
   openTab(tab: SettingsTabId): void {
     this.activeTab = tab;
-    this.editingProfileId = null;
     this.display();
   }
 
@@ -379,7 +377,6 @@ export class WeSightSettingTab extends PluginSettingTab {
       tab.toggleClass('is-active', this.activeTab === entry.id);
       tab.onclick = () => {
         this.activeTab = entry.id;
-        this.editingProfileId = null;
         this.display();
       };
     }
@@ -1298,194 +1295,6 @@ export class WeSightSettingTab extends PluginSettingTab {
     }
   }
 
-  private async setProfileDefault(profile: ProviderProfile): Promise<void> {
-    try {
-      this.deps.providerStore.setDefault(profile.agentId, profile.id);
-      const settings = this.deps.getSettings();
-      settings.providerProfileByAgent[profile.agentId] = profile.id;
-      await this.deps.saveSettings();
-      this.display();
-    } catch (error) {
-      new Notice(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async deleteProfile(id: string): Promise<void> {
-    const removed = this.deps.providerStore.remove(id);
-    if (!removed) return;
-    const settings = this.deps.getSettings();
-    if (settings.providerProfileByAgent[removed.agentId] === id) {
-      settings.providerProfileByAgent[removed.agentId] = this.deps.providerStore.find(removed.agentId)?.id ?? '';
-      await this.deps.saveSettings();
-    }
-    if (this.editingProfileId === id) {
-      this.editingProfileId = null;
-    }
-    this.display();
-  }
-
-  private renderProfileForm(section: HTMLElement, agentFilter?: AgentId): void {
-    const editing = this.editingProfileId
-      ? this.deps.providerStore.list().find(profile => profile.id === this.editingProfileId) ?? null
-      : null;
-    const form = section.createDiv({ cls: 'wesight-provider-form' });
-    new Setting(form).setName(editing ? 'Edit profile' : 'Add profile').setHeading();
-    const agent = form.createEl('select');
-    for (const agentId of AGENT_IDS) {
-      agent.createEl('option', { text: getAgentDescriptor(agentId).displayName, value: agentId });
-    }
-    agent.value = editing?.agentId ?? agentFilter ?? 'claude';
-    agent.disabled = Boolean(agentFilter);
-
-    const name = form.createEl('input', { attr: { placeholder: 'Profile name' } });
-    name.value = editing?.name ?? '';
-    const defaultModel = form.createEl('input', { attr: { placeholder: 'Default model' } });
-    defaultModel.value = editing?.defaultModel || editing?.model || '';
-    const baseUrl = form.createEl('input', { attr: { placeholder: 'Base URL' } });
-    baseUrl.value = editing?.baseUrl ?? '';
-    const wireApi = form.createEl('select');
-    wireApi.createEl('option', { text: 'Chat completions', value: 'chat' });
-    wireApi.createEl('option', { text: 'Responses API', value: 'responses' });
-    wireApi.value = editing?.wireApi ?? 'chat';
-
-    const models = form.createEl('textarea', { cls: 'full', attr: { placeholder: 'Models, one per line' } });
-    models.rows = 4;
-    models.value = (editing?.models ?? []).join('\n');
-    const apiKey = form.createEl('input', { attr: { placeholder: 'API key', type: 'password' } });
-    apiKey.addClass('full');
-    initializeStoredSecretInput(apiKey, Boolean(editing?.apiKey));
-
-    const load = form.createEl('button', { text: 'Load models' });
-    load.onclick = () => {
-      void this.loadProviderModels({
-        agent,
-        baseUrl,
-        apiKey,
-        existingApiKey: editing?.apiKey ?? '',
-        models,
-        defaultModel,
-      });
-    };
-
-    const save = form.createEl('button', { text: editing ? 'Save profile' : 'Add profile' });
-    save.onclick = () => void this.saveProfileForm({
-      editing,
-      agent,
-      name,
-      defaultModel,
-      models,
-      baseUrl,
-      apiKey,
-      wireApi,
-    });
-
-    if (editing) {
-      const cancel = form.createEl('button', { text: 'Cancel edit' });
-      cancel.onclick = () => {
-        this.editingProfileId = null;
-        this.display();
-      };
-    }
-  }
-
-  private async loadProviderModels(elements: {
-    agent: HTMLSelectElement;
-    baseUrl: HTMLInputElement;
-    apiKey: HTMLInputElement;
-    existingApiKey: string;
-    models: HTMLTextAreaElement;
-    defaultModel: HTMLInputElement;
-  }): Promise<void> {
-    try {
-      const fetched = await fetchProviderModels({
-        agentId: elements.agent.value as AgentId,
-        baseUrl: elements.baseUrl.value,
-        apiKey: resolveSecretInput(elements.apiKey.value, elements.existingApiKey),
-      });
-      elements.models.value = fetched.join('\n');
-      if (!elements.defaultModel.value && fetched[0]) {
-        elements.defaultModel.value = fetched[0];
-      }
-      new Notice(`Loaded ${fetched.length} model${fetched.length === 1 ? '' : 's'}.`);
-    } catch (error) {
-      new Notice(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async saveProfileForm(elements: {
-    editing: ProviderProfile | null;
-    agent: HTMLSelectElement;
-    name: HTMLInputElement;
-    defaultModel: HTMLInputElement;
-    models: HTMLTextAreaElement;
-    baseUrl: HTMLInputElement;
-    apiKey: HTMLInputElement;
-    wireApi: HTMLSelectElement;
-  }): Promise<void> {
-    try {
-      const modelList = parseModelList(elements.models.value);
-      const profile = this.deps.providerStore.save({
-        agentId: elements.agent.value as AgentId,
-        id: elements.editing?.id,
-        name: elements.name.value,
-        defaultModel: elements.defaultModel.value,
-        models: modelList,
-        baseUrl: elements.baseUrl.value,
-        apiKey: resolveSecretInput(elements.apiKey.value, elements.editing?.apiKey ?? ''),
-        wireApi: elements.wireApi.value as ProviderWireApi,
-        isDefault: elements.editing?.isDefault,
-      });
-      const settings = this.deps.getSettings();
-      if (elements.editing && elements.editing.agentId !== profile.agentId
-        && settings.providerProfileByAgent[elements.editing.agentId] === profile.id) {
-        settings.providerProfileByAgent[elements.editing.agentId] = this.deps.providerStore.find(elements.editing.agentId)?.id ?? '';
-      }
-      settings.providerProfileByAgent[profile.agentId] = profile.id;
-      await this.deps.saveSettings();
-      this.editingProfileId = null;
-      this.display();
-    } catch (error) {
-      new Notice(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private renderImportExport(section: HTMLElement): void {
-    new Setting(section)
-      .setName('Export profiles')
-      .setDesc('Copies redacted provider profiles to the clipboard.')
-      .addButton(button => {
-        button.setButtonText('Copy redacted JSON').onClick(async () => {
-          await navigator.clipboard.writeText(JSON.stringify(this.deps.providerStore.exportProfiles(), null, 2));
-          new Notice('Redacted provider profiles copied.');
-        });
-      });
-
-    let importText = '';
-    new Setting(section)
-      .setName('Import profiles')
-      .setDesc('Paste profile JSON exported from WeSight. Redacted API keys import as empty values.')
-      .addTextArea(text => {
-        text.inputEl.rows = 5;
-        text.setPlaceholder('[{"agentId":"codex","name":"OpenAI","defaultModel":"gpt-5.4"}]')
-          .onChange(value => {
-            importText = value;
-          });
-      });
-    new Setting(section)
-      .addButton(button => {
-        button.setButtonText('Import JSON').onClick(() => {
-          try {
-            const parsed: unknown = JSON.parse(importText);
-            const imported = this.deps.providerStore.importProfiles(parsed);
-            new Notice(`Imported ${imported.length} provider profile${imported.length === 1 ? '' : 's'}.`);
-            this.display();
-          } catch (error) {
-            new Notice(error instanceof Error ? error.message : String(error));
-          }
-        });
-      });
-  }
-
   private renderEnvironment(containerEl: HTMLElement): void {
     const section = containerEl.createDiv({ cls: 'wesight-settings-section' });
     new Setting(section).setName('Environment').setHeading();
@@ -1568,13 +1377,6 @@ export class WeSightSettingTab extends PluginSettingTab {
 function truncate(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value;
   return `${value.slice(0, maxLength).trim()}…`;
-}
-
-function parseModelList(value: string): string[] {
-  return [...new Set(value
-    .split(/[\n,]/)
-    .map(item => item.trim())
-    .filter(Boolean))];
 }
 
 function supportedProviderFormat(preset: ProviderPreset, preferred: ProviderApiFormat): ProviderApiFormat {

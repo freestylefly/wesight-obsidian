@@ -1,3 +1,4 @@
+import notes153 from '../../docs/releases/1.5.3.md?raw';
 import notes152 from '../../docs/releases/1.5.2.md?raw';
 import notes151 from '../../docs/releases/1.5.1.md?raw';
 import notes150 from '../../docs/releases/1.5.0.md?raw';
@@ -10,6 +11,7 @@ import notes110 from '../../docs/releases/1.1.0.md?raw';
 import notes100 from '../../docs/releases/1.0.0.md?raw';
 
 export const RECENT_RELEASE_NOTES = [
+  { version: '1.5.3', title: '代码整理与文档更新', markdown: notes153 },
   { version: '1.5.2', title: '快速转支持跳过生成直接发布', markdown: notes152 },
   { version: '1.5.1', title: '修复公众号主题配色与公式样式', markdown: notes151 },
   { version: '1.5.0', title: '腾讯文档连接器与同步更新', markdown: notes150 },
